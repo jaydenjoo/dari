@@ -10,9 +10,13 @@ function createMockSupabase(
 ): SupabaseClient<Database> {
   const chain = {
     select: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnValue(
-      finalResult instanceof Promise ? finalResult : Promise.resolve(finalResult),
-    ),
+    limit: vi
+      .fn()
+      .mockReturnValue(
+        finalResult instanceof Promise
+          ? finalResult
+          : Promise.resolve(finalResult),
+      ),
   };
   const client = {
     from: vi.fn().mockReturnValue(chain),

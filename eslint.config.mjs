@@ -17,7 +17,22 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // shadcn/ui 컴포넌트는 외부 생성 파일이므로 lint 제외
     "src/components/ui/**",
+    // vitest 커버리지 리포트 (빌드 artifact)
+    "coverage/**",
   ]),
+  // underscore prefix 는 의도적 unused 관례 — no-unused-vars 에서 제외
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

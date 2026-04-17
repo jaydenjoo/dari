@@ -220,9 +220,7 @@ describe("beforeSend — breadcrumbs", () => {
 
   it("breadcrumb.data 가 없으면 그대로 보존한다", () => {
     const out = runBeforeSend({
-      breadcrumbs: [
-        { category: "navigation", message: "route change" },
-      ],
+      breadcrumbs: [{ category: "navigation", message: "route change" }],
     });
 
     expect(out.breadcrumbs?.[0]).toMatchObject({

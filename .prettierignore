@@ -11,3 +11,6 @@ public
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+
+# 외부 제공 참고 자료 — 원본 형식 보존
+docs/design-references/

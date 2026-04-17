@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Format · Test · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm run test
+
+      # Build 는 모듈 로드 시점에 env.ts 의 parseEnv() 를 실행한다.
+      # CI 에서는 실제 Supabase/AI provider 에 연결하지 않으므로,
+      # 각 실행마다 무작위 placeholder 를 동적으로 생성해 Zod 제약만 통과시킨다.
+      # 실제 secret 이 YAML 에 하드코딩되지 않아 gitleaks 오탐을 원천 차단한다.
+      - name: Generate CI placeholder env for build
+        run: |
+          {
+            echo "NEXT_PUBLIC_APP_URL=http://localhost:4000"
+            echo "NEXT_PUBLIC_SUPABASE_URL=https://ci-placeholder.supabase.co"
+            echo "DATABASE_URL=postgres://ci:ci@localhost:5432/ci_dummy"
+            echo "UPSTASH_REDIS_REST_URL=https://ci-placeholder.upstash.io"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(openssl rand -hex 24)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(openssl rand -hex 24)"
+            echo "GOOGLE_GENERATIVE_AI_API_KEY=$(openssl rand -hex 24)"
+            echo "UPSTASH_REDIS_REST_TOKEN=$(openssl rand -hex 24)"
+            echo "ANTHROPIC_API_KEY=sk-$(openssl rand -hex 24)"
+          } >> "$GITHUB_ENV"
+
+      - name: Build
+        run: npm run build
+        env:
+          # Sentry source map 업로드를 의도적으로 스킵 (CI 는 실 프로젝트에 업로드 안 함).
+          # SENTRY_AUTH_TOKEN/ORG/PROJECT 가 없으면 withSentryConfig 가 안전하게 skip.
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  secret-scan:
+    name: Gitleaks secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # gitleaks-action@v2 는 개인(personal) 리포지토리에서 무료.
+    # 조직(organization) 으로 이전 시 GITLEAKS_LICENSE secret 등록 필요.
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
