@@ -287,3 +287,44 @@ behavior: behaviorSchema.default(behaviorSchema.parse({})),
 - **안티패턴**: `.env.ci` 파일을 리포에 커밋 (누출 리스크 영구) / Real GitHub Secrets 사용 (Jayden 수동 등록 필요 + 노출 리스크 미세 존재 / `<placeholder>` 각괄호 (Zod URL 제약 위반).
 
 ---
+
+### 2026-04-17 독립 리뷰 2 에이전트 병렬 = 단일 개발자의 정합성 안전망 (설계 결정)
+
+**증상**: Task 0-F-3 (환경 분리 문서 + `SENTRY_ENVIRONMENT` end-to-end) 구현 완료 후 독립 code-reviewer + security-reviewer **병렬** 리뷰로 MEDIUM 4건 포착 — 단일 개발자 시점에서 놓친 문서·코드 정합성 이슈:
+
+- `ADR-008` 내부 참조 `§9` 가 line 29 에 남음 (앞서 line 73 만 수정, 한 곳 누락)
+- `DATABASE_URL` 이 Zod `required` 인데 `environments.md §3` 은 preview 에 "(미사용)" 표기 (Preview 배포 시 부팅 실패 가능)
+- RLS 미활성화 상태 Preview URL 공개에 대한 명시적 경고가 `§9 🟡 주의` 에 누락
+- 브라우저 Sentry 는 `NEXT_PUBLIC_*` 제약으로 preview/prod 구분 불가 — 완화 절차 누락
+
+**원인**: 단일 개발자가 이전 수정 컨텍스트에 갇혀 섹션 번호 리넘버링 시 전체 참조 스캔 누락. 문서·코드 정합성 (Zod 스키마 ↔ 문서 매트릭스) 이 **한 눈에 안 보이는** 분산 구조. 실제 위험은 "Preview 배포 시 부팅 실패" 같은 운영 영향으로 발현.
+
+**해결**: "리뷰" 지시 시 code-reviewer + security-reviewer 두 에이전트 **병렬 호출** 규칙화 (MEMORY.md `feedback_review_dual_agents.md` 영속). 4건 포착 후 옵션 B (M1-M4 전체 반영). CRITICAL/HIGH 0, MEDIUM 4 → Fix then ship / Ship as-is.
+
+**규칙** ⭐:
+
+- **섹션 번호 재배치 (§N → §N+1) 시 `grep "§<이전 번호>"` 전체 파일 스캔 필수**. 참조 한 곳만 고치면 다른 곳 놓치기 쉬움.
+- **Zod 스키마와 문서 (환경변수 매트릭스 등) 의 required/optional 분류는 같은 PR 에서 함께 수정**. 스키마가 진실 공급원 — 문서가 따라야 함.
+- **단일 개발자 프로젝트도 구현 완료 후 code-reviewer + security-reviewer 병렬 리뷰 루틴화**. 문서·코드 정합성은 self-review 로 발견 어려움.
+- **"리뷰" 단독 지시 = 두 에이전트 병렬 호출** (MEMORY.md `feedback_review_dual_agents.md`). 수식어 있을 때만 단일.
+- 독립 리뷰 프롬프트에 **이미 검증 완료한 항목 (prettier/tsc/test 등) 명시** → 재검증 회피로 토큰 절약.
+
+---
+
+### 2026-04-17 Next.js env 주입 경계 — NEXT_PUBLIC\_ 없는 env 는 브라우저에서 undefined (기술 이슈)
+
+**증상**: `SENTRY_ENVIRONMENT` 를 서버/엣지/브라우저 3곳에서 동일하게 사용하려 했으나, `instrumentation-client.ts` 에서 `process.env.SENTRY_ENVIRONMENT` 가 `undefined` 로 취급됨. 결과: 브라우저 에러가 `NODE_ENV` 기반으로 분류되어 Vercel Preview/Production 에러가 하나의 bucket 으로 묶임. fallback chain `X ?? Y` 의 왼쪽 항이 항상 `undefined` → chain 무의미.
+
+**원인**: Next.js 빌드 시스템은 **클라이언트 번들에 `NEXT_PUBLIC_*` 접두사 있는 env 만 inline 치환**. 접두사 없는 서버 전용 env 는 브라우저 번들에서 `process.env.X` 가 그대로 `undefined`. 런타임 에러는 안 나지만 fallback 의 첫 단계가 **쓸모 없는 분기**.
+
+**해결**: 서버/엣지에서만 `SENTRY_ENVIRONMENT` 사용하고 브라우저는 `NODE_ENV` fallback 유지. `instrumentation-client.ts` 에 **제약 설명 주석** 추가 + `environments.md §7` 에 브라우저 구분 불가 경고 + Stage 2 진입 전 완화 옵션 명문화 (A: Alert 필터 `!platform.browser`, B: `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 도입). 후자는 backlog 분리.
+
+**규칙** ⭐:
+
+- **클라이언트 번들에 값이 필요하면 반드시 `NEXT_PUBLIC_*` 접두사**. 이것이 없으면 브라우저에서 항상 `undefined`.
+- 서버 + 브라우저 양쪽에 같은 값을 쓰려면 **두 env 변수 (`X` 서버 + `NEXT_PUBLIC_X` 클라이언트) 이중 세팅** 필요. 이중 관리 비용을 감수할 가치가 있는지 먼저 판단.
+- fallback chain 설계 시 **런타임별 값 주입 경계를 반드시 검증**. 한 런타임에서 왼쪽 항이 항상 `undefined` 면 chain 의 첫 단계가 쓸모 없는 설계.
+- Sentry environment 태그처럼 "preview/prod 구분이 꼭 필요한 상황" 이 아니라면 `NEXT_PUBLIC_*` 도입은 오버엔지니어링 (조기 추상화 금지). 실제 사고 triage 지연이 관찰되면 그때 도입.
+- **`instrumentation-client.ts` 의 제약 주석 필수**: 브라우저 특성 모르는 후임 기여자가 "왜 여기만 fallback 이 다른가" 의심할 때 즉시 답 제공.
+
+---
