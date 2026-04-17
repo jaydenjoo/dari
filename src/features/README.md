@@ -24,11 +24,13 @@ features/{name}/
 ## Feature 경계 판단 기준
 
 **features/에 들어가는 것**:
+
 - 비즈니스 기능 (auth, payment, dashboard 등)
 - 특정 도메인의 UI + 로직 묶음
 - 다른 feature 없이도 독립 작동 (인프라 제외)
 
 **shared/에 들어가는 것**:
+
 - 여러 feature가 공유하는 UI 컴포넌트 (Button, Input)
 - 순수 유틸 함수 (formatDate, cn)
 - 환경변수, 설정 (config/env.ts)
@@ -53,5 +55,6 @@ shared/ui, shared/lib, shared/config
 **금지**: shared → features
 
 ## 관련 문서
+
 - 바이브코딩 통합가이드 v9.3 Part B #13~#15
 - 모듈 카탈로그 v1.0 (재사용 가능한 feature 템플릿)
