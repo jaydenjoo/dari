@@ -34,6 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# design references — keep MD guides, exclude heavy binaries (zip, exported page folders)
+docs/design-references/*
+!docs/design-references/*.md
+
 # vercel
 .vercel
 
