@@ -37,3 +37,34 @@ const config2 = migrateAndValidate(legacyJson);
 2. `CURRENT_CONFIG_VERSION` 상수 bump (1.0 → 1.1 등)
 3. `migrations.ts` 에 이전 버전 → 새 버전 변환 함수 추가
 4. ADR 작성 (`docs/adr/ADR-NNN-config-schema-vN.md`)
+
+## 공개 API
+
+```ts
+import {
+  dariConfigSchema,
+  migrateAndValidate,
+  CURRENT_CONFIG_VERSION,
+  type DariConfig,
+  type BehaviorMode,
+  type AIModel,
+} from "@/core/config";
+```
+
+`index.ts` 는 `schema.ts` + `migrations.ts` 전체 re-export. 서브 스키마 (`identitySchema`, `aiSchema`, `behaviorSchema`, `appearanceSchema` 등) 와 세부 타입 (`Identity`, `Behavior`, `Appearance` …) 도 동일 경로에서 접근 가능.
+
+## 의존성
+
+- `zod` — 스키마 검증
+- 내부: 없음 (standalone 모듈)
+
+## 관련 ADR
+
+- [ADR-003](../../../docs/adr/ADR-003-config-jsonb.md) — Config jsonb 저장 + types 수동 유지
+
+## 제약·주의사항
+
+- **`bots.config` jsonb 컬럼에 저장** — DB 스키마 변경이 아니라 Config 버전 bump 로 진화 (ADR-003)
+- Zod 4.x nested default 패턴: `schema.default(schema.parse({}))` 필수 ([learnings.md](../../../docs/learnings.md) — "Zod 4.x `.default({})` 엄격 타입 체크" 교훈)
+- 마이그레이션 함수는 reversible 하게 작성 (롤백 가능성 고려)
+- 새 버전 도입 시 `docs/config-examples/` 3종 샘플 테스트 통과 확인
