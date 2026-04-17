@@ -17,7 +17,7 @@
 NODE_ENV=development
 
 # ─── App URL ───
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:4000
 
 # ─── Supabase ───
 # 발급: https://supabase.com/dashboard/project/_/settings/api
@@ -102,7 +102,7 @@ Supabase 프로젝트 없이 env 검증만 통과하려면 임시로 아래 값 
 
 ```env
 NODE_ENV=development
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:4000
 
 # Supabase는 Phase 0-B에서 실제 프로젝트 생성 후 교체
 NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co

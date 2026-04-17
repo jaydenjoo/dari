@@ -20,7 +20,7 @@ import { z } from "zod";
 
 // 클라이언트 안전 (브라우저에 노출됨 — 민감 정보 포함 금지)
 const clientSchema = z.object({
-  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:4000"),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
