@@ -11,4 +11,9 @@
  * 이 index는 **타입만 re-export** — 런타임 클라이언트는 환경별 import 강제.
  */
 
-export type { Database, BotStatus } from "./types";
+export type {
+  Database,
+  BotStatus,
+  KnowledgeSourceType,
+  KnowledgeChunkMatch,
+} from "./types";

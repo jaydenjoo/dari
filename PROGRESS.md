@@ -5,89 +5,96 @@
 ## 현재 위치
 
 - Phase: 0 (기반 공사)
-- Epic: 0-B (DB 스키마) — **75% 완료 (3/4 테이블)**
-- 상태: 다음 세션에서 `knowledge_chunks` + pgvector 작업 예정
+- Epic: 0-B (DB 스키마) — **100% 완료 (4/4 테이블)** ✅
+- 상태: Epic 0-B 완결. 다음 세션은 **Epic 0-D(인증) vs Epic 0-E(안정성)** 중 선택.
 
 ## 완료된 Epic
 
 - ✅ Phase 0-A (개발 환경): deps + shadcn + prettier + eslint
 - ✅ Phase 0-C (Config 스키마): DariConfig v1.0 + migrations.ts + 샘플 3종
-- 🟡 Phase 0-B 진행 중 (bots / conversations / messages ✅, knowledge_chunks 남음)
+- ✅ **Phase 0-B (DB 스키마, 4/4 테이블 완결)**
+  - bots / conversations / messages / knowledge_chunks
+  - pgvector 0.8.0 + ivfflat cosine + `match_knowledge_chunks` RPC
+  - 함수 search_path 보안 강화 (ALTER FUNCTION `SET search_path = ''`)
 
-## 이번 세션(2026-04-17 저녁) 완료 내역
+## 이번 세션(2026-04-17 밤) 완료 내역
 
-### 커밋 7개
+### 커밋 예정 (1건)
 
-1. `9510223` chore: setup dev environment (deps/shadcn/prettier/eslint)
-2. `a10bbe3` feat(config): Dari config schema with Zod
-3. `408ecf4` docs: ADR + env template + config examples
-4. `fb7d59e` chore(dev): switch local dev port to 4000 (포트 충돌 회피)
-5. `922cdb5` docs: design system guides (경로 C — MD 커밋 + zip/폴더 .gitignore)
-6. `454a057` feat(db): bots table + Supabase client modules
-7. `56e3e4e` feat(db): rename bots.bot_id→slug + conversations + messages
+이 문서 + learnings.md + 아래 산출물을 한 커밋으로:
 
-### DB 작업 (Supabase project: `pxdopzlaffjcxqfrqidq` / dari / ap-northeast-2)
+- `supabase/migrations/0004_fix_function_search_path.sql` (신규)
+- `supabase/migrations/0005_create_knowledge_chunks.sql` (신규)
+- `src/core/db/types.ts` (수정 — KnowledgeChunk Tables/Functions 추가)
+- `src/core/db/index.ts` (수정 — KnowledgeSourceType/KnowledgeChunkMatch re-export)
 
-- ✅ pgvector 0.8.0 활성화 (schema: extensions)
-- ✅ 마이그레이션 4개 적용:
-  - `enable_pgvector`
-  - `create_bots_table` (0001)
-  - `rename_bot_id_to_slug` (0002)
-  - `create_conversations_and_messages` (0003)
-- ✅ 3 테이블 RLS enable (정책은 Epic 0-D Auth 후 0004 예정)
-- ✅ 라운드트립 검증:
-  - bots: INSERT → UPDATE(trigger) → DELETE
-  - 2단계 cascade: bot → conversation → messages 모두 자동 삭제
-  - `last_message_at` 트리거 정상 작동 (trigger_ok=true)
+### DB 작업
+
+- ✅ 마이그레이션 6개 적용 (이전 4개 + 신규 2개):
+  - `fix_function_search_path` (0004) — ALTER FUNCTION 로 search_path 고정
+  - `create_knowledge_chunks` (0005) — 테이블 + 인덱스 3종 + RPC
+- ✅ knowledge_chunks 테이블 (Gemini 768-dim, ivfflat cosine, lists=100)
+- ✅ `match_knowledge_chunks` RPC (security invoker + search_path='')
+- ✅ 보안 린트 WARN 2건 해소 (`function_search_path_mutable`)
+
+### 검증 (라운드트립 완전 통과)
+
+- 768-dim 단위 벡터 3개로 cosine similarity 서수 검증
+  - 쿼리=vec_a → chunk A 1.0 / chunk C 0.7071 / chunk B 0.0 순 반환 확인
+- bots → knowledge_chunks cascade DELETE 정상
+- 함수 2개 `proconfig = ["search_path=\"\""]` 확인
+- 기존 트리거 2종 동작 재검증 (과거 시점 덮어쓰기 기법)
+- advisor security: WARN 0건 / INFO 4건(RLS policy 미작성 — 예상됨)
 
 ### 코드 작업
 
-- ✅ `src/core/db/` 모듈 (browser/server/admin 3 클라이언트 + types + index)
-- ✅ `@supabase/ssr` 기반 SSR 세션 자동 관리
-- ✅ `server-only` 가드로 service_role 키 번들 유입 차단
-- ✅ **Drizzle 제외 결정** (RLS 이중 관리 회피 — 실행 직전 재평가 결과)
-- ✅ typecheck 전 구간 에러 0
+- ✅ `src/core/db/types.ts`
+  - Enum-like: `KnowledgeSourceType` 추가
+  - Sub-structures: `KnowledgeChunkMatch` 추가
+  - `Database.public.Tables.knowledge_chunks` 추가
+  - `Database.public.Functions.match_knowledge_chunks` 시그니처 정의
+  - **수동 유지 결정** — 자동 생성은 DariConfig·MessageSource를 `Json` 으로 평탄화 → 정확도 손실. 주석에 결정 사유 명시.
+- ✅ `src/core/db/index.ts` — 신규 타입 2종 re-export
+- ✅ typecheck 에러 0
+
+### 교훈 저장 (learnings.md에 3건 추가)
+
+- DO 블록 내 `now()` 트랜잭션 고정값 (트리거 검증 시 주의)
+- `ALTER FUNCTION ... SET search_path = ''`가 최소 변경 경로 (DROP+CREATE 불필요)
+- Supabase types 자동 생성 보류 결정 (DariConfig 보존 우선)
 
 ### 메모리 저장 (글로벌)
 
-- ✅ `project_dari_port.md` — 로컬 포트 4000 (3000 아님)
-- ✅ `feedback_error_avoidance_first.md` — 기술 선택 시 에러/효율 비교 규칙
-- ✅ `MEMORY.md` 2개 엔트리 인덱스
-
-### 글로벌 규칙 반영
-
-- `.env.local`은 Jayden이 직접 생성 (Claude 생성 차단)
-- gitleaks 템플릿 예시는 `<placeholder>` 각괄호 형식 사용
+- ✅ `feedback_plan_per_task.md` — Task마다 Plan→Approve→Build 엄격 준수 규칙
+- ✅ MEMORY.md 3번째 엔트리 인덱스 업데이트
 
 ## 다음 세션 할 일
 
-### 🎯 최우선: Epic 0-B 마무리 — knowledge_chunks
+### 🎯 최우선: 두 경로 중 선택
 
-**설계 결정 포인트 (세션 시작 시 결정)**:
+**경로 B: Epic 0-D (인증) — Supabase Google OAuth**
 
-1. **임베딩 제공자/차원**
-   - Gemini text-embedding-004: 768-dim (무료 tier 관대, 한국어 양호)
-   - OpenAI text-embedding-3-small: 1536-dim
-   - Claude는 임베딩 API 없음 (Voyage AI 권장)
-   - → 현재 `.env.local`에 `GOOGLE_GENERATIVE_AI_API_KEY` 있으므로 Gemini 768-dim 유력
-2. **인덱스 타입**: ivfflat(간단/삽입 빠름) vs hnsw(검색 빠름/메모리 多)
-3. **청킹 전략**: 고정 크기(500 토큰) vs 의미 단위 분할
-4. 마이그레이션 `0004_create_knowledge_chunks.sql`
-5. types.ts에 `KnowledgeChunk` 추가
-6. 유사도 검색 SQL 함수 or RPC
-7. 라운드트립 검증
+- 블로커: Google Cloud Console에서 OAuth Client ID/Secret 발급 (Jayden 수동)
+- 가치: `bots.owner_id` 활성화 → RLS 정책 작성 가능 (0006) → 진짜 보안 경계 완성
+- 소요: 2~3시간 (OAuth 설정 + /login + 미들웨어 + 세션 체크)
 
-### 그 다음 (독립 가능)
+**경로 D: Epic 0-E (안정성) — Vitest + Pino + Sentry + Health check**
 
-- **Epic 0-D (인증)**: Supabase Google OAuth + /login + 미들웨어
-- **Epic 0-B 마무리2**: RLS 정책 0004 → 0005 (인증 완료 후)
-- **Epic 0-E (안정성)**: Vitest + Playwright + Pino + Sentry + Health check
+- 블로커: 없음
+- 가치: 앞으로 모든 기능에 테스트·로깅·관찰성 자동 적용. Phase 1 진입 전 필수 배선.
+- 소요: 2~3시간 (각 요소 1개씩 최소 설정)
+
+→ 다음 세션 시작 시 우선순위 재확인.
+
+### 그 외 대기 중
+
+- **Epic 0-B 후속(0006)**: RLS 정책 — Auth 완료 후에만 의미 있음
 - **Epic 0-F (유지보수)**: ADR 5종 + GitHub Actions CI + 환경 분리
 - **Epic 0-G (확장성)**: KnowledgeSource/BehaviorHandler/AIProvider 인터페이스 + EventBus
 
 ## 차단 요소
 
-**없음**. 다음 세션 시작 시 knowledge_chunks 설계 결정(임베딩 제공자)만 필요.
+**없음**. 다음 세션 시작 시 경로 B vs D 선택만 필요.
 
 ## 완료한 Task (누적)
 
@@ -107,14 +114,20 @@
 - [x] conversations + messages 테이블 (0003)
 - [x] 2단계 cascade DELETE 검증
 - [x] 에러 최소 경로 추천 규칙 메모리 저장
+- [x] **함수 search_path 보안 강화 (0004)**
+- [x] **knowledge_chunks 테이블 + RPC (0005)**
+- [x] **KnowledgeChunk 타입 추가 + 자동 생성 보류 결정**
+- [x] **RAG 라운드트립 검증 (cosine similarity 서수 통과)**
+- [x] **Task마다 Plan→Approve→Build 규칙 메모리 저장**
 
 ## 세션 이력
 
 - 2026-04-17 (오전): 프로젝트 초기화 (init-project-v2.sh v9.3)
 - 2026-04-17 (오후): PRD v2.0 재작성 + 마스터 플랜 v3.0 수립 + Phase 0-A/0-C 완료
-- **2026-04-17 (저녁)**: Epic 0-B 3/4 테이블 완성 + Supabase 클라이언트 + 메모리 규칙 2개
+- 2026-04-17 (저녁): Epic 0-B 3/4 테이블 완성 + Supabase 클라이언트 + 메모리 규칙 2개
+- **2026-04-17 (밤): Epic 0-B 완결 (0004 함수 search_path + 0005 knowledge_chunks) + 타입 + 라운드트립 + 교훈 3건**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-17 저녁
+- 날짜: 2026-04-17 밤
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)
