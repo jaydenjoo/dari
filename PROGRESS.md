@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 0 (기반 공사)
-- Epic: 0-E 안정성 기반 (+ ε-1 Task 0-E-5 완료) / Epic 0-D 인증 (Task 0-D-1 완료)
-- 상태: **Google OAuth 기본 로그인 흐름 완성** → 다음 경로 선택 필요 (0-D-2 RLS / 0-E-6 관찰성 탐지 / Phase 1 / 기타)
+- Epic: 0-D 인증 — Task 0-D-1 (OAuth) + 0-D-2 (RLS) 완료
+- 상태: **owner 기반 RLS 활성화 완결** → 다음 경로 선택 (0-E-6 관찰성 탐지 / Phase 1 진입 / 짧은 정비)
 
 ## 완료된 Epic
 
@@ -37,8 +37,49 @@
   - `updateSession` 매 요청 + 보호 라우트 리디렉트 + `?next=` 쿼리스트링 보존
   - `isSafeNextPath` 단일 출처 (open redirect / path traversal 방어)
   - 독립 리뷰 2라운드 (옵션 X 5건 반영) + Playwright E2E 9/9 통과
+- ✅ **Task 0-D-2 (Epic 0-D 완결)**: owner 기반 RLS 정책 활성화 (경로 A 최소 단단)
+  - 마이그레이션 0006 (14 정책): bots 4 + conversations 4 + messages 2 + knowledge_chunks 4
+  - `bots.owner_id` NOT NULL 전환 (데이터 0건, 안전) + `to authenticated` 명시 (anon 배제)
+  - `(select auth.uid())` InitPlan 래핑 (per-row 재평가 방지) + USING/WITH CHECK 구분
+  - messages immutable 설계 유지 (UPDATE/DELETE 정책 부재 = 자동 거부)
+  - 소프트 삭제 봇(`status='deleted'`) 접근 허용 명시 (휴지통/복구 UI 여지)
+  - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
+  - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
 
-## 이번 세션(2026-04-17 야간) 완료 내역
+## 이번 세션(2026-04-18 오전) 완료 내역
+
+### Task 0-D-2 (Epic 0-D 완결) — owner 기반 RLS
+
+- 마이그레이션 **`0006_add_rls_policies.sql`** — 14 정책 일괄 신규
+  - bots 4 (SELECT/INSERT/UPDATE/DELETE) — `owner_id = (select auth.uid())`
+  - conversations 4 — `exists (bots where id = bot_id and owner_id = ...)`
+  - messages 2 (SELECT/INSERT) — 2단 EXISTS (conversations JOIN bots)
+  - knowledge_chunks 4 — bots EXISTS 동일 패턴
+- `bots.owner_id` NOT NULL 전환 (데이터 0건, 안전)
+- **경로 A (owner 전용, 최소 단단)** 선택 — 익명 방문자/로그인 방문자 흐름은 Phase 1 service_role 경유
+- Supabase `advisors(security)` — `rls_enabled_no_policy` WARN 0건 해소
+- **독립 리뷰 2 에이전트 병렬** (code-reviewer + security-reviewer) → 양쪽 Ship as-is
+  - GOOD 공통: `(select auth.uid())` InitPlan 래핑 / `to authenticated` 명시 / USING↔WITH CHECK 구분 / 2단 EXISTS / messages immutable 정책 부재 = 자동 거부
+  - MEDIUM 1 (공통): 소프트 삭제 봇 접근 정책 — 옵션 A (의도 유지 + 주석 보강) 결정
+- **SQL 기반 RLS 시뮬레이션 10/10 PASS** (`SET LOCAL "request.jwt.claims"` 로 두 계정 시뮬레이션)
+  - G1-2: A/B 컨텍스트 대칭 SELECT (자기 것만 반환)
+  - G3: 익명 전원 차단 (4 테이블 0 rows)
+  - G4-5: INSERT impersonation (owner_id/bot_id 타인) → `42501 RLS violation`
+  - G6/G8: UPDATE/DELETE 타인 리소스 → 0 rows affected
+  - G7: owner 이전 공격 (자기 봇 owner_id → B) → WITH CHECK 차단
+  - G9/G10: messages UPDATE/DELETE → 정책 부재 = 0 rows (immutable 보장)
+
+### 주요 결정 / 발견
+
+- **소프트 삭제 봇 접근 정책 = 의도적으로 owner 접근 허용** — 휴지통/복구 UI 여지, 소프트 삭제 개념 정합. 대시보드 숨김은 앱 레벨 `where status != 'deleted'` 필터 책임.
+- **SQL 기반 RLS 시뮬레이션 = UI E2E 대체 가능** — `SET LOCAL ROLE authenticated` + `SET LOCAL "request.jwt.claims"` 로 Google OAuth 2계정 로그인 없이 10 시나리오를 3-4분 안에 검증. Supabase 가 실제 로그인 시 설정하는 값과 동일.
+- **독립 리뷰의 성능 모범사례 확인** — `(select auth.uid())` InitPlan 래핑이 이미 반영된 것을 리뷰어가 적극 GOOD 으로 평가. Supabase 공식 모범사례 정확히 준수.
+
+### learnings.md 추가 (+1, 총 18건)
+
+- SQL 기반 RLS 시뮬레이션을 UI E2E 대체 수단으로 활용 — `SET LOCAL "request.jwt.claims"` 패턴
+
+## 이전 세션(2026-04-17 야간) 완료 내역
 
 ### 커밋 2건
 
@@ -133,12 +174,12 @@
 
 ### 🎯 경로 선택
 
-**경로 α (권장): Task 0-D-2 — RLS 정책 활성화**
+**경로 α (권장): Phase 1 진입 — 봇 CRUD + DariConfig UI**
 
-- `supabase/migrations/0006_rls.sql` 활성화 (bots / conversations / messages / knowledge_chunks 4종)
-- security-reviewer 가 강조한 S5 해소 (OWASP A01 Broken Access Control 리스크)
-- 로그인 사용자별 격리 수동 검증 (두 계정으로 교차 조회 테스트)
-- 소요: 30~45m
+- `/bots` 목록 → `/bots/new` 생성 폼 → `/bots/:id` 상세
+- `owner_id = auth.uid()` 자동 주입 (RLS 통과 필수)
+- DariConfig 입력 UI (Phase 0-C 스키마 활용)
+- 소요: 여러 세션 (Task 분해 필요)
 
 **경로 β: Task 0-E-6 (관찰성 탐지 지표, 0-E-5 backlog 묶음)**
 
@@ -147,14 +188,7 @@
 - `redact.ts` 자체 단위 테스트 (경계값 direct 검증)
 - 소요: 45~60m
 
-**경로 γ: Phase 1 진입 (봇 CRUD + AI 응답)**
-
-- `/bots` 목록 → `/bots/new` 생성 폼 → `/bots/:id` 상세
-- DariConfig 입력 UI (Phase 0-C 스키마 활용)
-- RLS 선행 필수 — 경로 α 먼저 완료 권장
-- 소요: 여러 세션
-
-**경로 δ (짧은 정비, 선택)**
+**경로 γ (Phase 1 전 짧은 정비, 선택)**
 
 - **디자인 폰트 전역 교체**: Geist → Pretendard + DM Sans (디자인 시스템 v2 완전 준수, ~20m)
 - **CI Node 24 전환**: `actions/*@v4` → `@v5` (2026-06-02 전, 10~15m)
@@ -163,13 +197,15 @@
 
 ### 그 외 대기 중
 
+- **테스트 유저 cleanup**: Supabase Dashboard 에서 `rls-test-b@example.com` 삭제 (30초, 또는 재검증용 보존)
 - **gitleaks 오탐 선제 정리**: `env-template.md` 의 `sk-ant-xxxxx` 등을 `<placeholder>` 각괄호로 통일 (보안 리뷰 부가 제안, CI 통과 중이라 우선순위 낮음)
 - **gitleaks pre-commit hook 설치**: 팀 확장 전 (sec-reviewer M3, 여전히 backlog)
-- **Task 0-D-1 Supabase Dashboard 수동 확인 1건**: Jayden 본인 `hidream72@gmail.com` 레코드 Users 테이블 생성 여부 (30초)
+- **conversations/messages 로그인 방문자(user_id) 정책 확장**: Phase 1 위젯 로그인 지원 시점에 추가
+- **위젯 anon 라우트 service_role 경유 설계**: Phase 1 위젯 구현 시 `bot_id` 소유권 검증 + rate limiting 필수
 
 ## 차단 요소
 
-**없음** — 모든 경로 즉시 시작 가능. 경로 α (RLS) 를 경로 γ (Phase 1) 전에 반드시 완료 권장.
+**없음** — Phase 1 진입 가능 (RLS 완결). 경로 α 직행 또는 γ 정비 후 경로 α 선택지.
 
 ## 완료한 Task (누적)
 
@@ -205,6 +241,7 @@
 - [x] "리뷰" = code+security 병렬 규칙 메모리 저장 (`feedback_review_dual_agents.md`)
 - [x] **Task 0-E-5: logger ↔ Sentry bridge + redact 단일 출처 (독립 리뷰 2라운드, MEDIUM 7 + LOW 2 반영)**
 - [x] **Task 0-D-1: Google OAuth + Next 16 proxy 세션 게이트 + isSafeNextPath 단일 출처 (독립 리뷰 2라운드, 옵션 X 5건 반영, Playwright E2E 9/9)**
+- [x] **Task 0-D-2: owner 기반 RLS 정책 14 활성화 + `bots.owner_id` NOT NULL + 독립 리뷰 2 에이전트 Ship as-is + SQL 시뮬레이션 10/10 PASS (Epic 0-D 완결)**
 
 ## 세션 이력
 
@@ -216,8 +253,9 @@
 - 2026-04-17 (후속): Epic 0-F 50% (2/4 Task) — 0-F-2 CI + 0-F-1 ADR 5종 + 교훈 1건
 - **2026-04-17 (마감): Epic 0-F 100% 완결 — 0-F-3 환경 분리 + 0-F-4 모듈 README + 독립 리뷰 4회 (MEDIUM 7건 반영) + 커밋 2건 + 교훈 2건 + 메모리 1건**
 - **2026-04-17 (야간): Task 0-E-5 + Task 0-D-1 — logger↔Sentry bridge 완결 + Google OAuth 첫 로그인 흐름 + Playwright E2E 자동화 도입 + 교훈 2건 (Next16 proxy 리네임 / server-only 금지)**
+- **2026-04-18 (오전): Task 0-D-2 — owner 기반 RLS 14 정책 활성화 + Epic 0-D 완결 + 독립 리뷰 2 Ship as-is + SQL 시뮬레이션 10/10 PASS + 교훈 1건 (SQL 기반 RLS 시뮬레이션)**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-17 야간 (Task 0-E-5 + Task 0-D-1 완료, 첫 로그인 흐름 가동)
+- 날짜: 2026-04-18 오전 (Task 0-D-2 완료, Epic 0-D 완결, Phase 1 진입 준비)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)

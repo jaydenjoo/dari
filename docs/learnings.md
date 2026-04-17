@@ -353,6 +353,29 @@ training data 는 `middleware.ts` 기준이고 Supabase SSR 공식 가이드도 
 
 ---
 
+### 2026-04-18 SQL 기반 RLS 시뮬레이션을 UI E2E 대체 수단으로 활용 (설계 결정)
+
+**증상**: Task 0-D-2 RLS 정책 14개 적용 후 두 계정 교차 검증 필요. 실제로 두 Google OAuth 계정을 로그인 → 전환 → 로그아웃 → UI 로 SELECT/UPDATE/DELETE 교차 시도하려면 ~20-30분 소요. E2E Playwright 로 자동화해도 Google OAuth UI 자동화 제약 + 계정 2개 준비 비용 큼.
+
+**원인**: Supabase 의 RLS 는 `auth.uid()` 가 세션의 `request.jwt.claims.sub` 필드를 읽는 방식으로 구현됨. 실제 로그인 = 세션 레이어가 이 claim 을 설정해주는 것뿐. PostgreSQL 의 `SET LOCAL "request.jwt.claims"` 로 같은 claim 을 직접 주입하면 정책 평가 결과가 실제 로그인 시와 **100% 동일**.
+
+**해결**: 테스트 유저 추가(Dashboard 1-click) → service_role 로 봇/대화/메시지 준비 → 각 시나리오를 독립 트랜잭션 (`begin; SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub":"<uuid>","role":"authenticated"}'; <검증 쿼리>; rollback;`) 으로 실행. 10 시나리오 ~3-4분 완결. 공격 시도 (impersonation / owner 이전 / 타인 UPDATE·DELETE / immutable 위반) 는 `42501 RLS violation` 에러 또는 `0 rows affected` 로 차단 확인.
+
+**규칙** ⭐:
+
+- **RLS 정책 검증은 SQL 시뮬레이션이 최고 효율**. UI E2E 는 세션 레이어 전체를 통합 테스트하는 시점(Playwright 최종 검증) 에만 필요. 정책 로직 자체는 claim 주입으로 충분.
+- **시뮬레이션 패턴**: `begin; set local role authenticated; set local "request.jwt.claims" = '{"sub":"<A uid>","role":"authenticated"}'; <쿼리>; rollback;` — rollback 으로 세션 변수 자동 해제.
+- 공격 시나리오별 기대 결과 패턴:
+  - INSERT WITH CHECK 위반 → `ERROR: 42501 RLS policy violation` (트랜잭션 abort)
+  - UPDATE/DELETE USING 불일치 → `0 rows affected` (에러 아님, 조용한 차단)
+  - owner 이전 공격 (UPDATE 의 SET owner_id = 타인) → WITH CHECK 가 변경 후 row 를 평가하므로 `42501` 차단
+  - 정책 부재 테이블 조작 (messages UPDATE/DELETE) → `0 rows affected` (basic deny)
+- **테스트 데이터는 cleanup 철저** (트랜잭션 rollback 외에 준비 데이터는 명시적 DELETE). `bots` 는 cascade 로 하위 테이블 자동 삭제.
+- **`SET LOCAL ROLE anon` 으로 익명 컨텍스트도 동일 방식 검증** — `to authenticated` 명시된 정책은 anon 에 평가조차 되지 않아 자동 0 rows.
+- Supabase `auth.users` 에는 MCP 로 직접 INSERT 하지 말 것 (스키마 내부 trigger·constraint 복잡). Dashboard > Authentication > Users > "Add user" 가 안전. 30초.
+
+---
+
 ### 2026-04-17 Next 16 proxy 런타임에서 import "server-only" 금지 (기술 이슈)
 
 **증상**: `src/core/db/proxy-client.ts` (proxy 전용 Supabase client) 상단에 `import "server-only";` 추가 후 dev server 가동 → 모든 요청이 `TypeError: adapterFn is not a function` 으로 404 반환. 에러 스택은 `.next/dev/server/middleware.js:4:3` 로 이어지지만 원인 라인이 압축되어 직관적 추적 불가. `proxy.ts:` 타임은 로그에 찍혀 (proxy 자체는 감지됨) 파일 위치 문제가 아닌 런타임 문제임을 확인.
