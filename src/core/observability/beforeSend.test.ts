@@ -81,6 +81,7 @@ describe("beforeSend — request", () => {
         method: "POST",
         url: "https://example.com/api/login",
         data: {
+          username: "alice",
           email: "alice@example.com",
           password: "plain-6",
           refreshToken: "plain-7",
@@ -88,8 +89,10 @@ describe("beforeSend — request", () => {
       },
     });
 
+    // email 은 SENSITIVE_FIELD_NAMES 에 포함 (🟡 프로젝트 PII 보호)
     expect(out.request?.data).toMatchObject({
-      email: "alice@example.com",
+      username: "alice",
+      email: "[Redacted]",
       password: "[Redacted]",
       refreshToken: "[Redacted]",
     });
@@ -209,7 +212,7 @@ describe("beforeSend — breadcrumbs", () => {
     expect(first?.data).toMatchObject({
       url: "/api/login",
       method: "POST",
-      body: { email: "alice@example.com", password: "[Redacted]" },
+      body: { email: "[Redacted]", password: "[Redacted]" },
     });
 
     const second = out.breadcrumbs?.[1];

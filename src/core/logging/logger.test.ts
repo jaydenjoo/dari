@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { logger, createTestLogger, type Logger } from "./logger";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@sentry/nextjs", () => ({
+  captureException: vi.fn(),
+}));
+
+import * as Sentry from "@sentry/nextjs";
 import { createRequestLogger } from "./context";
+import { createTestLogger, logger, type Logger } from "./logger";
 
 describe("logger (base instance)", () => {
   it("표준 pino 로그 레벨 메서드들이 존재한다", () => {
@@ -145,5 +151,93 @@ describe("redact (민감 필드 자동 제거)", () => {
       "silent",
     ];
     expect(validLevels).toContain(logger.level);
+  });
+});
+
+describe("Sentry bridge (error/fatal 자동 캡처)", () => {
+  // Sentry.captureException 의 2번째 인자는 union type (Scope | Partial<ScopeContext>).
+  // 테스트에서는 logger.ts 가 항상 객체 리터럴 로 전달함을 알고 있으므로 그 형태로 캐스팅.
+  type CapturedContext = { level?: string; extra?: Record<string, unknown> };
+
+  beforeEach(() => {
+    vi.mocked(Sentry.captureException).mockClear();
+  });
+
+  it("logger.error 호출 시 Sentry.captureException 이 error 레벨로 호출된다", () => {
+    const boom = new Error("something exploded");
+    logger.error({ err: boom, botId: "b1" }, "bot failed");
+
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+    const [capturedErr, options] = vi.mocked(Sentry.captureException).mock
+      .calls[0];
+    expect(capturedErr).toBeInstanceOf(Error);
+    expect((capturedErr as Error).message).toBe("something exploded");
+    const ctx = options as CapturedContext;
+    expect(ctx.level).toBe("error");
+    // 비민감 필드는 extra 로 전달되어 디버깅에 활용
+    expect(ctx.extra).toMatchObject({ botId: "b1", msg: "bot failed" });
+  });
+
+  it("logger.fatal 호출 시 Sentry.captureException 이 fatal 레벨로 호출된다", () => {
+    logger.fatal({ err: new Error("process dying") }, "crash");
+
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+    const [, options] = vi.mocked(Sentry.captureException).mock.calls[0];
+    const ctx = options as CapturedContext;
+    expect(ctx.level).toBe("fatal");
+  });
+
+  it("logger.info / logger.warn / logger.debug 호출 시 Sentry 는 호출되지 않는다", () => {
+    logger.info({ botId: "b1" }, "regular info");
+    logger.warn({ botId: "b1" }, "a warning");
+    logger.debug({ botId: "b1" }, "verbose detail");
+
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("err 필드 없이 logger.error 호출해도 msg 로 Error 를 복원하여 캡처한다", () => {
+    logger.error("string-only error message");
+
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+    const [capturedErr] = vi.mocked(Sentry.captureException).mock.calls[0];
+    expect(capturedErr).toBeInstanceOf(Error);
+    expect((capturedErr as Error).message).toBe("string-only error message");
+  });
+
+  it("2-depth 이상 중첩 민감 필드가 Sentry extra 로 가기 전에 [Redacted] 로 치환된다", () => {
+    // pino redact 는 1-depth 까지만 경로 매칭 → 2-depth 이상은 bridge 의
+    // redactDeep 이 차단해야 한다 (ADR-006 단일 출처 일관성).
+    logger.error(
+      {
+        err: new Error("deep leak attempt"),
+        user: { profile: { password: "should-not-leak" } },
+      },
+      "nested sensitive",
+    );
+
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+    const [, options] = vi.mocked(Sentry.captureException).mock.calls[0];
+    const ctx = options as CapturedContext;
+    const user = ctx.extra?.user as { profile: { password: string } };
+    expect(user.profile.password).toBe("[Redacted]");
+    // 원본 민감값이 Sentry 페이로드 어디에도 직렬화되지 않음
+    expect(JSON.stringify(ctx.extra)).not.toContain("should-not-leak");
+  });
+
+  it("bridge 내부에서 예외가 나도 앱을 깨지 않고 silent 로 처리된다", () => {
+    const parseSpy = vi
+      .spyOn(JSON, "parse")
+      .mockImplementationOnce(() => {
+        throw new Error("forced parse failure");
+      });
+
+    expect(() =>
+      logger.error({ err: new Error("boom") }, "during parse failure"),
+    ).not.toThrow();
+
+    // parse 가 실패하면 bridge 는 silent → Sentry.captureException 미호출
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+
+    parseSpy.mockRestore();
   });
 });

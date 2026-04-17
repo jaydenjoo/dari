@@ -23,6 +23,11 @@ export const SENSITIVE_FIELD_NAMES = [
   "private_key",
   "serviceRoleKey",
   "service_role_key",
+  // 개인정보 (🟡 프로젝트 — 가맹점/사용자 이메일·전화번호 보호)
+  "email",
+  "phone",
+  "phoneNumber",
+  "phone_number",
 ] as const;
 
 /** HTTP 헤더명 redact 대상 (case-insensitive 비교). */

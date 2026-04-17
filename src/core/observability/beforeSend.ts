@@ -1,9 +1,6 @@
 import type { Breadcrumb, ErrorEvent, EventHint } from "@sentry/core";
-import {
-  REDACTED,
-  SENSITIVE_FIELD_NAMES,
-  SENSITIVE_HEADER_NAMES,
-} from "./sensitiveFields";
+import { redactDeep } from "./redact";
+import { REDACTED, SENSITIVE_HEADER_NAMES } from "./sensitiveFields";
 
 /**
  * Sentry 이벤트 전송 전에 민감 필드를 `[Redacted]` 로 치환한다.
@@ -20,30 +17,13 @@ import {
  * - event.exception.values[].value (에러 메시지 자체) — 디버깅 가치 보존 우선.
  *   "에러 메시지에 민감값 넣지 않기" 는 호출 측의 코딩 규칙으로 관리.
  *
+ * 재귀 치환 로직은 `./redact` 모듈로 공유 — logger → Sentry bridge 와 동일 동작.
  * immutability: 원본 event 를 mutate 하지 않고 새 객체를 반환.
  */
 
-const SENSITIVE_FIELD_SET: ReadonlySet<string> = new Set(SENSITIVE_FIELD_NAMES);
 const SENSITIVE_HEADER_SET: ReadonlySet<string> = new Set(
   SENSITIVE_HEADER_NAMES,
 );
-
-const MAX_DEPTH = 10;
-
-function redactRecursive(value: unknown, depth: number): unknown {
-  if (depth > MAX_DEPTH) return REDACTED; // 순환 참조 / 비정상 깊이 안전장치
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) {
-    return value.map((item) => redactRecursive(item, depth + 1));
-  }
-  const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = SENSITIVE_FIELD_SET.has(key)
-      ? REDACTED
-      : redactRecursive(val, depth + 1);
-  }
-  return result;
-}
 
 /**
  * 헤더명 기반 redact. `Set-Cookie` 같은 multi-value 헤더(배열 값) 도 치환.
@@ -64,9 +44,7 @@ function redactHeaders(
 
 function redactBreadcrumbs(breadcrumbs: Breadcrumb[]): Breadcrumb[] {
   return breadcrumbs.map((b) =>
-    b.data
-      ? { ...b, data: redactRecursive(b.data, 0) as Breadcrumb["data"] }
-      : b,
+    b.data ? { ...b, data: redactDeep(b.data) as Breadcrumb["data"] } : b,
   );
 }
 
@@ -80,7 +58,7 @@ export function beforeSend(
         query_string: undefined,
         data:
           event.request.data !== undefined
-            ? redactRecursive(event.request.data, 0)
+            ? redactDeep(event.request.data)
             : event.request.data,
         headers: event.request.headers
           ? (redactHeaders(
@@ -106,10 +84,10 @@ export function beforeSend(
   return {
     ...event,
     extra: event.extra
-      ? (redactRecursive(event.extra, 0) as typeof event.extra)
+      ? (redactDeep(event.extra) as typeof event.extra)
       : event.extra,
     contexts: event.contexts
-      ? (redactRecursive(event.contexts, 0) as typeof event.contexts)
+      ? (redactDeep(event.contexts) as typeof event.contexts)
       : event.contexts,
     request: redactedRequest,
     user: redactedUser,
