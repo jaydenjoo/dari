@@ -3,6 +3,10 @@ import pino, {
   type Logger,
   type LoggerOptions,
 } from "pino";
+import {
+  buildPinoRedactPaths,
+  REDACTED,
+} from "../observability/sensitiveFields";
 
 /**
  * Dari 구조화 로거 (Pino).
@@ -38,55 +42,11 @@ function resolveLogLevel(
 }
 
 /**
- * 로깅 시 자동 redact 대상.
- * - 최상위 / 1-depth 중첩 / 흔한 HTTP 헤더를 모두 커버.
- * - pino redact 는 완전 일치 기반 → `passwordHint` 같은 이름 유사 필드는 안전.
+ * 로깅 시 자동 redact 대상 경로.
+ * 실제 필드명 정의는 `core/observability/sensitiveFields.ts` 단일 진실 공급원.
+ * pino redact 는 완전 일치 기반 → `passwordHint` 같은 이름 유사 필드는 안전.
  */
-export const REDACT_PATHS = [
-  // 최상위
-  "password",
-  "token",
-  "authorization",
-  "apiKey",
-  "api_key",
-  "secret",
-  "clientSecret",
-  "client_secret",
-  "accessToken",
-  "access_token",
-  "refreshToken",
-  "refresh_token",
-  "privateKey",
-  "private_key",
-  "serviceRoleKey",
-  "service_role_key",
-  // 1-depth 중첩
-  "*.password",
-  "*.token",
-  "*.authorization",
-  "*.apiKey",
-  "*.api_key",
-  "*.secret",
-  "*.clientSecret",
-  "*.client_secret",
-  "*.accessToken",
-  "*.access_token",
-  "*.refreshToken",
-  "*.refresh_token",
-  "*.privateKey",
-  "*.private_key",
-  "*.serviceRoleKey",
-  "*.service_role_key",
-  // HTTP 헤더 (req/res 객체 로깅 시 흔히 노출)
-  "headers.authorization",
-  "headers.cookie",
-  "headers.x-api-key",
-  "headers.x-auth-token",
-  "req.headers.authorization",
-  "req.headers.cookie",
-  "req.headers.x-api-key",
-  "req.headers.x-auth-token",
-] as const;
+export const REDACT_PATHS = buildPinoRedactPaths();
 
 const baseOptions: LoggerOptions = {
   level: resolveLogLevel(process.env.LOG_LEVEL, IS_PROD ? "info" : "debug"),
@@ -96,7 +56,7 @@ const baseOptions: LoggerOptions = {
   },
   redact: {
     paths: [...REDACT_PATHS],
-    censor: "[Redacted]",
+    censor: REDACTED,
   },
   timestamp: pino.stdTimeFunctions.isoTime,
 };
