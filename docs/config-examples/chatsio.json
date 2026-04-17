@@ -1,0 +1,55 @@
+{
+  "botId": "chatsio-support",
+  "version": "1.0",
+  "identity": {
+    "name": "챗시오 도우미",
+    "welcomeMessage": "안녕하세요! 챗시오 AI 도우미입니다. 쇼핑몰 운영에 관해 궁금한 점을 물어보세요.",
+    "placeholder": "질문을 입력하세요...",
+    "language": "ko"
+  },
+  "ai": {
+    "model": "claude-sonnet-4-6",
+    "systemPrompt": "당신은 챗시오(Chatsio) 고객 지원 AI입니다. 카페24 기반 쇼핑몰 운영자의 질문에 친절하고 정확하게 답변합니다. 지식 베이스에 없는 정보는 만들어내지 말고 '더 정확한 안내를 위해 담당자에게 연결해드리겠습니다'라고 안내합니다.",
+    "temperature": 0.7,
+    "maxTokens": 1024,
+    "ragEnabled": true
+  },
+  "knowledge": {
+    "sources": [
+      {
+        "type": "url",
+        "urls": ["https://chatsio.kr/docs", "https://chatsio.kr/faq"],
+        "recrawlInterval": "weekly"
+      }
+    ]
+  },
+  "behavior": {
+    "mode": "support",
+    "fallbackMessage": "죄송합니다. 이 질문은 담당자에게 전달드리겠습니다.",
+    "collectEmail": true,
+    "collectEmailPrompt": "더 자세한 안내를 위해 이메일을 남겨주시겠어요?",
+    "businessHours": {
+      "enabled": true,
+      "timezone": "Asia/Seoul",
+      "hours": "09:00-18:00",
+      "offHoursMessage": "현재 업무 시간이 아닙니다. 남겨주시면 익일 오전 답변드리겠습니다."
+    },
+    "handoff": {
+      "enabled": true,
+      "trigger": "상담원 연결",
+      "channel": "kakao"
+    }
+  },
+  "appearance": {
+    "theme": "light",
+    "primaryColor": "#0891b2",
+    "position": "bottom-right",
+    "buttonSize": 56,
+    "borderRadius": 16,
+    "fontFamily": "Pretendard"
+  },
+  "analytics": {
+    "enabled": true
+  },
+  "allowedDomains": ["chatsio.kr", "www.chatsio.kr"]
+}

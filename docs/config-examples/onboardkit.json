@@ -1,0 +1,45 @@
+{
+  "botId": "onboardkit-faq",
+  "version": "1.0",
+  "identity": {
+    "name": "온보딩 도우미",
+    "welcomeMessage": "환영합니다! 입사 관련 궁금한 점을 편하게 물어보세요.",
+    "placeholder": "예: 연차는 몇 일인가요?",
+    "language": "ko"
+  },
+  "ai": {
+    "model": "claude-sonnet-4-6",
+    "systemPrompt": "당신은 신입사원의 입사 관련 질문에 답변하는 온보딩 AI입니다. 회사 핸드북과 복리후생 가이드에 기반하여 정확히 답변합니다. 핸드북에 명시되지 않은 사항은 '해당 정보는 HR 담당자에게 문의해주세요'라고 안내합니다. 정책 해석이 필요한 모호한 질문은 추측하지 마세요.",
+    "temperature": 0.5,
+    "maxTokens": 1024,
+    "ragEnabled": true
+  },
+  "knowledge": {
+    "sources": [
+      {
+        "type": "file",
+        "files": ["company-handbook.pdf", "benefits-guide.pdf"]
+      }
+    ]
+  },
+  "behavior": {
+    "mode": "faq",
+    "fallbackMessage": "해당 정보는 핸드북에 없습니다. HR 담당자에게 문의해주세요.",
+    "collectEmail": false,
+    "handoff": {
+      "enabled": true,
+      "trigger": "HR 담당자 연결",
+      "channel": "email"
+    }
+  },
+  "appearance": {
+    "theme": "light",
+    "primaryColor": "#2a9d5c",
+    "position": "bottom-right",
+    "fontFamily": "Pretendard"
+  },
+  "analytics": {
+    "enabled": true
+  },
+  "allowedDomains": ["onboardkit.internal"]
+}

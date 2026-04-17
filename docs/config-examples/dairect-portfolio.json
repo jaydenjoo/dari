@@ -1,0 +1,54 @@
+{
+  "botId": "dairect-portfolio",
+  "version": "1.0",
+  "identity": {
+    "name": "Dairect 안내봇",
+    "welcomeMessage": "안녕하세요! dairect.kr 포트폴리오 안내 봇입니다. 어떤 프로젝트가 궁금하신가요?",
+    "placeholder": "예: Dari는 어떤 프로젝트인가요?",
+    "language": "ko"
+  },
+  "ai": {
+    "model": "claude-sonnet-4-6",
+    "systemPrompt": "당신은 Dairect(Jayden의 프로젝트 포트폴리오) 안내 AI입니다. 각 프로젝트의 목적·기술스택·진행상황을 친절히 소개하고, SI 협업에 관심 있는 방문자에게는 자연스럽게 이메일 문의를 안내합니다. 과장하거나 확정되지 않은 로드맵을 약속하지 마세요.",
+    "temperature": 0.8,
+    "maxTokens": 1024,
+    "ragEnabled": true
+  },
+  "knowledge": {
+    "sources": [
+      {
+        "type": "url",
+        "urls": ["https://dairect.kr", "https://dairect.kr/portfolio"],
+        "recrawlInterval": "daily"
+      },
+      {
+        "type": "text",
+        "title": "SI 문의 가이드",
+        "content": "SI(시스템 통합) 협업 문의는 hidream72@gmail.com 으로 주시면 24시간 내 답변드립니다. 기본 협업 범위는 AI 챗봇 도입, RAG 시스템 구축, 대시보드 개발입니다. 예산/일정은 미팅에서 협의합니다."
+      }
+    ]
+  },
+  "behavior": {
+    "mode": "sales",
+    "fallbackMessage": "해당 내용은 hidream72@gmail.com 으로 문의 주시면 더 자세히 안내드립니다.",
+    "collectEmail": true,
+    "collectEmailPrompt": "프로젝트 관련 자료를 이메일로 보내드릴까요? 이메일을 알려주세요.",
+    "handoff": {
+      "enabled": true,
+      "trigger": "SI 문의",
+      "channel": "email"
+    }
+  },
+  "appearance": {
+    "theme": "light",
+    "primaryColor": "#1a5eb8",
+    "position": "bottom-right",
+    "buttonSize": 56,
+    "borderRadius": 20,
+    "fontFamily": "Pretendard"
+  },
+  "analytics": {
+    "enabled": true
+  },
+  "allowedDomains": ["dairect.kr", "www.dairect.kr"]
+}
