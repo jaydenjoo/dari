@@ -269,3 +269,21 @@ behavior: behaviorSchema.default(behaviorSchema.parse({})),
 - **Claude 는 `.env*` 파일 읽기/쓰기 권한 없음** — env 디버깅은 항상 Jayden 에게 명시적 확인 요청 (이 규칙은 앞선 교훈 "Write 도구가 `.env*` 파일 생성 차단" 과 동일 맥락).
 
 ---
+
+### 2026-04-17 CI placeholder env 는 workflow YAML 하드코딩 금지 — shell 동적 생성 (설계 결정)
+
+**증상**: `next build` 는 env.ts 의 Zod 검증(`url()`, `.min(20)`, `.startsWith("sk-")`) 통과 필수. CI 에서 실 Supabase/AI 값은 불필요 → placeholder 가 필요한데, YAML `env:` 섹션에 직접 기재하는 방안은 gitleaks 오탐 리스크가 큼 (`sk-` prefix, JWT prefix, 20+자 base64 문자열 모두 탐지 대상).
+
+**원인**: YAML 에 쓴 문자열은 (1) 커밋 히스토리 영구 기록, (2) gitleaks entropy + rule 기반 탐지 양쪽 적중, (3) 각괄호 `<placeholder>` 로 우회하면 Zod `.url()`/`.startsWith()` 제약에 실패.
+
+**해결**: Build step 직전 별도 step 에서 `echo "KEY=$(openssl rand -hex 24)" >> "$GITHUB_ENV"` 로 동적 생성. `sk-$(openssl ...)` 같은 조합으로 prefix 요구도 충족. URL 은 `https://ci-placeholder.<vendor>.<tld>` 고정값 (URL 형식은 gitleaks 오탐 거의 없음).
+
+**규칙** ⭐:
+
+- **CI 에서 서버 env placeholder 가 필요하면 반드시 shell step 으로 동적 생성**. YAML 의 `env:` 섹션에 secret-like 문자열 하드코딩 금지.
+- **패턴**: `echo "KEY=$(openssl rand -hex N)" >> "$GITHUB_ENV"` + 필요 시 prefix 결합 (`sk-$(...)`).
+- **URL 제약**: `url()` Zod 는 랜덤 해시로 생성 불가 → `https://ci-placeholder.<vendor>.<tld>` 고정값 사용.
+- **이득 3가지**: (1) gitleaks 오탐 0, (2) 커밋 히스토리에 secret-like 문자열 0, (3) 매 실행 값이 바뀌어 실 secret 으로 오해될 여지 0.
+- **안티패턴**: `.env.ci` 파일을 리포에 커밋 (누출 리스크 영구) / Real GitHub Secrets 사용 (Jayden 수동 등록 필요 + 노출 리스크 미세 존재 / `<placeholder>` 각괄호 (Zod URL 제약 위반).
+
+---
