@@ -38,6 +38,9 @@ yarn-error.log*
 docs/design-references/*
 !docs/design-references/*.md
 
+# Playwright MCP 자동 검증 아티팩트 (스냅샷·콘솔 로그·스크린샷)
+.playwright-mcp/
+
 # vercel
 .vercel
 

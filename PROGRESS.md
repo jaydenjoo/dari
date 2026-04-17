@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 0 (기반 공사)
-- Epic: 0-F (유지보수 기반) — **100% 완결 (4/4 Task)** ✅
-- 상태: 다음 경로 선택 필요 (Epic 0-D 인증 / Phase 1 진입 / 기타)
+- Epic: 0-E 안정성 기반 (+ ε-1 Task 0-E-5 완료) / Epic 0-D 인증 (Task 0-D-1 완료)
+- 상태: **Google OAuth 기본 로그인 흐름 완성** → 다음 경로 선택 필요 (0-D-2 RLS / 0-E-6 관찰성 탐지 / Phase 1 / 기타)
 
 ## 완료된 Epic
 
@@ -24,8 +24,63 @@
   - 0-F-2: GitHub Actions CI + eslint/prettier baseline 정리 (CI 녹색 2회 연속)
   - 0-F-3: 환경 분리 전략 (`docs/environments.md` + ADR-008) + `SENTRY_ENVIRONMENT` end-to-end
   - 0-F-4: 모듈 README 골격 (`src/core/{config,db,logging,observability}`)
+- ✅ **Task 0-E-5 (ε-1, 관찰성 보강)**: logger ↔ Sentry bridge + redact 단일 출처 일관화
+  - `pino.multistream` 으로 primary + Sentry bridge 2-stream 구조
+  - `redactDeep` 공유 유틸 (`core/observability/redact.ts`) — bridge ↔ beforeSend 동일 로직
+  - 2-depth 이상 중첩 민감 필드 차단 (이중 방어선 3단계)
+  - email/phone PII 필드 승격 (🟡 프로젝트 개인정보 보호)
+  - Date/RegExp/Map/Set/Error 가드
+  - 독립 리뷰 2라운드 (MEDIUM 5 + 2 + LOW 2 반영)
+- ✅ **Task 0-D-1 (Epic 0-D Auth 시작)**: Google OAuth + Next 16 proxy 세션 게이트
+  - Next 16 `proxy.ts` (구 middleware) + `@supabase/ssr` 0.10 PKCE
+  - `/login` 페이지 (디자인 시스템 v2) + `/auth/callback` + `/auth/logout`
+  - `updateSession` 매 요청 + 보호 라우트 리디렉트 + `?next=` 쿼리스트링 보존
+  - `isSafeNextPath` 단일 출처 (open redirect / path traversal 방어)
+  - 독립 리뷰 2라운드 (옵션 X 5건 반영) + Playwright E2E 9/9 통과
 
-## 이번 세션(2026-04-17 마감) 완료 내역
+## 이번 세션(2026-04-17 야간) 완료 내역
+
+### 커밋 2건
+
+- `dc4659b` feat(logging): Sentry bridge + redact 단일 출처 일관화 (Task 0-E-5)
+- `74a87e1` feat(auth): Google OAuth + Next 16 proxy 세션 게이트 (Task 0-D-1)
+
+### Task 0-E-5 (logger ↔ Sentry bridge)
+
+- `pino.multistream` 2-stream 구조 (primary + Sentry bridge, error/fatal 자동 캡처)
+- `redactDeep` 공유 유틸 신규 — bridge 에서도 2-depth 이상 중첩 차단, beforeSend 리팩토 공유
+- `SENSITIVE_FIELD_NAMES` 에 `email/phone/phoneNumber/phone_number` 승격 (🟡 PII)
+- `redactDeep` 에 Date/RegExp/Map/Set/Error 가드 (내장 객체 데이터 손실 방지)
+- `msg/err` 문자열 내 민감값 코딩 규칙 README 명시
+- **독립 리뷰 2라운드** (옵션 B + 옵션 X) → MEDIUM 5+2, LOW 2 반영
+- 테스트: 29 → 35 (+6 bridge 시나리오)
+
+### Task 0-D-1 (Google OAuth + 로그인 흐름)
+
+- `src/proxy.ts` (Next 16 파일 컨벤션) — 매 요청 `getUser()` refresh + 보호 라우트 리디렉트
+- `src/core/db/proxy-client.ts` — `updateSession` 헬퍼 (let response closure + setAll 패턴)
+- `src/core/auth/route-policy.ts` — `isPublicPath` + `isSafeNextPath` 단일 출처
+- `/login` 페이지 디자인 시스템 v2 (Card + Google SVG + 2레이어 그림자 + 자간 + 블롭 배경)
+- `/auth/callback` PKCE 코드 교환 + logger.error → Sentry 자동 캡처 (0-E-5 bridge 활용)
+- `/auth/logout` Server Action
+- 홈 `/` 로그인 상태 표시 + 로그아웃 버튼
+- `?next=` 쿼리스트링 보존 (`/bots?tab=active` → 로그인 후 탭 복원) + 백슬래시/userinfo/길이 제한 방어
+- **독립 리뷰 2라운드** (1차 Ship + 2차 옵션 X 5건 반영) + **Playwright E2E 9/9 통과**
+- 테스트: 35 → 67 (+18 `isSafeNextPath` + 14 `isPublicPath`)
+
+### 주요 결정 / 발견
+
+- **Next.js 16 `middleware` → `proxy` 리네임 + `src/` 레이아웃은 `src/proxy.ts` 필수** — AGENTS.md 경고 적중. 구현 중 발견, Plan 수정안 즉시 보고·승인 루틴.
+- **`proxy.ts` 및 그 의존에서 `import "server-only"` 금지** — `adapterFn is not a function` 크래시. `server-only` 가드의 적용 범위는 Server Component / Action / Route Handler 만.
+- **ultrareview 는 스냅샷 타이밍 false positive 가능** — 트리거 시점 중간 상태를 기준으로 분석. 로컬 build/test/Playwright 결과가 진실.
+- **MCP Playwright 를 수동 검증 대체로 활용 가능** — 세션 유지된 브라우저 이용해 로그인/비로그인 양측 E2E 자동화. Google OAuth UI 만 수동이 현실적이나 기존 세션 유지 시 자동 통과.
+
+### learnings.md 추가 (+2, 총 17건)
+
+- Next.js 16 middleware → proxy 리네임 + src/ 레이아웃 필수 (AI 이탈 방지 + 설계 결정)
+- proxy 런타임에서 `import "server-only"` 금지 (기술 이슈)
+
+## 이전 세션(2026-04-17 마감) 완료 내역
 
 ### 커밋 2건 (이 세션 추가)
 
@@ -78,38 +133,43 @@
 
 ### 🎯 경로 선택
 
-**경로 β (권장): Epic 0-D (인증)**
+**경로 α (권장): Task 0-D-2 — RLS 정책 활성화**
 
-- 블로커: **Jayden 의 Google OAuth Client ID/Secret 발급 필요** (Google Cloud Console, 5~10분)
-- Supabase Google OAuth + `/login` + 미들웨어 + 세션 체크
-- 완료 시 RLS 정책 활성화 가능 (`supabase/migrations/0006_rls.sql`) → Phase 1 진입 안전 확보
-- 소요: 2~3h
+- `supabase/migrations/0006_rls.sql` 활성화 (bots / conversations / messages / knowledge_chunks 4종)
+- security-reviewer 가 강조한 S5 해소 (OWASP A01 Broken Access Control 리스크)
+- 로그인 사용자별 격리 수동 검증 (두 계정으로 교차 조회 테스트)
+- 소요: 30~45m
 
-**경로 δ: Phase 1 진입 직행 (봇 CRUD + AI 응답)**
+**경로 β: Task 0-E-6 (관찰성 탐지 지표, 0-E-5 backlog 묶음)**
 
-- Auth 없이 하드코딩 userId 로 개발 시작
-- 리스크: Auth 도입 시 수정 범위 큼
-- 소요: 긴 (여러 세션)
+- `redactDeep` depth-exceeded sentinel (운영 모니터링 트리거)
+- bridge JSON.parse 실패 탐지 (stderr 또는 별도 metric)
+- `redact.ts` 자체 단위 테스트 (경계값 direct 검증)
+- 소요: 45~60m
 
-**경로 γ: Epic 0-G (확장성 기반)**
+**경로 γ: Phase 1 진입 (봇 CRUD + AI 응답)**
 
-- 블로커 없음, 리스크: 실 요구 없이 추상화 (조기 추상화 금지 원칙 충돌)
-- Phase 1 에서 실 요구 발견 후 도입이 더 안전
+- `/bots` 목록 → `/bots/new` 생성 폼 → `/bots/:id` 상세
+- DariConfig 입력 UI (Phase 0-C 스키마 활용)
+- RLS 선행 필수 — 경로 α 먼저 완료 권장
+- 소요: 여러 세션
 
-**경로 ε (짧은 정비, 선택)**
+**경로 δ (짧은 정비, 선택)**
 
-- **Task 0-E-5** logger ↔ Sentry bridge — `logger.error` 호출이 자동 Sentry 캡처 (30~45m)
-- **CI Node 24 전환** — `actions/*@v4` → `@v5` (2026-06-02 전, 10~15m)
-- **NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입** — 브라우저 preview/prod 구분 (Stage 2 진입 전, 30~45m)
+- **디자인 폰트 전역 교체**: Geist → Pretendard + DM Sans (디자인 시스템 v2 완전 준수, ~20m)
+- **CI Node 24 전환**: `actions/*@v4` → `@v5` (2026-06-02 전, 10~15m)
+- **NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입**: 브라우저 preview/prod 구분 (Stage 2 진입 전, 30~45m)
+- **`proxy-client.ts` ESLint no-restricted-imports 규칙**: proxy 외 import 강제 차단 (~15m)
 
 ### 그 외 대기 중
 
-- **Epic 0-B-Post (0006)**: RLS 정책 — Auth 완료 후에만 의미 있음
 - **gitleaks 오탐 선제 정리**: `env-template.md` 의 `sk-ant-xxxxx` 등을 `<placeholder>` 각괄호로 통일 (보안 리뷰 부가 제안, CI 통과 중이라 우선순위 낮음)
+- **gitleaks pre-commit hook 설치**: 팀 확장 전 (sec-reviewer M3, 여전히 backlog)
+- **Task 0-D-1 Supabase Dashboard 수동 확인 1건**: Jayden 본인 `hidream72@gmail.com` 레코드 Users 테이블 생성 여부 (30초)
 
 ## 차단 요소
 
-**없음** — 경로 β 는 Jayden 이 Google OAuth Client 발급하면 해금. 나머지 경로 즉시 시작 가능.
+**없음** — 모든 경로 즉시 시작 가능. 경로 α (RLS) 를 경로 γ (Phase 1) 전에 반드시 완료 권장.
 
 ## 완료한 Task (누적)
 
@@ -143,6 +203,8 @@
 - [x] **Task 0-F-3: 환경 분리 문서 (environments.md + ADR-008) + SENTRY_ENVIRONMENT end-to-end + DATABASE_URL optional 전환 (독립 리뷰 MEDIUM 4건 반영)**
 - [x] **Task 0-F-4: 모듈 README 골격 (core/config 보완 + db/logging/observability 신규, 독립 리뷰 3건 반영)**
 - [x] "리뷰" = code+security 병렬 규칙 메모리 저장 (`feedback_review_dual_agents.md`)
+- [x] **Task 0-E-5: logger ↔ Sentry bridge + redact 단일 출처 (독립 리뷰 2라운드, MEDIUM 7 + LOW 2 반영)**
+- [x] **Task 0-D-1: Google OAuth + Next 16 proxy 세션 게이트 + isSafeNextPath 단일 출처 (독립 리뷰 2라운드, 옵션 X 5건 반영, Playwright E2E 9/9)**
 
 ## 세션 이력
 
@@ -153,8 +215,9 @@
 - 2026-04-17 (심야): Epic 0-E 완결 (4/4 Task) + 독립 리뷰 2회 + 커밋 4건 + 교훈 3건
 - 2026-04-17 (후속): Epic 0-F 50% (2/4 Task) — 0-F-2 CI + 0-F-1 ADR 5종 + 교훈 1건
 - **2026-04-17 (마감): Epic 0-F 100% 완결 — 0-F-3 환경 분리 + 0-F-4 모듈 README + 독립 리뷰 4회 (MEDIUM 7건 반영) + 커밋 2건 + 교훈 2건 + 메모리 1건**
+- **2026-04-17 (야간): Task 0-E-5 + Task 0-D-1 — logger↔Sentry bridge 완결 + Google OAuth 첫 로그인 흐름 + Playwright E2E 자동화 도입 + 교훈 2건 (Next16 proxy 리네임 / server-only 금지)**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-17 마감 (Epic 0-F 100% 완결, Phase 0 유지보수 기반 확립)
+- 날짜: 2026-04-17 야간 (Task 0-E-5 + Task 0-D-1 완료, 첫 로그인 흐름 가동)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)

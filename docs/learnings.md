@@ -328,3 +328,47 @@ behavior: behaviorSchema.default(behaviorSchema.parse({})),
 - **`instrumentation-client.ts` 의 제약 주석 필수**: 브라우저 특성 모르는 후임 기여자가 "왜 여기만 fallback 이 다른가" 의심할 때 즉시 답 제공.
 
 ---
+
+### 2026-04-17 Next.js 16 에서 middleware → proxy 리네임 + src/ 레이아웃은 src/proxy.ts 필수 (설계 결정 / AI 이탈 방지)
+
+**증상**: Task 0-D-1 (Supabase Google OAuth) Plan 을 `middleware.ts` 기준으로 작성했으나 실행 직전 재평가 시 `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/` 에 `middleware.md` 가 없고 `proxy.md` 만 존재함을 발견. 또한 루트에 `proxy.ts` 를 두면 Next.js 가 인식하지 못하여 redirect 가 동작하지 않음 (로그에 `proxy.ts:` 타임 미출력). `src/proxy.ts` 로 이동 후 정상 감지.
+
+**원인**: Next.js 16 에서 2 가지 파일 컨벤션 변경이 동시에 발생했으나 어디에도 "breaking" 이라고 강조 표시되지 않음 (단순 "renamed / deprecated" 표현).
+
+1. `middleware.ts` → `proxy.ts` 리네임 (함수명·타입명도 `middleware`/`NextMiddleware` → `proxy`/`NextProxy`)
+2. `src/` 디렉토리 레이아웃을 쓰는 프로젝트는 파일을 **반드시 `src/proxy.ts`** 에 둬야 감지 (docs 에 "or inside `src` if applicable" 로 기술). 루트 `proxy.ts` 는 `src/` 프로젝트에서는 조용히 무시됨 — `next dev` 에러 없음, 단순히 실행되지 않을 뿐이라 원인 특정이 까다로움.
+
+training data 는 `middleware.ts` 기준이고 Supabase SSR 공식 가이드도 아직 `middleware.ts` 예시를 보여준다. AGENTS.md 가 이미 "This is NOT the Next.js you know" 로 경고했으나 이 구체 변경은 실 구현 단계에서만 드러남.
+
+**해결**: Plan 단계에서 코드 작성 전 `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/` 확인 → `proxy.md` 발견. Plan 수정안을 Jayden 에게 즉시 보고·승인 받은 후 진행. 파일 위치는 실제 구현 중 dev server 로그에서 `proxy.ts:` 타임이 안 찍히는 걸 보고 `src/` 로 이동.
+
+**규칙** ⭐:
+
+- **AGENTS.md 의 "This is NOT the Next.js you know" 경고는 실제**. Next.js 관련 구현 시작 전 **반드시** `node_modules/next/dist/docs/` 에서 해당 파일 컨벤션·API reference 를 먼저 확인. training data 우선 사용은 금지.
+- Next.js 파일 컨벤션 확인 경로: `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/` — `middleware.md` 없으면 `proxy.md` 같은 대체 명칭 검색.
+- **`src/` 레이아웃 프로젝트는 Next.js 특수 파일도 `src/` 안에**: `src/proxy.ts`, `src/middleware.ts` (레거시), `src/instrumentation.ts` 등. 루트 두면 조용히 무시 가능.
+- **dev server 로그에 `<file>.ts: <ms>` 타임이 찍히는지로 감지 여부 판단**. 안 찍히면 Next.js 가 해당 파일을 인식하지 못하는 것. HMR 에러 안 나는 "조용한 실패" 에 속지 말 것.
+- Supabase/외부 라이브러리 가이드의 예시 코드는 **항상 프레임워크 최신 버전에 맞춰 재검증**. SDK 가이드는 보통 구 Next 버전 기준. 파일명·함수명만 최신 컨벤션 (`proxy`/`NextProxy`) 으로 치환.
+- **실행 직전 재평가를 Plan 승인 후에도 멈추지 않는 단계로 운영**. Plan 에 "실행 직전 재평가 체크포인트" 섹션을 내장하고, 발견 시 즉시 Plan 수정안 제시.
+
+---
+
+### 2026-04-17 Next 16 proxy 런타임에서 import "server-only" 금지 (기술 이슈)
+
+**증상**: `src/core/db/proxy-client.ts` (proxy 전용 Supabase client) 상단에 `import "server-only";` 추가 후 dev server 가동 → 모든 요청이 `TypeError: adapterFn is not a function` 으로 404 반환. 에러 스택은 `.next/dev/server/middleware.js:4:3` 로 이어지지만 원인 라인이 압축되어 직관적 추적 불가. `proxy.ts:` 타임은 로그에 찍혀 (proxy 자체는 감지됨) 파일 위치 문제가 아닌 런타임 문제임을 확인.
+
+**원인**: Next.js 16 의 proxy 런타임 (middleware 후속) 에서 `"server-only"` 패키지가 resolve 되지 못함. 해당 패키지는 Server Component / Route Handler / Server Action 용으로 설계됐고, proxy 번들은 이를 지원하지 않는 것으로 보인다. 명시적 error 메시지가 없어 `adapterFn` 초기화 시점에 호출부가 `undefined` 로 떨어지는 방식.
+
+기존에 `src/core/db/client-server.ts` 에 `"server-only"` 가 정상 동작하는 것을 보고 `proxy-client.ts` 에도 당연히 되리라 가정한 것이 화근. client-server 는 Server Component/Action 컨텍스트, proxy-client 는 proxy runtime — **실행 컨텍스트가 다름에도 같은 가드를 쓸 수 있다고 오해**.
+
+**해결**: `proxy-client.ts` 에서 `import "server-only";` 제거. proxy 파일 자체가 Next.js 내부에서 서버 전용 번들로 처리되고 클라이언트 번들에는 절대 포함되지 않으므로 가드 원천 불필요. 파일 상단에 "server-only 재추가 금지" 주석 + 근거 + 오용 방지 가이드 기록 (ESLint no-restricted-imports 규칙화는 별도 Task).
+
+**규칙** ⭐:
+
+- **proxy.ts 및 그 의존 모듈에서 `import "server-only"` 금지**. proxy 번들은 해당 패키지를 resolve 하지 못해 `adapterFn is not a function` 크래시.
+- **`"server-only"` 가드의 적용 범위는 Server Component / Route Handler / Server Action** — proxy/middleware 에는 쓰지 않음. proxy 파일 자체가 서버 전용 번들로 처리되므로 가드 중복.
+- "proxy 전용" 모듈은 파일명에 `proxy-` 접두사를 붙여 구분하고, **주석으로 "`proxy.ts` 외에서 import 금지" 명시**. guard 없이도 오용 방지 — 추후 ESLint `no-restricted-imports` 로 강제.
+- **`adapterFn is not a function` 에러를 만나면 가장 먼저 의심할 것**: (1) `"server-only"` import 체인, (2) Edge runtime 전용 API 를 Node 에서 호출, (3) `async` default export 가 아닌 다른 형태. 스택의 `.next/dev/server/middleware.js:4:3` 위치는 힌트가 되지 못함.
+- 실행 컨텍스트가 다른 유사 모듈을 만들 때 **"당연히 같은 패턴이 통하리라" 는 가정 금지** — Server Component / Server Action / Route Handler / Proxy / Edge / Client 각각 제약이 다름. 기존 파일 복붙 대신 해당 런타임의 공식 예시 우선 확인.
+
+---
