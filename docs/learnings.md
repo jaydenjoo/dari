@@ -233,3 +233,39 @@ behavior: behaviorSchema.default(behaviorSchema.parse({})),
 - **절차**: (1) 공식 가이드대로 최초 설정 → (2) 설치·실행 로그 확인 → (3) 최신 권고 감지 시 즉시 전환 → (4) 테스트 재통과 + 이득 측정값 기록.
 
 ---
+
+### 2026-04-17 독립 code-reviewer 를 통한 보안 사각 발견 (설계 결정)
+
+**증상**: Task 0-E-2 (Pino logger) 와 Task 0-E-3 (Sentry beforeSend) 양쪽에서 Writer(주 컨텍스트) 가 놓친 CRITICAL 2건씩, MEDIUM 4건씩을 독립 reviewer 가 발견. 예: Pino 의 REDACT_PATHS 가 `serviceRoleKey`/`accessToken`/`x-api-key` 등 16개 중 다수 누락, Sentry 의 beforeSend 가 `event.user`/`event.breadcrumbs[].data`/`event.request.query_string` 3대 PII 경로 미커버.
+
+**원인**: Writer 는 자신이 작성한 코드의 "설계 가정" 을 당연시함 — "redact 은 필요한 건 다 넣었다" / "beforeSend 는 extra/contexts/request.data 만 훑으면 충분". 같은 컨텍스트 안의 self-review 는 자기 전제를 의심하지 못함. 편향 회피에는 외부 시선 구조적으로 필요.
+
+**해결**: Claude Code 의 `code-reviewer` 서브에이전트로 독립 리뷰 위임. 주 컨텍스트와 격리된 별도 세션에서 리뷰어가 파일을 처음 읽고 판단. 프롬프트에 (1) 프로젝트 3대 우선순위, (2) 🔴 보안 등급, (3) 리뷰 관점 우선순위 목록, (4) "놓칠 가능성 있는 경로" 체크리스트를 명시 → CRITICAL/MEDIUM/NITS/GOOD 분류된 구조화 리포트 받음.
+
+**규칙** ⭐:
+
+- **🔴 보안 등급 프로젝트의 보안/관찰성/인증/결제 Task 는 구현 직후 독립 리뷰 필수**. 🟡/🟢 는 선택적.
+- **리뷰 프롬프트는 "무엇을 놓쳤을 것인가"를 구체적으로 명시**. "리뷰해주세요" 같은 일반 요청은 피상적 피드백만 받음. 누락 가능한 경로·필드·케이스 목록을 프롬프트에 포함해 Reviewer 의 탐색 방향 유도.
+- **리뷰어가 "커밋 비권장" 판정 시 즉시 수정 → 재검증 → 커밋**. 일단 커밋하면 follow-up PR 비용은 기하급수적. 지금이 최저 비용.
+- **CRITICAL 은 사실상 100% 수용. MEDIUM 은 🔴 프로젝트라면 기본 채택**. NITS 는 시간 여유에 따라.
+- **절차**: 구현 → 기본 검증(test/tc/build) → 독립 리뷰 → CRITICAL+MEDIUM 수정 → 재검증 → 커밋. 리뷰 누락은 "빨리 갔다가 나중에 2배로 되돌아가기" 전형.
+
+---
+
+### 2026-04-17 env.ts 누락은 "첫 사용 라우트" 추가 시에만 드러남 (기술 이슈)
+
+**증상**: Task 0-E-4 빌드에서 `❌ 환경변수 검증 실패 (서버): NEXT_PUBLIC_SUPABASE_ANON_KEY: [ 'Invalid input: expected string, received undefined' ]` → 빌드 실패. 그런데 이전 4번의 빌드(Task 0-E-1 ~ 0-E-3)는 동일한 env 상태에서 모두 통과했음. 5번째 빌드에서만 실패.
+
+**원인**: env.ts 는 모듈 로드 시점 `parseEnv()` throw 설계 (fail-fast). 하지만 모듈은 **실제 import 되어야 실행됨**. 프로젝트 내 env.ts 를 import 하는 경로는 Supabase 클라이언트 3종(`client-server.ts`, `client-admin.ts`, `client-browser.ts`) 뿐. 이들이 page.tsx/layout.tsx 에 아직 연결되지 않은 상태 → Next.js build 의 "Collecting page data" 단계에서 env.ts 코드가 **결코 실행되지 않음** → env 미설정이 눈에 띄지 않음. `/api/health` 의 `route.ts` 가 `createClient()` 호출 → `client-server.ts → env.ts` 체인을 빌드 시점에 최초 로드 → 미설정 드러남.
+
+**해결**: Jayden 이 `.env.local` 에 즉시 추가. 빌드 재시도 통과 → dev server → curl /api/health → HTTP 200 확인.
+
+**규칙** ⭐:
+
+- **빌드 성공 ≠ env 완전성 증명**. 라우트가 적은 초기 단계일수록 위험 — env 체인이 로드되는 경로가 없으면 검증도 돌지 않는다.
+- **fail-fast env 검증 설계를 채택할 때는 "검증이 실제로 실행되는지" 함께 확인**. 검증 로직이 있어도 로드되지 않으면 **죽은 코드**.
+- **조기 감지 장치**: (a) CI 에 `npm run build` 필수 포함, (b) 가장 의존성 많은 모듈을 import 하는 **최소 스모크 엔드포인트**(`/api/health` 같은)를 초기에 배선, (c) env 스키마 vs `.env.local` 키 자동 비교 스크립트.
+- **새 프로젝트 초기 체크리스트**: 첫 커밋 직후 "env.ts 에 선언된 모든 키가 `.env.local` 에 실제 값으로 존재하는가" 를 수동 점검. 비어있는 placeholder 는 `min(20)` 같은 Zod 제약을 통과하지 못한다.
+- **Claude 는 `.env*` 파일 읽기/쓰기 권한 없음** — env 디버깅은 항상 Jayden 에게 명시적 확인 요청 (이 규칙은 앞선 교훈 "Write 도구가 `.env*` 파일 생성 차단" 과 동일 맥락).
+
+---
