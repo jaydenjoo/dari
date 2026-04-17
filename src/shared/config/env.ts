@@ -33,7 +33,9 @@ const serverSchema = clientSchema.extend({
     .default("development"),
 
   // ─── Database (Supabase Postgres) ───
-  DATABASE_URL: z.string().url(),
+  // migration CLI 전용 — 앱 런타임은 @supabase/ssr 만 사용 (ADR-002).
+  // 런타임에 참조되지 않으므로 optional. Vercel Preview/Prod 에도 등록 불요.
+  DATABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
 
   // ─── AI Providers ───
@@ -46,6 +48,9 @@ const serverSchema = clientSchema.extend({
 
   // ─── Observability (dev에서는 선택) ───
   SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z
+    .enum(["development", "preview", "production"])
+    .optional(),
 
   // ─── Crawling (Firecrawl, 실패 시 cheerio 폴백) ───
   FIRECRAWL_API_KEY: z.string().optional(),

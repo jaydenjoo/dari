@@ -27,7 +27,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<paste-anon-key-from-supabase-dashboard>
 # 서버 전용 — 절대 클라이언트에 노출 금지
 SUPABASE_SERVICE_ROLE_KEY=<paste-service-role-key-from-supabase-dashboard>
 
-# Drizzle 마이그레이션용 (Settings → Database → Connection string → URI)
+# supabase CLI (migration) 전용 — 앱 런타임 불요 (Drizzle 미사용, ADR-002)
+# 로컬 `supabase db push` 실행 시만 필요. Vercel 환경변수에 등록 불요.
 DATABASE_URL=postgresql://postgres:[PASSWORD]@db.xxxxx.supabase.co:5432/postgres
 
 # ─── AI Providers ───
@@ -46,6 +47,8 @@ UPSTASH_REDIS_REST_TOKEN=AXxxxxx
 # Sentry: https://sentry.io → Project → Settings → Client Keys (DSN)
 SENTRY_DSN=https://xxxxx@oXXXXX.ingest.sentry.io/XXXXX
 NEXT_PUBLIC_SENTRY_DSN=https://xxxxx@oXXXXX.ingest.sentry.io/XXXXX
+# Sentry 환경 태그 — local/preview/prod 구분 (환경별 값: docs/environments.md §7)
+SENTRY_ENVIRONMENT=development
 
 # ─── 웹 크롤링 (선택 — 미설정 시 cheerio 폴백) ───
 # Firecrawl: https://www.firecrawl.dev/
@@ -56,19 +59,53 @@ FIRECRAWL_API_KEY=fc-xxxxx
 
 ## 🔑 각 키 발급처 요약
 
-| 변수                            | 어디서?                                                   | 필수?       | 참고                         |
-| ------------------------------- | --------------------------------------------------------- | ----------- | ---------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase Dashboard → Settings → API → Project URL         | ✅          | Phase 0-B에서 발급           |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | 같은 페이지 → `anon` `public` 키                          | ✅          | 브라우저 노출 OK             |
-| `SUPABASE_SERVICE_ROLE_KEY`     | 같은 페이지 → `service_role` `secret` 키                  | ✅          | ⚠️ 절대 클라이언트 노출 금지 |
-| `DATABASE_URL`                  | Dashboard → Settings → Database → Connection string → URI | ✅          | 비밀번호 치환 필요           |
-| `ANTHROPIC_API_KEY`             | https://console.anthropic.com/                            | ✅          | `sk-ant-`로 시작             |
-| `GOOGLE_GENERATIVE_AI_API_KEY`  | https://aistudio.google.com/apikey                        | ✅          | Gemini 임베딩용              |
-| `UPSTASH_REDIS_REST_URL`        | https://console.upstash.com/ → DB 생성 → REST 탭          | ✅          | Rate limit용                 |
-| `UPSTASH_REDIS_REST_TOKEN`      | 같은 페이지                                               | ✅          |                              |
-| `SENTRY_DSN`                    | https://sentry.io → 프로젝트 생성 → Client Keys           | 🟡 dev 선택 | 프로덕션 권장                |
-| `NEXT_PUBLIC_SENTRY_DSN`        | 동일 (클라이언트용)                                       | 🟡 dev 선택 |                              |
-| `FIRECRAWL_API_KEY`             | https://www.firecrawl.dev/                                | 🟡 선택     | 미설정 시 cheerio 폴백       |
+| 변수                            | 어디서?                                                   | 필수?       | 참고                             |
+| ------------------------------- | --------------------------------------------------------- | ----------- | -------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase Dashboard → Settings → API → Project URL         | ✅          | Phase 0-B에서 발급               |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | 같은 페이지 → `anon` `public` 키                          | ✅          | 브라우저 노출 OK                 |
+| `SUPABASE_SERVICE_ROLE_KEY`     | 같은 페이지 → `service_role` `secret` 키                  | ✅          | ⚠️ 절대 클라이언트 노출 금지     |
+| `DATABASE_URL`                  | Dashboard → Settings → Database → Connection string → URI | 🟡 CLI only | 로컬 migration 시만, 런타임 불요 |
+| `ANTHROPIC_API_KEY`             | https://console.anthropic.com/                            | ✅          | `sk-ant-`로 시작                 |
+| `GOOGLE_GENERATIVE_AI_API_KEY`  | https://aistudio.google.com/apikey                        | ✅          | Gemini 임베딩용                  |
+| `UPSTASH_REDIS_REST_URL`        | https://console.upstash.com/ → DB 생성 → REST 탭          | ✅          | Rate limit용                     |
+| `UPSTASH_REDIS_REST_TOKEN`      | 같은 페이지                                               | ✅          |                                  |
+| `SENTRY_DSN`                    | https://sentry.io → 프로젝트 생성 → Client Keys           | 🟡 dev 선택 | 프로덕션 권장                    |
+| `NEXT_PUBLIC_SENTRY_DSN`        | 동일 (클라이언트용)                                       | 🟡 dev 선택 |                                  |
+| `SENTRY_ENVIRONMENT`            | 직접 설정 (`development`/`preview`/`production`)          | 🟡 dev 선택 | Sentry UI 환경 구분용            |
+| `FIRECRAWL_API_KEY`             | https://www.firecrawl.dev/                                | 🟡 선택     | 미설정 시 cheerio 폴백           |
+
+---
+
+## 🌍 환경별 값 차이 (local / preview / prod)
+
+**요약**: 위 복사용 블록은 **`local` 전용**. `preview` + `prod` 값은 Vercel Dashboard Env UI 에 등록한다.
+운영 전략·이행 로드맵은 [environments.md](./environments.md) 참조.
+
+| 변수                            | `local`                 | `preview`                  | `prod`                    |
+| ------------------------------- | ----------------------- | -------------------------- | ------------------------- |
+| `NODE_ENV`                      | `development`           | `production` (Vercel 자동) | `production`              |
+| `NEXT_PUBLIC_APP_URL`           | `http://localhost:4000` | `$VERCEL_URL` (자동 주입)  | `https://dairect.kr`      |
+| `NEXT_PUBLIC_SUPABASE_URL`      | dari-dev URL            | dari-dev URL (공유)        | **dari-prod URL**         |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dari-dev 키             | dari-dev 키                | **dari-prod 키**          |
+| `SUPABASE_SERVICE_ROLE_KEY`     | dari-dev 키             | dari-dev 키                | **dari-prod 키**          |
+| `DATABASE_URL`                  | (선택, CLI 용)          | ❌ 불필요                  | ❌ 불필요 (로컬 CLI only) |
+| `ANTHROPIC_API_KEY`             | 개인 개발 키            | 개인 개발 키               | **프로덕션 키**           |
+| `GOOGLE_GENERATIVE_AI_API_KEY`  | 개인 개발 키            | 개인 개발 키               | **프로덕션 키**           |
+| `UPSTASH_REDIS_REST_URL/TOKEN`  | dari-dev Redis          | dari-dev Redis             | **dari-prod Redis**       |
+| `SENTRY_ENVIRONMENT`            | `development`           | `preview`                  | `production`              |
+| `FIRECRAWL_API_KEY`             | (선택)                  | 개인 개발 키               | **프로덕션 키**           |
+
+> 🚨 **절대 공유 금지**: AI 키·Redis·Supabase 는 **환경별로 반드시 분리**. prod 키를 local 에서 쓰면 비용 폭발, 반대면 개발 실수가 prod 데이터를 오염.
+
+### Vercel 환경변수 등록 팁
+
+Vercel Dashboard → Project → Settings → Environment Variables 에서 각 변수당 **3개 체크박스** 제공:
+
+- `dari-prod` 키 → **Production 만** 체크 (preview 노출 금지)
+- `dari-dev` 키 → **Preview + Development** 체크
+- 공유 키 (Sentry DSN 등) → 3개 모두 체크 가능
+
+자세한 절차: [environments.md §4-1](./environments.md)
 
 ---
 

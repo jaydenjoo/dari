@@ -11,6 +11,10 @@ import { beforeSend } from "./src/core/observability/beforeSend";
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
 const IS_DEV = process.env.NODE_ENV === "development";
 
+// NOTE: 브라우저 번들에는 `NEXT_PUBLIC_*` 접두사 없는 env 가 주입되지 않음.
+// 따라서 `SENTRY_ENVIRONMENT` 는 서버/엣지에서만 구분되고, 브라우저 측은
+// NODE_ENV 기반으로만 분류된다 (preview 와 prod 가 동일하게 production).
+// 상세: docs/environments.md §7
 if (dsn) {
   Sentry.init({
     dsn,
