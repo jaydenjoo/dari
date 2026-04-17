@@ -56,13 +56,15 @@
 
 ## 인덱스
 
-| #                                        | 제목                           | 상태     | 작성일     |
-| ---------------------------------------- | ------------------------------ | -------- | ---------- |
-| [000](./ADR-000-index.md)                | ADR 시스템 도입                | Accepted | 2026-04-17 |
-| [001](./ADR-001-nextjs-16-app-router.md) | Next.js 16.2 + App Router 채택 | Planned  | -          |
-| [002](./ADR-002-supabase-drizzle.md)     | Supabase + Drizzle ORM 조합    | Planned  | -          |
-| [003](./ADR-003-config-jsonb.md)         | Config JSONB 저장 방식         | Planned  | -          |
-| [004](./ADR-004-preact-shadow-dom.md)    | Widget: Preact + Shadow DOM    | Planned  | -          |
-| [005](./ADR-005-plugin-interfaces.md)    | Plugin 인터페이스 설계         | Planned  | -          |
+| #                                        | 제목                                         | 상태     | 작성일     |
+| ---------------------------------------- | -------------------------------------------- | -------- | ---------- |
+| [001](./ADR-001-nextjs-16-app-router.md) | Next.js 16.2 + App Router + Turbopack        | Accepted | 2026-04-17 |
+| [002](./ADR-002-supabase-ssr.md)         | Drizzle 제외, @supabase/ssr 일원화           | Accepted | 2026-04-17 |
+| [003](./ADR-003-config-jsonb.md)         | Config jsonb 저장 + types 수동 유지          | Accepted | 2026-04-17 |
+| [004](./ADR-004-preact-shadow-dom.md)    | Widget: Preact + Shadow DOM                  | Planned  | -          |
+| [005](./ADR-005-plugin-interfaces.md)    | Plugin 인터페이스 설계                       | Planned  | -          |
+| [006](./ADR-006-observability-stack.md)  | 관찰성 스택: Pino + Sentry + sensitiveFields | Accepted | 2026-04-17 |
+| [007](./ADR-007-testing-strategy.md)     | 테스트 전략: Vitest + Playwright 보류        | Accepted | 2026-04-17 |
 
-> **Planned**: 해당 Epic 진행 시 작성 예정
+> **Planned**: 해당 Epic 진행 시 작성 예정 (004 = Phase 1 위젯, 005 = Epic 0-G 플러그인)
+> **연관 문서**: [../testing-accounts.md](../testing-accounts.md) (ADR-007 기반 E2E 전략)
