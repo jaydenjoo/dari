@@ -12,10 +12,11 @@ import {
 } from "@/core/ratelimit/login-limiter";
 
 // 이메일/비밀번호 로그인 입력 스키마.
-// 비밀번호 최소 길이는 Supabase 기본 정책(6) 과 정합.
+// 비밀번호 최소 길이 8자 — OWASP 2025 권장 + 🟡 PII 프로젝트 기준.
+// Supabase Dashboard (Auth → Password Settings) 와 반드시 동기화.
 const passwordLoginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6).max(200),
+  password: z.string().min(8).max(200),
 });
 
 /**

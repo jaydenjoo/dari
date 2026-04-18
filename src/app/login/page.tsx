@@ -15,7 +15,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     "로그인 과정에서 필요한 정보를 받지 못했어요. 다시 시도해주세요.",
   auth_failed: "Google 로그인 중 문제가 생겼어요. 다시 시도해주세요.",
   oauth_init_failed: "로그인을 시작하지 못했어요. 잠시 후 다시 시도해주세요.",
-  invalid_input: "이메일 형식과 비밀번호(6자 이상)를 확인해주세요.",
+  invalid_input: "이메일 형식과 비밀번호(8자 이상)를 확인해주세요.",
   invalid_credentials: "이메일 또는 비밀번호가 올바르지 않아요.",
   too_many_attempts: "로그인 시도가 너무 잦아요. 잠시 후 다시 시도해주세요.",
 };
@@ -125,8 +125,8 @@ export default async function LoginPage({
                 type="password"
                 autoComplete="current-password"
                 required
-                minLength={6}
-                placeholder="6자 이상"
+                minLength={8}
+                placeholder="8자 이상"
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[15px] text-gray-900 placeholder-gray-400 transition outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />
             </div>
