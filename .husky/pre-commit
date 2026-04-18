@@ -1,0 +1,19 @@
+# Dari pre-commit hook — gitleaks (로컬 방어망, CI 에서 gitleaks-action 백업 동작)
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠️  gitleaks 미설치. brew install gitleaks 권장."
+  echo "   (CI 에서 gitleaks-action 이 백업 동작하므로 커밋은 통과)"
+  exit 0
+fi
+
+gitleaks protect --staged --no-banner --redact
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+  echo ""
+  echo "🚫 보안 경고: 스테이징된 파일에서 API 키/비밀번호/토큰 감지"
+  echo "   - .env 파일이 .gitignore 에 포함되어 있는지 확인"
+  echo "   - 실수로 키를 붙여넣었다면 해당 값 제거 후 재스테이징"
+  echo "   - 템플릿 값은 <angle-bracket-placeholder> 형식으로 작성"
+  exit 1
+fi
