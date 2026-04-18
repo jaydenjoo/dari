@@ -19,6 +19,9 @@ const eslintConfig = defineConfig([
     "src/components/ui/**",
     // vitest 커버리지 리포트 (빌드 artifact)
     "coverage/**",
+    // 위젯 번들 빌드 산출물 (scripts/build-widget.mjs 생성)
+    "public/widget.js",
+    "public/widget.js.map",
   ]),
   // underscore prefix 는 의도적 unused 관례 — no-unused-vars 에서 제외
   {

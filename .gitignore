@@ -50,3 +50,7 @@ docs/design-references/*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# widget bundle (scripts/build-widget.mjs 산출물)
+/public/widget.js
+/public/widget.js.map

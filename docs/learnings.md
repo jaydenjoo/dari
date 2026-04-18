@@ -32,6 +32,50 @@
 
 ## 기록
 
+### 2026-04-18 신규 보안 함수 3건 포함 위젯 번들 재리뷰에서 bypass 3건 추가 포착 (설계 결정)
+
+**증상**: Task 1-6-b 위젯 스캐폴딩 1차 리뷰(code + security 병렬)에서 9건을 일괄 반영한 뒤 Ship 직전 security 단독 재리뷰를 돌렸다. 차단급(CRITICAL)·HIGH 0 + 회귀 0 이었지만 MEDIUM 3건이 **신규 보안 함수 3종(`BOT_ID_PATTERN` / `sanitizeUserInput` / `extractKnownCode`)의 bypass 경로**로 포착됐다:
+1. `sanitizeUserInput` 의 C1 제어문자(`\x80-\x9F`) 미필터
+2. `sanitizeUserInput` 의 Unicode 방향 제어(U+202A-E) · isolate(U+2066-9) · BOM(U+FEFF) · Tag characters(U+E0000-7F) 미필터
+3. `config.ts` 의 `.trim()` 이 비ASCII 공백(NBSP/BOM/라인구분자) 을 놓쳐 `\uFEFFslug` 형태의 invisible DoS 가능
+
+**원인**: 보안 함수의 "정상 입력 보존 vs 공격 입력 차단" 트레이드오프는 1차 리뷰 시야에서 **현재 구현이 커버하는 범위**에 집중된다. "아직 커버 안 하는 범위의 공격 벡터"는 2차 관점에서야 탐지된다. 특히 LLM Prompt Injection 의 Unicode 층위(방향 제어, Tag chars)는 2024-2025 새 연구 결과라 일반 1차 리뷰 체크리스트에 미편입.
+
+**해결**:
+- `CONTROL_CHAR_RE` 를 `\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F` 로 확장 (C1 포함)
+- `UNICODE_CONTROL_RE` 신규 추가 (`[\u202A-\u202E\u2066-\u2069\uFEFF]|[\u{E0000}-\u{E007F}]` / `u` 플래그)
+- `config.ts` 에 `EXT_TRIM_RE` (일반 공백 + NBSP + BOM + 라인/단락 구분자 + 방향 제어 + isolate) 로 trim 확장
+- `widget.test.ts` 신규 14 케이스 — 정상 입력 보존 3 / C0 3 / C1 1 / 방향 4 / Tag 1 / 조합 3
+- 번들 4.1 → 4.4KB gzip (0.3KB 증가로 공격 표면 대폭 축소)
+
+**규칙** ⭐:
+
+- **신규 보안 함수 추가 시 반드시 security 단독 재리뷰 라운드** — "현재 구현 커버 범위" 외 bypass 탐색 전용 프롬프트로. 지난 Task(1-5-d SSRF IPv6, 1-6-a 차단급 M-1) 에 이은 세 번째 실증. 이제 **공식 절차** 로 편입.
+- **Unicode 사용자 입력 sanitize 체크리스트**: C0(0x00-1F) / DEL(0x7F) / C1(0x80-9F) / 방향 제어(U+202A-E) / isolate(U+2066-9) / BOM(U+FEFF) / Tag chars(U+E0000-7F) 층을 한 번에 제거. 정상 입력에 필요한 ZWSP(U+200B) / ZWNJ(U+200C) / ZWJ(U+200D) 는 제외(이모지 결합·폰트 처리).
+- **`.trim()` 은 보안 경계에 부족** — JavaScript 기본 `trim()` 이 비ASCII 공백(NBSP/BOM 등)을 전부 제거하지 않음. slug 처럼 ASCII 전제 필드는 명시적 확장 정규식 사용.
+- **sanitize 테스트는 "정상 입력 보존" 케이스 먼저** — 한글/이모지/개행이 깨지지 않는지부터 확인해야 실용성 유지. 공격 차단만 테스트하면 overfilter 회귀를 못 잡음.
+
+---
+
+### 2026-04-18 pnpm 은 `prebuild` 훅 미자동실행 — `&&` 체인 명시 필수 (기술 이슈)
+
+**증상**: Task 1-6-b 에서 Next 빌드 전에 위젯 번들을 선행 생성하려고 `package.json` 에 `"prebuild": "pnpm build:widget"` 훅을 넣었다. `pnpm build` 실행 시 훅이 **미호출**되어 `public/widget.js` 갱신이 안 됨. 첫 검증에서는 이전 호출 산출물이 public/ 에 남아 있어 "성공"처럼 보였으나, 삭제 후 재실행으로 함정 포착.
+
+**원인**: pnpm 7+ 부터 `pre*` / `post*` 스크립트는 **보안상 기본 비활성화** 되었다 (supply chain 공격 방어 — 악성 dep 이 `postinstall` 등으로 임의 실행되는 벡터 차단). npm/yarn 은 여전히 실행한다. `enable-pre-post-scripts=true` 로 켤 수는 있으나 전역 리스크 증가.
+
+**해결**:
+- `"build": "pnpm build:widget && next build"` 로 명시 체인 전환
+- `"prebuild"` 스크립트 제거
+- 모든 pipeline 관계는 `&&` / `;` 로 명시, 훅 의존 금지
+
+**규칙** ⭐:
+
+- **pnpm 프로젝트에서 `pre*` / `post*` 훅 의존 금지** — `prepare` (husky 등) 만 예외적으로 작동. 나머지는 명시 체인으로.
+- **산출물 선행 삭제로 빌드 체인 검증** — 빌드 스크립트 추가 후 반드시 `rm -f <산출물> && pnpm <chain>` 으로 파이프라인이 "정말로 생성하는지" 확인. 기존 산출물 잔존이 성공 착시를 만든다.
+- **빌드 스크립트 내부에서 이전 산출물 정리** — `unlink(outfile).catch(()=>{})` 한 줄로 dev 모드 산출물이 prod 빌드에 섞이는 경로(`.map` 파일 등) 완전 차단. `.gitignore` 만으로는 배포 파이프라인(Vercel 등) 에서 방어 불가.
+
+---
+
 ### 2026-04-17 계획 수립 시 3대 우선순위 명시적 검증 필요 (설계 결정)
 
 **증상**: 초기 마스터 플랜 v1.0은 기능 나열 중심이었으나, 안정성(P1) 40점으로 치명적 부실.

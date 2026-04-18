@@ -142,7 +142,9 @@ describe("checkRatelimit", () => {
     envMock.NODE_ENV = "production";
     const limiter = makeLimiter(async () => {
       // gitleaks:allow — synthetic 3-segment placeholder (not a real JWT)
-      throw new Error("invalid JWT: eyJfakeHdr.eyJfakePayload.fakeSignaturePart");
+      throw new Error(
+        "invalid JWT: eyJfakeHdr.eyJfakePayload.fakeSignaturePart",
+      );
     });
 
     await checkRatelimit(limiter, "k", { name: "t" });

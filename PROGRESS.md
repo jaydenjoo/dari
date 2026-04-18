@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 보안 보강 ✅** (옵션 D 일괄, 차단급 M-1 + N-1~N-6 모두 반영)
-- 상태: **Task 1-6-a 보안 보강 완료** (vitest 127 → 132, +5) / **이번 세션 변경 미커밋** / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Task 1-6-b `/widget.js` 번들** (~90분) 또는 **Task 1-6-c RAG** (~60분, Task 1-7 선행 필요)
+- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 보안 보강 ✅ + 1-6-b 번들 스캐폴딩 ✅** (1차 리뷰 9건 + 재리뷰 3건 반영)
+- 상태: **Task 1-6-b `/widget.js` 번들 완료** (vitest 132 → 182, +50 / 번들 4.4KB gzip) / **이번 세션 변경 미커밋** / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Jayden 브라우저 스모크 + 커밋** 후 **Task 1-6-c RAG** (Task 1-7 선행 필요) 또는 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분)
 
 ## 완료된 Epic
 
@@ -59,7 +59,82 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야 Ⅳ) 완료 내역 — Task 1-6-a 보안 보강 (옵션 A → 옵션 D 일괄)
+## 이번 세션(2026-04-18 심야 Ⅴ) 완료 내역 — Task 1-6-b `/widget.js` 번들 스캐폴딩
+
+### 흐름 (~180분)
+
+1. **Plan → Approve → Build** (Task 1-6-b 스캐폴딩 ~90분)
+   - 4 결정 포인트 2~3경로 비교표 (번들 서빙 / 격리 / UI 프레임워크 / 상태 영속)
+   - esbuild + Shadow DOM(closed) + Vanilla JS + localStorage 채택 → 번들 4.1KB gzip
+   - 신규 8 (scripts/build-widget.mjs + src/widget/{index,config,ui,widget,chat}.ts + {config,chat}.test.ts)
+   - 수정 3 (package.json build 체인 + eslint.config.mjs + .gitignore)
+2. **독립 리뷰 2 병렬** (code-reviewer + security-reviewer)
+   - code: CRITICAL 0 / HIGH 3 / MEDIUM 6 / LOW 4 / Fix-then-ship
+   - security: CRITICAL 0 / HIGH 2 / MEDIUM 6 / LOW 7 / Fix-then-ship
+   - 합의: sec H-2 + code M-1 (sourcemap 공개) 동일 건 합산
+3. **옵션 C 일괄 반영** (~45분) — 차단급 + HIGH + 선제 방어 9건
+   - sec H-2: `build-widget.mjs --sourcemap` 플래그, 기본 OFF (프로덕션 안전)
+   - sec H-1: `data-api-url` 제거 → `script.src` origin 고정 (공격자 redirect 차단)
+   - sec M-1: `BOT_ID_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/` + lowercase 정규화
+   - sec M-4: `sanitizeUserInput` (제어문자 사전 제거, Prompt Injection 얕은 층)
+   - sec M-6: `WidgetErrorCode` union + `KNOWN_ERROR_CODES` 화이트리스트 → 서버 내부 식별자 유출 차단
+   - code H-3: `submit()` try/finally → input lock 영구 고착 방지
+   - code M-2: `AbortController` → 패널 닫기/재submit 시 요청 취소 + `signal.aborted` 로 에러 UI 회피
+   - code M-4: `SendMessageResult.code` 를 `WidgetErrorCode` 로 좁힘
+   - code H-2: `botTitle` 하드코딩 → Task 1-6-d DariConfig 로더로 이월 명시
+4. **security 단독 재리뷰 1라운드** (~10분) — 신규 보안 함수 bypass 검증
+   - CRITICAL 0 / HIGH 0 (1차 반영 전부 통과, 회귀 없음)
+   - MEDIUM 3 신규 (C1 제어문자 / Unicode 방향 제어·Tag chars / 비ASCII 공백 trim)
+   - LOW 1 (CI 빌드 산출물 정리)
+5. **재리뷰 반영 즉시 일괄** (~15분) — Auto 모드 자율 판단
+   - sec M-α: `CONTROL_CHAR_RE` 확장 (`\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F` — C0 + DEL + C1)
+   - sec M-β: `UNICODE_CONTROL_RE` 추가 (`\u202A-\u202E\u2066-\u2069\uFEFF` + Tag chars `\u{E0000}-\u{E007F}`)
+   - sec M-γ: `EXT_TRIM_RE` (BOM/NBSP/라인구분자/방향제어 포함 확장 trim)
+   - sec LOW: `build-widget.mjs` 시작부에 `unlink(widget.js[.map])` 추가 (CI 오염 방어 마지막 한 겹)
+   - 신규 `widget.test.ts` 14 케이스 (정상 입력 보존 3 / C0 3 / C1 1 / Unicode 방향 4 / Tag 1 / 조합 3)
+
+### 신규 / 수정 파일 (이번 세션 누적)
+
+- **신규 9**: `scripts/build-widget.mjs` + `src/widget/{index,config,ui,widget,chat}.ts` + `src/widget/{config,chat,widget}.test.ts`
+- **수정 3**: `package.json` (build 체인 + build:widget/build:widget:dev + esbuild devDep) / `eslint.config.mjs` (public/widget.js* ignore) / `.gitignore` (public/widget.js* ignore)
+- **devDep +1**: `esbuild@^0.28.0`
+
+### 검증
+
+- **pnpm check**: tsc clean / lint 4 warning (기존 unused vars) / prettier clean / **vitest 132 → 182 (+50)**
+  - config.test 14 / chat.test 9 / widget.test 14 (신규) — 37 widget 관련
+  - 나머지 +13 은 기존 테스트 파일 변동 포함 누적 (factory/observability 등)
+- **pnpm build**: `build:widget && next build` 체인 clean
+  - 산출물: `public/widget.js` **13.0KB raw / 4.4KB gzip** (목표 15KB gzip 의 29%)
+  - `public/widget.js.map` 미생성 확인 (프로덕션 안전)
+- 브라우저 스모크: Jayden 로컬 `pnpm dev` 필요 (Auto 제약)
+
+### 주요 결정 / 교훈
+
+- **재리뷰의 가치 재실증 — 신규 보안 함수 bypass 3건 추가 포착** (지난 세션 "M-1 차단급 발견" 교훈의 변형 실증). 이번에는 차단급은 없었지만 C1/Unicode 방향 제어/비ASCII 공백 trim 우회 등 선제 방어 3건을 1차에서 못 잡고 재리뷰에서 포착. **신규 보안 함수 = 재리뷰 필수** 공식 확정.
+- **pnpm prebuild 훅 미지원 함정** — `prebuild` 스크립트가 npm 에서만 자동 실행. pnpm 에서는 `&&` 체인(`"build": "pnpm build:widget && next build"`) 으로 명시해야 안전. 첫 빌드에서 public/widget.js 가 이미 존재해 "성공"처럼 보였으나 삭제 후 재실행으로 포착.
+- **Shadow DOM closed + raw CSS 가 Tailwind 런타임 불가와 만남** — Tailwind 은 전역 스타일 시트라 Shadow DOM 내부에서 작동 안 함. CSS 변수/디자인 토큰(브랜드 컬러·2레이어 그림자·rounded radius)을 수동 이식하는 패턴 확립. 외부 사이트에 embed 되는 위젯은 **앞으로도 raw CSS 우선**.
+- **sourcemap 공개의 공격 정보량** — 공격자가 minify 전 소스 + 주석 + 에러 코드 전체를 확보. 기본 OFF + dev 전용 `build:widget:dev` 분리가 한 줄 cost 로 정보 노출 차단.
+- **Unicode 공격 표면의 층위** — C0 제어문자 / DEL / C1 제어문자 / Unicode 방향 제어 (U+202A-E) / isolate (U+2066-9) / BOM / Tag characters (U+E0000-7F) 로 층층이 존재. 한 번에 전부 필터하는 것이 비용보다 가치 큼 (실제 정상 입력에 포함되지 않음). ZWSP/ZWNJ/ZWJ 는 이모지 결합에 쓰이므로 제외.
+
+### learnings.md 추가 (+2, 총 42건)
+
+- 재리뷰 라운드의 가치 재실증 — 신규 보안 함수 3건 특화 재리뷰에서 C1/Unicode/trim 3건 추가 포착
+- Unicode 사용자 입력 sanitize 의 층위 체크리스트 (C0/DEL/C1/방향/isolate/BOM/Tag + ZW 계열 보존 원칙)
+
+### Backlog (다음 세션)
+
+- **🟡 0007 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` 트리거 활성화 (이전 세션 이월)
+- **이번 세션 변경 1 커밋** — 9 신규 + 3 수정 + devDep 추가
+- **Jayden 브라우저 스모크** — `pnpm dev` + 샘플 HTML 페이지에 `<script src="http://localhost:4000/widget.js" data-bot-id="…" async>` 삽입 → 플로팅 버튼/메시지 송수신/conversationId 영속 확인
+- **Task 1-6-c RAG 연결** (~60분, Task 1-7 지식 업로드 경로 선행)
+- **Task 1-6-d DariConfig 로더** — headerTitle/색상/아바타/인사말을 config.ui 로 주입 (botTitle 하드코딩 해소)
+- **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분, 이월) — 브라우저 Sentry preview/prod 분리
+- **Phase 2 backlog (이월)**: 스트리밍 응답 / 마크다운 렌더 + DOMPurify / CSS 파일 분리(code M-5) / smooth scroll / AbortSignal 취소 에러 별도 UX / Prompt Injection 서버 방어(Task 1-0-c) / `data-api-url` 재도입 필요 시 허용 origin 화이트리스트
+
+---
+
+## 직전 세션(2026-04-18 심야 Ⅳ) 완료 내역 — Task 1-6-a 보안 보강 (옵션 A → 옵션 D 일괄)
 
 ### 흐름 (~125분)
 
