@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: 1-5 봇 CRUD — Task 1-5-a 목록 ✅ / 1-5-b 생성 ✅ / **1-5-c 상세 ✅ 완료**
-- 상태: **Task 1-5-c 상세 페이지 완료 + PageBackground 추출로 도트 패턴 10→1 DRY** → 다음 경로 (**Task 1-5-d 편집 폼** — DariConfig 6섹션 UI, 또는 Task 0-D-6 proxy cookie 버그 / types.ts `__InternalSupabase` 근본 수정)
+- Epic: 1-5 봇 CRUD — 1-5-a 목록 ✅ / 1-5-b 생성 ✅ / 1-5-c 상세 ✅ / **1-5-d 편집 ✅ 완료** → **Epic 1-5 완결**
+- 상태: **Epic 1-5 봇 CRUD 완결 + 리뷰 재라운드(CRITICAL SSRF 차단) + types.ts 근본 + Task 0-D-6 proxy cookie 전파** → 다음 세션 **Task 1-0-a Rate Limit 인프라** (Phase 1 P1 안정성, ~1.5h)
 
 ## 완료된 Epic
 
@@ -45,8 +45,99 @@
   - 소프트 삭제 봇(`status='deleted'`) 접근 허용 명시 (휴지통/복구 UI 여지)
   - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
   - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
+- ✅ **Task 1-5-d (Epic 1-5 완결)**: /bots/[slug]/edit 편집 폼 + 5섹션 UI + RLS UPDATE 첫 실증
+  - 신규 13파일 (edit/actions/page/loading/error/form/field + 5 section + knowledge-placeholder + e2e)
+  - 3중 방어 + Mass Assignment 차단 (owner_id/slug/botId/knowledge.sources/allowedDomains 전부 폼 미수신)
+  - 독립 리뷰 2 에이전트 → 1차 반영 7건 (code H-1 allowedDomains / sec M-1 SSRF / sec M-3 에러 메시지 / sec L-1 fontFamily / sec L-2 timezone / sec L-3 trigger / code M-2 dead code)
+  - **재리뷰 CRITICAL 1건** — isSafeExternalWebhook IPv6 사설/mapped 대역 우회 즉시 차단 (ULA fc00::/7, link-local fe80::/10, `::ffff:10.0.0.1`). 회귀 방지 단위 테스트 +8 (SSRF 6 + timezone 2)
+  - 검증: **86/86 vitest** (78→86) / build clean / **16/16 E2E** (12→16)
+- ✅ **Task 0-D-6 (Epic 0-D 완전 종결)**: proxy redirect 시 refreshed 세션 쿠키 전파
+  - `redirectWithRefreshedCookies` helper — `updateSession` response.cookies → redirect response 복제
+  - 증상: redirect 시 새 JWT 쿠키 누락 → 다음 요청 세션 불인식 race
+- ✅ **types.ts 근본 수정 (`as never` / `.returns<>` 전면 제거)**
+  - `__InternalSupabase: { PostgrestVersion: "12" }` 슬롯 + 4 테이블 `Relationships: []`
+  - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
+  - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 밤) 완료 내역
+## 이번 세션(2026-04-18 심야) 완료 내역
+
+### Task 1-5-d — /bots/[slug]/edit 편집 폼 (Epic 1-5 완결)
+
+- **신규 13파일** (src 12 + e2e 1):
+  - `actions.ts` — Server Action updateBot (3중 방어 + RLS UPDATE + knowledge.sources/allowedDomains 보존)
+  - `page.tsx` / `loading.tsx` / `error.tsx` — 1-5-c 와 동일 패턴 (slug 선검증 + getUser + maybeSingle + 에러 메시지 일반화)
+  - `edit-bot-form.tsx` — sticky section nav + 6 SectionCard (controlled state)
+  - `field.tsx` — 공통 Field + inputClass/textareaClass/selectClass
+  - `identity / ai / behavior / appearance / analytics-section.tsx` — 5섹션 sub-components
+  - `knowledge-placeholder.tsx` — Phase 2 자리표시 (sourceCount 표시)
+  - `tests/e2e/bot-edit.spec.ts` — 4 spec (비로그인 / 본인 편집 / 타인 RLS / 잘못된 업무시간 입력 유지)
+
+### 리뷰 1차 반영 (7건)
+
+| 등급     | 항목                        | 변경                                                             |
+| -------- | --------------------------- | ---------------------------------------------------------------- |
+| code H-1 | allowedDomains 묵시 초기화  | actions.ts 에서 `preservedAllowedDomains` 보존                   |
+| sec M-1  | webhookUrl SSRF             | schema.ts `.refine(isSafeExternalWebhook)` (https/사설대역 차단) |
+| sec M-3  | Sentry 에 DB 에러 원문 누출 | page.tsx `throw new Error("봇 편집 조회 실패")` 일반화           |
+| sec L-1  | fontFamily CSS injection    | max(100) + regex `/^[\w\s,'-]+$/`                                |
+| sec L-2  | timezone IANA 미검증        | regex `/^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+){0,2}$/`                |
+| sec L-3  | handoff.trigger 길이        | max(200)                                                         |
+| code M-2 | SectionHeader dead code     | field.tsx 삭제                                                   |
+
+### 재리뷰 CRITICAL — IPv6 SSRF 우회 즉시 차단
+
+- code + security 두 에이전트 모두 지목
+- 1차 `isSafeExternalWebhook` 은 IPv4 점표기만 검사 → IPv6 사설 대역 (`fc00::/7`, `fe80::/10`) + IPv4-mapped IPv6 (`::ffff:10.0.0.1`) 통과 가능
+- Node.js `new URL("https://[::1]/").hostname` = `::1` vs `[::1]` 환경별 일관성 X → 브라켓 정규화 추가
+- 강화: `isPrivateIPv4` + `isPrivateIPv6` 분리, IPv4-mapped 파싱으로 우회 경로 차단
+- **회귀 방지 단위 테스트 +8** (정상 https / http거부 / IPv4 8종 / IPv6 8종 / 정상 공인 IPv6 / undefined / timezone IANA / timezone 비정상)
+- DNS rebinding 은 fetch 시점 dns.lookup 재검증 필요 — Phase 2 백로그 명시
+
+### Task 0-D-6 — proxy redirect cookie 전파
+
+- 증상: `NextResponse.redirect(url)` 은 빈 cookies — `updateSession` 이 refresh 한 JWT 쿠키가 클라이언트에 전달되지 않아 다음 요청 race
+- 수정: `redirectWithRefreshedCookies(url, response)` helper 추가, response.cookies.getAll() 을 redirect response 에 복제 (옵션/만료일 포함)
+- 두 redirect 분기 (로그인/비로그인) 모두 적용
+
+### types.ts 근본 수정
+
+- `__InternalSupabase: { PostgrestVersion: "12" }` 슬롯 + 4 테이블 `Relationships: []`
+- PostgrestVersion="12" 선택: postgrest-js feature-flags 의 v13+ 전용 기능 (SpreadOnMany/MaxAffected) 미사용 — 12 가 가장 보수적
+- `.returns<T[]>()` 4곳 제거 (bots/page.tsx, [slug]/page.tsx, edit/page.tsx, edit/actions.ts)
+- `as never` 2곳 제거 (bots/new/actions.ts, edit/actions.ts)
+
+### 검증 결과
+
+- `pnpm check`: tsc + eslint + prettier + **86/86 vitest** (78 → 86, +8 신규)
+- `pnpm build`: Turbopack clean, `/bots/[slug]/edit` Dynamic 등록
+- `pnpm test:e2e --workers=1`: **16/16 PASS** (smoke 1 + bots-list 4 + bot-create 3 + bot-detail 4 + **bot-edit 4**)
+
+### learnings.md 추가 (+5, 총 32건)
+
+- Zod 4.x `.default()` 는 undefined 입력에 정상 적용 (허위 양성 H-2 사건)
+- Phase 보안 위협을 schema 레이어에 선제 차단 (DariConfig 단일 진실 공급원)
+- Node.js URL hostname IPv6 브라켓 일관성 + IPv4-mapped 우회 (SSRF 재리뷰 CRITICAL)
+- `__InternalSupabase.PostgrestVersion` 슬롯 = supabase-js 타입 추론 활성화 열쇠
+- Next.js 16 proxy 의 `NextResponse.redirect()` 는 빈 cookies — refreshed 세션 쿠키 수동 전파 필수
+
+### Backlog (다음 세션)
+
+- **Task 1-0-a Rate Limit 인프라** (~1.5h) — Supabase SQL 기반 추천 (외부 의존 0, MVP 적합)
+- **Task 1-0-b CORS + allowedDomains 검증 미들웨어** (~45분) — Epic 1-6 위젯 직전
+- **Task 1-0-c Prompt Injection 방어** → Epic 1-6 (Chat API) 로 이관 확정
+- **Epic 1-6 위젯 런타임** (2~3 세션) — `/widget.js` + Chat API + RAG
+- **봇 관리 보조** — 삭제 UI / status 토글 / slug 변경 UI
+- **리뷰 미소화** (선택):
+  - `generateMetadata` 동적 title (1-5-c code M-1)
+  - error.tsx Sentry digest-only 전송 (1-5-c sec M-1)
+  - 동시 편집 Optimistic locking (1-5-d sec M-2, 다인 운영 진입 시)
+  - Collapse 시 값 reset UX (1-5-d code M-4)
+- **Phase 2 전 schema 강화**: DNS rebinding fetch 시점 검증 / 비십진 IPv4 정규화
+- **인프라**: CI Node 24 / gitleaks 오탐 / Pretendard·DM Sans 전역
+
+---
+
+## 직전 세션(2026-04-18 밤) 완료 내역
 
 ### Task 1-5-c — /bots/[slug] 상세 페이지 (Phase 1 사용자 흐름 닫기)
 

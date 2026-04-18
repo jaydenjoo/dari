@@ -645,3 +645,170 @@ security 리뷰 지적은 **이론상 타당** 했으나 (로그 파이프라인
 - redact 정책은 **단일 출처(SENSITIVE_FIELD_NAMES)** 로 관리. 필드 추가/제외 시 **근거 주석 필수** — "왜 이건 제외했나" 기록이 후속 리뷰 반복 차단의 핵심.
 
 ---
+
+### 2026-04-18 Zod 4.x `.default()` 는 undefined 입력에 정상 적용 (기술 이슈)
+
+**증상**: Task 1-5-d 의 code-reviewer 가 H-2 로 `fontFamily: optStr("appearance.fontFamily")` → Zod `z.string().default("Pretendard")` 조합에서 `undefined` 입력이 타입/런타임 에러 유발 가능성 제기. 비슷하게 `timezone`, `hours`, `offHoursMessage`, `handoff.trigger`, `fallbackMessage` 모두 의심 필드로 지목.
+
+**원인**: Zod v3 → v4 마이그레이션 시 `.default()` 동작이 바뀌었다는 근거 없이, 리뷰어가 보수적으로 "undefined = 타입 위반" 으로 가정. 실제 Zod 4.x 는 `"A default value is only applied when the input is undefined"` (공식 문서) 를 유지. 이미 `schema.test.ts` 의 "최소 입력" 테스트 (`dariConfigSchema.parse({...}).behavior.businessHours.timezone === "Asia/Seoul"`) 가 이 전제를 간접 검증하고 있었음 — 78/78 통과가 증거.
+
+**해결**: H-2 를 허위 양성으로 판정하고 코드 수정 대신 `buildConfigInput` 주석에 근거 한 줄 추가:
+
+```ts
+// empty string 인 optional 필드는 undefined 로 변환.
+// → Zod 4.x 의 `.default()` 는 `undefined` 입력에 default 를 정상 적용하므로
+//   `z.string().default("X")` 필드에 undefined 를 보내도 default("X") 로 채워진다.
+//   (참고: schema.test.ts 의 "최소 입력" 테스트가 이 전제를 검증함)
+```
+
+**규칙** ⭐:
+
+- **리뷰 제안을 받기 전에 "기존 테스트가 이미 검증 중인가?" 확인**. 통과 중인 테스트가 간접 증명이면 제안은 허위 양성 가능성 큼. 기계적 반영 전에 테스트 커버리지 확인.
+- **Zod `.default()` 동작 확정**: `undefined` 입력 시 default 적용. 키 자체가 없어도 동일. 즉 `optStr` 헬퍼가 `undefined` 반환해도 안전.
+- **허위 양성 판정 시 코드 주석으로 기록**. 다음 리뷰/유지보수자가 같은 의문 반복 방지. 설명은 "왜 괜찮은가" + "증거 위치(테스트 파일 경로)".
+- 라이브러리 동작에 대한 리뷰 제안은 **공식 문서 인용 + 기존 테스트 크로스체크** 로 판정. 추측성 의심에 기계적 반영은 오버엔지니어링.
+
+---
+
+### 2026-04-18 미래 Phase 보안 위협을 schema 레이어에 선제 차단 (설계 결정)
+
+**증상**: Task 1-5-d 독립 보안 리뷰에서 4건 발견 — `analytics.webhookUrl` SSRF 위험 / `fontFamily` CSS injection / `timezone` IANA 미검증 / `handoff.trigger` 길이 무제한. 모두 **Phase 1 에서는 실제 실행 경로 없음** (위젯 런타임이 Phase 2 에 도입 예정). "현재는 문제 없으니 넘어가자" vs "Phase 2 전 선제 차단" 사이에서 판단 필요.
+
+**원인**: "아직 사용 안 되니 나중에" 마인드는 Phase 2 런타임 코드가 실제로 값을 사용하기 시작한 시점에 급하게 막아야 하는 재공사를 만든다. 특히 `DariConfig` 는 **단일 진실 공급원 (SSOT)** 으로 이미 모든 엔드포인트·저장 경로가 통과하는 지점이라, schema 레이어에 제약을 얹는 것이 가장 적은 비용으로 가장 넓은 보호를 제공.
+
+**해결**: 네 건 모두 선제 차단.
+
+- `analytics.webhookUrl`: `.refine(isSafeExternalWebhook)` 로 https-only + IPv4/IPv6 사설 대역 차단
+- `fontFamily`: `.max(100) + regex /^[\w\s,'-]+$/` (CSS injection 방어)
+- `timezone`: `.regex(/^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+){0,2}$/)` (IANA 형식 + Etc/GMT+9 허용)
+- `handoff.trigger`: `.max(200)` (JSONB 크기 + 위젯 렌더링 방어)
+
+각 제약에 **"security L-X, Phase 2 런타임 전 선제 차단" 주석** 명시. 회귀 방지 단위 테스트 `analyticsSchema` / `businessHoursSchema` 블록 +8 케이스 추가.
+
+**규칙** ⭐:
+
+- **단일 진실 공급원(schema/config)에 보안 제약을 집중**시키는 것이 분산된 엔드포인트 검증보다 우수. 모든 저장 경로·로드 경로가 통과하므로 한 번의 수정으로 전 경로 보호.
+- **"현재 실행 안 된다" ≠ "나중에 막아도 된다"**. 실제 위협이 되는 시점 = 데이터가 이미 DB 에 존재하는 시점. 데이터 0건 + 사용 경로 X 시점이 선제 차단의 최저 비용 창. (2026-04-17 "데이터 0건 시점 리팩토링 최저 비용" 교훈의 보안 버전)
+- **선제 차단 코드에는 근거 주석 3종 필수**: (1) 어떤 공격을 막는가, (2) OWASP/CVE 참조, (3) Phase 2 의 어느 실행 경로에서 값이 쓰이는가. 미래 유지보수자가 "이 regex 왜 있지?" 고민할 때의 교과서.
+- **회귀 방지 테스트 동반**. 선제 차단은 "현재 실행 안 되는 코드" 라 쉽게 회귀함. `schema.test.ts` 블록 형태로 우회 시나리오 명시적 케이스화.
+
+---
+
+### 2026-04-18 Node.js URL hostname IPv6 브라켓 + IPv4-mapped 우회 (기술 이슈)
+
+**증상**: Task 1-5-d 재리뷰 CRITICAL — `isSafeExternalWebhook` 1차 구현이 IPv4 점표기(`10.0.0.1` 등)와 hostname blocklist(`localhost`, `127.0.0.1`, `::1`) 만 검사하면 **IPv6 우회 가능**:
+
+- `https://[fc00::1]/x` (ULA 사설)
+- `https://[fe80::1]/x` (link-local)
+- `https://[::ffff:10.0.0.1]/x` (IPv4-mapped IPv6 — 사설 IPv4 우회)
+- `https://[::ffff:7f00:1]/x` (16진 IPv4-mapped)
+
+추가로 Node.js URL 파싱이 `new URL("https://[::1]/").hostname` 을 `::1` 로 반환할지 `[::1]` 로 반환할지 **환경별 일관성 X** — blocklist 리터럴 매칭이 우회될 수 있음.
+
+**원인**: SSRF 방어 시 IPv4 만 생각하는 것이 흔한 함정. 현대 클라우드 (AWS VPC, K8s, Docker) 는 IPv6 내부 통신 사용 증가 + `::ffff:x.x.x.x` 형태의 IPv4-mapped 가 자동 생성 경로. 브라켓 처리 누락은 URL API 세부 스펙 차이를 무시한 결과.
+
+**해결**: `isPrivateIPv4` 와 `isPrivateIPv6` 를 분리하고 브라켓 정규화 선처리.
+
+```ts
+const raw = parsed.hostname.toLowerCase();
+const host = raw.replace(/^\[|\]$/g, ""); // 브라켓 제거 환경 일관화
+
+if (["localhost", "0.0.0.0"].includes(host)) return false;
+
+if (host.includes(":")) {
+  if (isPrivateIPv6(host)) return false; // ::1, fc__, fd__, fe8_~feb_, ::ffff:사설
+  return true;
+}
+
+if (isPrivateIPv4(host)) return false; // 127/10/192.168/172.16-31/169.254
+return true;
+```
+
+`isPrivateIPv6` 는 IPv4-mapped 파싱까지 수행 — `::ffff:(x.x.x.x)` 를 추출해 `isPrivateIPv4` 재호출. 회귀 방지 테스트 8 케이스 (정상/http거부/IPv4 사설 8종/IPv6 사설+mapped 8종/정상 공인 IPv6/undefined).
+
+**규칙** ⭐:
+
+- **SSRF 방어 체크리스트**: IPv4 사설 + IPv6 사설 + IPv4-mapped IPv6 + hostname 정규화(대소문자/브라켓) + 스킴 제한(https-only).
+- **URL API 의 `hostname` 필드는 플랫폼/버전별 IPv6 브라켓 처리 다름** — 항상 `.replace(/^\[|\]$/g, "")` 선처리 후 비교.
+- **DNS rebinding / 비십진 IPv4 표기 (8진/16진/단축) 는 schema 레이어로 완전 차단 불가** — fetch 시점 `dns.lookup()` 결과 재검증 필요. Phase 2 백로그로 이관하되 **명시적 주석** 으로 "schema 레이어 한계" 기록.
+- **재리뷰 필수 시점**: 신규 보안 함수(SSRF, auth, crypto)는 첫 구현 직후 **반드시 별도 리뷰 라운드** — 단순 유틸보다 우회 벡터가 다양해 1차 리뷰로 완전 커버 어려움.
+
+---
+
+### 2026-04-18 `__InternalSupabase.PostgrestVersion` 슬롯 = supabase-js 타입 추론 활성화 열쇠 (기술 이슈)
+
+**증상**: `src/core/db/types.ts` 를 수동 정의 (Epic 0-B 에서 자동 생성 대신 선택 — DariConfig·MessageSource 같은 구조 타입 정확도 보존 목적) 하면서 `supabase.from("bots").insert(payload)` 시 payload 타입이 `never` 로 좁혀져 TS2345 에러. `.returns<T[]>()` / `as never` 어셔션 회피가 전 프로젝트 6곳에 퍼짐.
+
+**원인**: postgrest-js v1.x 는 `Database` 타입에서 두 요소를 탐지해 Insert/Update payload 추론을 활성화한다.
+
+1. 최상위 `__InternalSupabase: { PostgrestVersion: string }` 슬롯 — `ClientServerOptions` 주입 경로
+2. 각 테이블의 `Relationships: GenericRelationship[]` 필드 — `GenericTable` 요구조건
+
+둘 중 하나라도 없으면 `GenericTable` 제약 불만족 → payload 타입이 `never` 로 fallback. `supabase gen types` 는 둘 다 자동 생성하지만, **수동 정의 시 문서화된 가이드 없음** → 쉽게 누락.
+
+**해결**: types.ts 최상위에 슬롯 + 4 테이블 모두에 빈 `Relationships: []` 추가.
+
+```ts
+export type Database = {
+  __InternalSupabase: {
+    PostgrestVersion: "12"; // postgrest-js feature-flags 12 = 가장 보수적
+  };
+  public: {
+    Tables: {
+      bots: {
+        Row: { ... };
+        Insert: { ... };
+        Update: { ... };
+        Relationships: []; // FK 정의 없으면 빈 배열
+      };
+      // ... conversations / messages / knowledge_chunks 동일
+    };
+    // ...
+  };
+};
+```
+
+PostgrestVersion="12" 선택 근거: postgrest-js `feature-flags.ts` 의 `SpreadOnManyEnabled`/`MaxAffectedEnabled` 가 13+ 에서만 활성화 → 현재 사용 안 함 → 12 가 가장 보수적·안전.
+
+슬롯 추가 후 `.returns<T[]>()` 4곳 + `as never` 2곳 전부 제거 가능. tsc/build/e2e 그대로 통과.
+
+**규칙** ⭐:
+
+- **supabase-js `Database` 타입을 수동 정의할 때 필수 2 요소**: (1) `__InternalSupabase.PostgrestVersion: "12"` (2) 각 테이블 `Relationships: []`. 누락 시 모든 INSERT/UPDATE 에서 `as never` 강제됨.
+- **`as never` 어셔션이 여러 곳에 반복되면 = 타입 정의 자체 결함 신호**. 회피 코드를 파일별로 붙이는 대신 근본 수정 우선 검토.
+- PostgrestVersion 은 **실제 Supabase 서버 버전 < postgrest-js feature 기대치** 의 보수적 값 선택. 미래 feature 사용 시점에 13+ 로 업그레이드.
+- 수동 정의 선택 근거는 `types.ts` 상단 주석에 명시 — Epic 1 이후 자동 생성 파이프라인 재평가 약속 유지.
+
+---
+
+### 2026-04-18 Next.js 16 proxy 의 `NextResponse.redirect()` 는 빈 cookies (기술 이슈)
+
+**증상**: Task 0-D-6 — proxy 에서 `updateSession` 이 세션 토큰 refresh 후 반환한 `response.cookies` 가 `NextResponse.redirect(url)` 생성 시 **전파되지 않음**. 결과: 로그인 직후 보호 라우트 접근 시 새 JWT 쿠키가 클라이언트로 안 가서 다음 요청에서 세션 만료 인식 → 재로그인 루프 또는 E2E worker 격리 race.
+
+**원인**: `NextResponse.redirect()` 는 **빈 cookies 를 가진 새 Response** 를 생성. `updateSession` 이 갱신한 response 는 closure 로 최신 cookies 를 보유하지만, redirect 분기에서 그 response 를 버리고 redirect 를 새로 만들면 cookies 가 누락. Supabase SSR 공식 가이드의 middleware 예시가 "redirect 안 하는 케이스만" 보여주는 숨겨진 함정.
+
+**해결**: helper 로 refreshed cookies 를 redirect response 에 복제.
+
+```ts
+function redirectWithRefreshedCookies(
+  url: URL,
+  refreshedResponse: NextResponse,
+): NextResponse {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of refreshedResponse.cookies.getAll()) {
+    redirect.cookies.set(cookie); // 옵션/만료일/secure 등 모두 복제
+  }
+  return redirect;
+}
+```
+
+모든 redirect 분기 (로그인→/, 비로그인→/login) 에서 일관되게 사용.
+
+**규칙** ⭐:
+
+- **Next.js 16 proxy (구 middleware) 의 redirect 분기는 cookies 를 수동 전파해야** session refresh 결과가 클라이언트에 도달한다. `NextResponse.redirect()` 는 cookies 불포함.
+- Supabase SSR 의 `updateSession` 패턴 사용 시 **redirect 시나리오 별도 처리 필수**. 공식 가이드 예시는 성공 경로만 커버 — redirect 분기는 직접 해결.
+- cookies 복제는 `response.cookies.getAll()` + `redirect.cookies.set(cookie)` 루프. `cookie` 객체 자체를 set 하면 옵션(httpOnly/secure/expires/sameSite)까지 복제됨 — 문자열/값만 전달하면 유실.
+- 이런 종류의 "문서에 없는 함정" 은 **E2E 에서 세션 흐름 테스트** (로그인 → 보호 라우트 접근 → 로그아웃 → 재접근) 로 조기 감지 가능. proxy 단순 테스트는 부족함.
+
+---
