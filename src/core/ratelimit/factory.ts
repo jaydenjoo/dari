@@ -47,10 +47,14 @@ export function createMemoizedLimiter(spec: LimiterSpec): () => Ratelimit {
  * (전체 URL · Bearer 토큰 · `token=` 쿼리 파라미터) 을 마스킹해 반환한다.
  *
  * Pino redact 는 객체 필드명 기반이라 `Error.message` 안에 inline 된 문자열은
- * 걸러내지 못한다. Upstash 드라이버가 REST URL·토큰을 포함한 메시지를 throw 할 수
- * 있어 fail-open 로깅 경로에서 이 함수로 한 번 더 정제한다. (security M-1 반영)
+ * 걸러내지 못한다. Upstash / Anthropic SDK / Supabase 드라이버가 REST URL·토큰·
+ * API 키를 포함한 메시지를 throw 할 수 있어 외부 서비스 catch 경로에서 이 함수로
+ * 한 번 더 정제한다. (security M-1 반영)
+ *
+ * export 이유: Chat API 등 외부 SDK 호출 경로에서 재사용. 여러 catch 블록에서
+ * 동일한 마스킹 규칙을 공유해야 로그 정책이 일관된다.
  */
-function sanitizeLoggableError(err: unknown): {
+export function sanitizeLoggableError(err: unknown): {
   name: string;
   message: string;
 } {

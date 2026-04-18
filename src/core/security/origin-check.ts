@@ -65,6 +65,13 @@ export function normalizeOrigin(raw: string | null | undefined): string | null {
  * - 각 entry: 정확 매칭 또는 `https://*.<base>` 와일드카드.
  * - 와일드카드는 서브도메인만 매칭 (base 자체 제외). 중첩 서브도메인도 허용.
  * - 잘못된 entry (파싱 실패, 빈 문자열) 는 조용히 skip.
+ *
+ * ⚠️ null / 누락 Origin 처리:
+ *   - `null` / `undefined` / 비문자열 / 파싱 실패 origin 은 빈 배열(allow-all) 이어도 **false**.
+ *   - 즉 `Origin` 헤더가 없는 요청(서버간 curl, 일부 non-browser, sandboxed iframe 의 "null" 문자열 등)은
+ *     allow-all 정책에서도 차단된다. 브라우저 요청만 허용하기 위한 의도적 설계.
+ *   - 위젯을 `<iframe sandbox>` 에 넣으면 Origin 이 `"null"` 로 전달되어 차단됨. 위젯 embed 가이드에서
+ *     sandbox 를 사용하지 않도록 안내하거나, 필요 시 별도 처리 Task 가 필요.
  */
 export function matchAllowedDomain(
   origin: string | null | undefined,
