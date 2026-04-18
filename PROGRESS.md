@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: 1-5 봇 CRUD — 1-5-a 목록 ✅ / 1-5-b 생성 ✅ / 1-5-c 상세 ✅ / **1-5-d 편집 ✅ 완료** → **Epic 1-5 완결**
-- 상태: **Epic 1-5 봇 CRUD 완결 + 리뷰 재라운드(CRITICAL SSRF 차단) + types.ts 근본 + Task 0-D-6 proxy cookie 전파** → 다음 세션 **Task 1-0-a Rate Limit 인프라** (Phase 1 P1 안정성, ~1.5h)
+- Epic: 1-0 보안/안정성 — **1-0-a Rate Limit ✅ / 1-0-b CORS 유틸 ✅** + γ 정비(Pretendard/DM Sans/JetBrains Mono + CI Node 24) ✅
+- 상태: **Task 1-0-a + 1-0-b + γ 정비 완결** (vitest 93 → 124, +31) / 코드 **미커밋** 상태 → 다음 세션 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분) 또는 **Epic 1-6 위젯 런타임 스캐폴딩** 중 택 1
 
 ## 완료된 Epic
 
@@ -59,7 +59,87 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야) 완료 내역
+## 이번 세션(2026-04-18 심야 Ⅱ) 완료 내역
+
+### Task 1-0-a — Rate Limit 인프라 (경로 α, ~100분)
+
+- **신규 5파일**: `factory.ts` (공통 `createMemoizedLimiter` + `checkRatelimit`) / `bot-create-limiter.ts` (하루 20개 per-user) / `factory.test.ts` (5 케이스) / `bot-create-limiter.test.ts` (2 케이스) / `vitest.stubs/server-only.ts`
+- **수정**: `login-limiter.ts` factory 사용 리팩터 / `bots/new/actions.ts` rate limit 체크 삽입 (Zod → getUser → **checkBotCreateRatelimit** → DariConfig → INSERT) / `env.ts` `NODE_ENV` default 제거 (fail-fast) / `vitest.config.mts` `server-only` alias / `package.json` pretendard + server-only devDep
+- **독립 리뷰 2 에이전트 병렬** (code Ship + security Fix-then-ship) → **일괄 수정 5건**:
+  - A (🔴 Sec M-1): `sanitizeLoggableError` + URL/Bearer/`token=` 마스킹 — fail-open 로그 누출 차단
+  - B (Code M-1): `LimiterAlgorithm` 주석 정정 (Upstash 팩토리 모두 동일 Algorithm)
+  - C (Code M-3 / Sec L-1): bot-create-limiter production 경로 테스트 (key=userId 전달 검증)
+  - D (🟡 Sec M-2): `env.ts` NODE_ENV required 전환 (무음 비활성화 방지)
+  - E (Code M-2): 차단 시 `logger.debug({ resetIn })` observability
+- 검증: pnpm check (vitest 86 → 93) / pnpm build clean / pnpm test:e2e **16/16 PASS** (회귀 0)
+
+### Task 1-0-b — CORS allowedDomains 검증 유틸 (경로 β, ~110분 + 재리뷰)
+
+- **신규 2파일** — `src/core/security/origin-check.ts` (normalizeOrigin / matchAllowedDomain / buildCorsHeaders) / `origin-check.test.ts` (30 케이스)
+- 정책 (Plan 승인): 빈 배열 allow-all (MVP) / `*.example.com` 와일드카드 / 서브도메인 명시 필요 / https 필수(localhost/127.0.0.1/[::1] http 예외) / 풀 origin 저장 / Route Handler 헬퍼 레이어
+- **독립 리뷰 2 에이전트** (code Fix-then-ship + security Fix-then-ship) → **일괄 수정 6건**:
+  - A (🔴 Sec HIGH / OWASP A01): TLD 단독 와일드카드 bypass 차단 — `*.com` / `*.net` 허용되던 것을 base 점 1개 이상 강제
+  - B (🟡 Code MH): trailing dot (`example.com.`) 정규화 — normalize + matchWildcard 양측
+  - C (Sec M-1): T4 userinfo(@) 공격 테스트 명시
+  - D: 7 신규 테스트 (TLD / trailing dot / trailing space / userinfo / idempotency)
+  - E (Code M-1): `/i` 플래그 역할 주석
+  - F (Sec M-2): Epic 1-6 배선 체크리스트 JSDoc (preflight/RLS/credentials 금지/wrapper/캐시)
+- **security 재리뷰** (신규 보안 함수 필수 라운드) → **Ship + LOW 3 추가 반영**:
+  - LOW-1: IP 스타일 base 거부 (`*.192.168` 차단, `/^\d+(\.\d+)*\.?$/`)
+  - LOW-2: userinfo 테스트 주석에 "의도된 보안 동작" 명시
+  - LOW-3: JSDoc 에 `Access-Control-Allow-Credentials: true` 금지 경고
+- 검증: vitest 93 → 124 (+31) / build clean
+
+### γ — 짧은 정비 번들 (γ-1 + γ-2, γ-4 생략)
+
+- **γ-1 폰트 시스템 정비**: `pretendard` NPM 1.3.9 설치 → `pretendardvariable-dynamic-subset.css` import / DM Sans + JetBrains Mono `next/font/google` / `layout.tsx` (lang ko + metadata 교체) / `globals.css` `--font-sans` / `--font-mono` / `--font-heading` fallback chain 정확 정의 (기존 `--font-sans: var(--font-sans)` 자기참조 버그 해소)
+- **γ-2 CI Node 22 → 24**: `.github/workflows/ci.yml` node-version 승격 (현 24 LTS)
+- **γ-4 gitleaks 오탐 정리 생략**: 현재 오탐 0 (ci.yml 에서 placeholder 동적 생성으로 이미 회피). YAGNI 판단
+- **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 유보**: 스코프 45분 — 별도 Task 분리 제안
+- 검증: pnpm build Turbopack clean (폰트 번들 OK) / vitest 124 유지
+- ⚠️ **브라우저 시각 확인은 Jayden 로컬 `pnpm dev` 필요** (Auto 모드 제약)
+
+### 검증 합산
+
+- 이번 세션 vitest: **86 → 124 (+38)** — factory 5, bot-create-limiter 2, origin-check 30 (증감 최종값)
+- 신규 8 파일 / 수정 9 파일 / devDep +2 (`pretendard`, `server-only`)
+- pnpm check / pnpm build 모두 clean, E2E 16/16 (회귀 0)
+- 코드 변경 **미커밋 상태**
+
+### 주요 결정 / 발견
+
+- **경로 α (Upstash 확장) vs B (Supabase SQL)** — PROGRESS.md backlog 에서 SQL 추천됐으나 기존 login-limiter 인프라 재사용 + Chat API 고부하 DB 리스크 + 1.5h 범위 적합성으로 **A (Upstash)** 선택. 1개 limiter 패턴으로 Chat API 등 차기 엔드포인트 확장 용이.
+- **"server-only" + pnpm + vitest 3중 함정** — (1) pnpm transitive 라 resolve 실패 (2) 런타임 throw (3) next 번들러만 stub 교체. 해결: devDep 명시 + vitest alias + 빈 stub. 교훈 기록.
+- **CORS 와일드카드 `*.com` bypass** — 1차 리뷰에서 포착. base 점 1개 이상 강제 + IP 대역 거부. ccSLD (`*.co.uk`) 는 PSL 필요로 MVP 범위 밖 (주석 한계 명시).
+- **재리뷰 교훈 재실증** — "신규 보안 함수는 별도 리뷰 라운드 필수" (SSRF IPv6 때 정립). 1차 HIGH + 재리뷰 LOW 3건 추가 포착. 앞으로도 고수.
+- **`NODE_ENV` Zod default 의 skip 분기 무음 비활성화 위험** — 보안 분기 조건 env 는 fail-fast required, UX env 만 default. 설계 원칙 공식화.
+- **γ-4 gitleaks 선제 정리 YAGNI 판단** — backlog 가 있어도 실제 오탐 없으면 스킵. 템플릿 파일 생성은 과잉.
+
+### learnings.md 추가 (+3, 총 35건)
+
+- `server-only` vitest alias stub 패턴 (devDep + alias + stub 3중 조건)
+- CORS 와일드카드 TLD 단독 bypass — base 점 개수 하한 강제 + IP 대역 거부
+- `NODE_ENV` Zod default 금지 — 보안 분기 조건은 fail-fast required
+
+### Backlog (다음 세션)
+
+- **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분) — 브라우저 Sentry 이벤트 preview/prod 분리. ADR-008 backlog
+- **Epic 1-6 위젯 런타임** (2~3 세션) — `/widget.js` + Chat API + RAG + `withAllowedOrigin` wrapper 배선. allowedDomains 허용 → 빈 배열 정책 재평가 시점
+- **코드 커밋** — 이번 세션 9 수정 + 8 신규 파일. 1 커밋 (Task 1-0-a/b + γ 묶음) 또는 3 커밋 분할
+- **Task 1-0-b 후속**:
+  - schema.ts `allowedDomains` 포맷 검증 (`z.string().regex(...)`) — Phase 2 편집 UI 배포 시점
+  - Route Handler wrapper `withAllowedOrigin(handler)` — Epic 1-6 배선 시
+  - ccSLD 완전 차단 PSL 라이브러리(`tldts`) — Phase 2
+- **Task 1-0-a 후속**:
+  - rate limit `reset` UX (차단 시 남은 시간 안내) — Phase 2
+  - DariConfig/INSERT 실패 후 카운터 복구 (LOW, 현재 허용 트레이드오프)
+  - i18n 에러 메시지 분리
+- **미소화 리뷰 backlog** (1-5-c/d): generateMetadata 동적 title / error.tsx Sentry digest-only / Optimistic locking / Collapse value reset UX
+- **docs/environments.md** — "NODE_ENV 는 플랫폼 주입 필수" 체크리스트 추가 (설계 결정 반영)
+
+---
+
+## 직전 세션(2026-04-18 심야) 완료 내역
 
 ### Task 1-5-d — /bots/[slug]/edit 편집 폼 (Epic 1-5 완결)
 
@@ -491,45 +571,38 @@
 
 ### 🎯 경로 선택
 
-**경로 α (권장): Task 1-5-c — `/bots/:slug` 상세 페이지**
+**경로 α (권장): γ-3 — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 도입**
 
-- 봇 1개 상세 정보 표시 + 편집 진입점 + 위젯 설치 코드 (Phase 1 후반)
-- RLS SELECT 정책 실증 (owner 격리 확인)
-- Task 1-5-d (편집 폼) 의 전제
-- 소요: 60~90m
+- 브라우저 Sentry 이벤트 preview/prod 분리 (ADR-008 backlog)
+- 스코프: env.ts `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum + `instrumentation-client.ts` 반영 + docs/environments.md 갱신
+- 소요: 45m
 
-**경로 β: Task 0-D-6 — proxy redirect cookie 유실 수정**
+**경로 β: Epic 1-6 위젯 런타임 스캐폴딩**
 
-- 병렬 E2E flaky 해소 (CI 품질 향상, 현재 `--workers=1` 강제)
-- `NextResponse.redirect(url)` 에 `updateSession` response.cookies 복사 로직 추가
-- 재현·검증이 까다로워 약간 tricky
-- 소요: 45~75m
+- `/widget.js` + `/api/chat/*` Chat API + RAG 연결 + `withAllowedOrigin` wrapper 배선
+- allowedDomains 빈 배열 정책 재평가 (위젯 공개 시점)
+- Task 1-0-a/b 유틸 실증. Phase 1 핵심
+- 소요: Plan 30m + 첫 Task 90~120m (2~3 세션 연장)
 
-**경로 γ: types.ts `__InternalSupabase` 추가 → `as never` 제거 (근본 수정, ROI 높음)**
+**경로 γ: 코드 커밋 + 리뷰 미소화**
 
-- 1 파일 수정으로 SELECT `.returns<T[]>()` + INSERT `as never` 양쪽 모두 해소 가능성
-- 실패 시 롤백 간단 (타입 정의만 변경)
-- 소요: 20~30m
-
-**경로 δ: 짧은 정비 번들**
-
-- 폰트 Pretendard/DM Sans 전역 교체 (~20m)
-- CI Node 24 전환 (10~15m)
-- NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입 (30~45m)
-- gitleaks 오탐 선제 정리 (10m)
+- 이번 세션 코드 커밋 1~3건 분할
+- 1-5-c/d 미반영 리뷰 backlog (generateMetadata / error.tsx digest-only / Optimistic locking) 중 1~2건
+- 소요: 30~45m
 
 ### 그 외 대기
 
-- **Task 1-0 재평가**: systemPrompt prompt injection 완화 (위젯 구현 시점)
-- **인증 사용자 봇 생성 상한**: per-user 50개 or rate limit (DoS 방어)
+- **docs/environments.md** — "NODE_ENV 플랫폼 주입 필수" 체크리스트 (이번 세션 설계 결정 반영)
+- **Task 1-0 재평가**: systemPrompt prompt injection 완화 (Epic 1-6 위젯 구현 시점)
 - **slug 변경 UI 시점**: `config.botId` 동기화 + 위젯 설치 ID 마이그레이션
 - **conversations/messages 로그인 방문자 정책 확장**: Phase 1 위젯 로그인 지원 시
-- **위젯 anon 라우트 service_role 경유 설계**: Phase 1 위젯 구현 시 `bot_id` 소유권 검증 + rate limiting
 - **`proxy-client.ts` ESLint no-restricted-imports**: proxy 외 import 강제 차단 (~15m)
+- **Task 1-0-b 후속** (Epic 1-6 시점): Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
+- **Task 1-0-a 후속**: rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
 
 ## 차단 요소
 
-**없음** — Phase 1 진입 완료. 경로 α/β/γ/δ 자유 선택.
+**없음** — Task 1-0-a/b + γ(1-2) 완결, 이번 세션 변경 미커밋. 경로 α/β/γ 자유 선택.
 
 ## 완료한 Task (누적)
 
@@ -567,6 +640,9 @@
 - [x] **Task 0-D-1: Google OAuth + Next 16 proxy 세션 게이트 + isSafeNextPath 단일 출처 (독립 리뷰 2라운드, 옵션 X 5건 반영, Playwright E2E 9/9)**
 - [x] **Task 0-D-2: owner 기반 RLS 정책 14 활성화 + `bots.owner_id` NOT NULL + 독립 리뷰 2 에이전트 Ship as-is + SQL 시뮬레이션 10/10 PASS (Epic 0-D 완결)**
 - [x] **Task 1-5-b: /bots/new 봇 생성 폼 (Phase 1 첫 기능) — Server Action + DariConfig default 활용 + 3중 방어 + 독립 리뷰 2 에이전트 (MEDIUM 3+LOW 1 반영) + E2E 3 spec (RLS INSERT 실증)**
+- [x] **Task 1-0-a: Rate Limit 인프라 — Upstash factory 공통화 + 봇 생성 per-user 20/day + 독립 리뷰 2 (Fix-then-ship, 일괄 5건) + sanitizeLoggableError + env.NODE_ENV fail-fast**
+- [x] **Task 1-0-b: CORS allowedDomains 검증 유틸 — normalize/match/cors 3함수 + 재리뷰 HIGH+MH+LOW 9건 일괄 반영 + 30 테스트 (TLD/IP/userinfo/trailing dot/IDN)**
+- [x] **γ 정비(1·2): Pretendard variable + DM Sans + JetBrains Mono + CI Node 24 승격**
 
 ## 세션 이력
 
@@ -582,8 +658,9 @@
 - **2026-04-18 (낮): Task INFRA-1 + 0-D-3 + 1-5-a — Playwright 로컬 인프라 + id/pw 로그인 폼 + /bots 목록 페이지 + 교훈 3건**
 - **2026-04-18 (오후): Task 0-D-4 + 0-D-5 + gitleaks hook — 로그인 rate limit + 비번 8자 + Husky v9 pre-commit + 교훈 2건**
 - **2026-04-18 (저녁): Task 1-5-b — /bots/new 봇 생성 폼 + RLS INSERT 정책 첫 실증 + 독립 리뷰 2 (code Fix then ship + security Ship as-is) + 교훈 2건 (supabase-js insert as never / React 19 useEffect 금지) — Phase 1 진입**
+- **2026-04-18 (심야 Ⅱ): Task 1-0-a Rate Limit + Task 1-0-b CORS 유틸 + γ 정비(폰트/CI24) — vitest +38 (93 → 124) / 독립 리뷰 3회 + 재리뷰 1회 / 교훈 3건 (server-only vitest alias / CORS TLD bypass / NODE_ENV Zod default) — 코드 미커밋**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-18 저녁 (Task 1-5-b 완료, Phase 1 진입)
+- 날짜: 2026-04-18 심야 Ⅱ (Task 1-0-a + 1-0-b + γ 완료, Epic 1-0 보안/안정성 2/3)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)

@@ -812,3 +812,92 @@ function redirectWithRefreshedCookies(
 - 이런 종류의 "문서에 없는 함정" 은 **E2E 에서 세션 흐름 테스트** (로그인 → 보호 라우트 접근 → 로그아웃 → 재접근) 로 조기 감지 가능. proxy 단순 테스트는 부족함.
 
 ---
+
+### 2026-04-18 `server-only` 는 vitest node 환경에서 throw — alias stub 필수 (기술 이슈)
+
+**증상**: Task 1-0-a 에서 `src/core/ratelimit/factory.ts` / `bot-create-limiter.ts` 가 `import "server-only"` 를 사용하면 vitest 실행 시 **두 단계 실패**:
+
+1. 패키지 resolve 실패 — `Cannot find package 'server-only'`. pnpm 에서 `server-only` 는 Next.js 의 transitive dep 이라 `.pnpm/` 하위에만 있고 직접 import 경로에 없음
+2. resolve 성공 후 런타임 throw — `This module cannot be imported from a Client Component module`. `server-only/index.js` 는 의도적으로 throw 하고 Next.js 번들러가 server 빌드에서만 빈 stub 으로 교체. vitest 는 번들러 미경유라 실 throw 모듈이 로드됨
+
+**원인**: `server-only` 는 "client 번들에서 import 되는 순간 throw" 하도록 설계된 guard. server 번들에서는 webpack/turbopack 이 virtual 모듈로 교체. vitest 는 그 교체 메커니즘을 거치지 않는다.
+
+**해결**: vitest.config 에 `resolve.alias` + 빈 stub 파일.
+
+```ts
+// vitest.config.mts
+resolve: {
+  alias: {
+    "server-only": new URL("./vitest.stubs/server-only.ts", import.meta.url)
+      .pathname,
+  },
+},
+
+// vitest.stubs/server-only.ts
+export {};
+```
+
+추가로 `pnpm add -D server-only` 로 직접 devDep 등록해 resolve 단계를 먼저 성공시킨 뒤 alias 가 실 모듈 대신 stub 으로 교체하게 한다.
+
+**규칙** ⭐:
+
+- **Next.js + pnpm + vitest 조합에서 `server-only` import 하는 모듈을 단위 테스트하려면**: (1) `devDependencies` 에 명시 추가 (resolve 성공용) (2) `vitest.config` alias + stub 파일 (throw 회피용) 둘 다 필요. 한쪽만으로는 안 됨.
+- `vi.mock("server-only", () => ({}))` 를 테스트마다 반복하지 말 것 — 여러 테스트에 같은 import 체인이 있으면 글로벌 1회 설정이 깔끔.
+- stub 파일은 `src/` 바깥(`vitest.stubs/`)에 둬 tsconfig include / eslint / Next 빌드와 충돌 없게.
+- 유사 패턴: `next/font`, `next/server` 같은 다른 Next 가상 모듈도 vitest 에서 import 할 경우 동일 alias 전략 필요할 수 있음.
+
+---
+
+### 2026-04-18 CORS 와일드카드의 TLD 단독 레이블 bypass (보안 이슈)
+
+**증상**: Task 1-0-b `matchAllowedDomain("https://evil.com", ["https://*.com"])` → **true**. 봇 소유자가 `https://*.com` 을 allowedDomains 에 등록하면 실질적으로 모든 `.com` 허용 = allow-all. `*.net`, `*.localhost`, `*.co.uk` (ccSLD) 전부 동일 카테고리.
+
+**원인**: 와일드카드 매칭이 `originHost.endsWith(".${baseHost}")` 순수 문자열 비교. `baseHost = "com"` 이면 `"evil.com".endsWith(".com") = true`. URL API 가 `https://com` 을 유효하게 파싱해 baseOrigin 정규화도 통과시킨다. 1차 리뷰에서 `baseHostRaw.includes("*")` 가드는 있었지만 "레이블 개수" 제약이 없었음.
+
+**해결**: `matchWildcard` 진입 직후 base 에 **최소 1개의 점 필수** 가드 + IP 대역 오용 차단.
+
+```ts
+// TLD 단독 차단 — base 에 점이 최소 1개 있어야 2+ 레이블
+if (!baseHostRaw.replace(/\.$/, "").includes(".")) return false;
+
+// IP 스타일 차단 — 숫자 레이블로만 구성된 base (예: *.192.168) 거부
+if (/^\d+(\.\d+)*\.?$/.test(baseHostRaw)) return false;
+```
+
+ccSLD (`*.co.uk`) 완전 방어는 Public Suffix List(`tldts` 등) 필요 — MVP 범위 밖. 주석으로 한계 명시 + Phase 2 schema refinement 로 이관.
+
+**규칙** ⭐:
+
+- **와일드카드 도메인 매칭은 `endsWith` 단순 비교로 불충분**. base 에 레이블 개수 하한(최소 2 레이블, 점 1개) 을 코드 레벨에서 강제. 소유자 입력(allowedDomains) 은 신뢰하지 않는다 — Trust Boundary 관점에서 앱 설정도 외부 입력.
+- 보안 매칭 함수는 **"URL 파싱 성공 ≠ 의미적 유효"** — `new URL("https://com")` 이 파싱 가능하다고 정상 도메인으로 취급하면 안 됨. 도메인의 **의미적 제약** (TLD 아님, IP 대역 아님) 을 별도 가드로 추가.
+- 재리뷰 교훈 재확인: Task 1-5-d SSRF IPv6 사례와 동일 패턴 — 신규 보안 함수는 1차 리뷰로 CRITICAL/HIGH 포착, 재리뷰로 추가 LOW 포착. **"신규 보안 함수는 별도 리뷰 라운드 필수"** 교훈이 다시 실증.
+- schema 레벨 정규식 검증(`z.string().regex(...)`) 이 있으면 입력 경로에서 미리 차단 가능 — Phase 2 에서 `allowedDomains` refinement 1순위 backlog.
+
+---
+
+### 2026-04-18 `NODE_ENV` Zod default 는 skip 분기 정책의 무음 비활성화 위험 (설계 결정)
+
+**증상**: Task 1-0-a 보안 리뷰(MEDIUM)에서 지적 — rate limit 등 `env.NODE_ENV !== "production"` 로 skip 하는 정책이 프로덕션에서 `NODE_ENV` 누락 시 **무음 비활성화**될 위험. `env.ts` 의 `NODE_ENV: z.enum([...]).default("development")` 가 Zod 기본값을 "development" 로 주입해 rate limit 전체가 에러 없이 통과.
+
+**원인**: Zod `.default()` 는 런타임 안정성 UX 장치이지만, **보안 정책의 분기 조건** 으로 사용되는 env 키에는 부적합. Vercel 은 `NODE_ENV=production` 을 자동 주입하므로 정상 경로에서는 문제 없지만, Docker 직접 배포 / 커스텀 런타임 / CI pipeline 오류 시 "production 이 아님" 으로 오해되어 skip 분기가 전부 열린 채 기동될 수 있다.
+
+**해결**: `NODE_ENV` default 제거 → 플랫폼 주입 누락 시 **부팅 실패** (fail-fast).
+
+```ts
+// env.ts — before
+NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+
+// after
+NODE_ENV: z.enum(["development", "production", "test"]),  // default 제거
+```
+
+Next.js(dev/build/start) / Vitest(test) / Vercel(production) 은 각 빌드/런타임에서 NODE_ENV 를 자동 주입하므로 정상 경로 영향 없음. 커스텀 런타임·Docker 는 명시 주입 필수화.
+
+**규칙** ⭐:
+
+- **보안 분기 조건에 쓰이는 env 키는 Zod default 금지**. 무음 비활성화보다 명시적 부팅 실패가 항상 안전 (fail-fast principle).
+- 분기 조건 env (`NODE_ENV`, `FEATURE_FLAG_*`, `DISABLE_RATELIMIT` 등) 는 **required** 로 두되, 정반대로 UX 안정성 env (`LOG_LEVEL`, `PORT`) 는 default 로 DX 보호. 용도별 구분.
+- 이 원칙은 Phase 2 이후 FeatureFlag, A/B 테스트 분기, 성능 모니터링 on/off 등 장래 정책에도 동일 적용.
+- 배포 문서 (`docs/environments.md`) 에 "NODE_ENV 는 플랫폼에서 반드시 명시 주입" 체크리스트 항목으로 추가 권장 (backlog).
+
+---
