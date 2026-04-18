@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { dariConfigSchema, CURRENT_CONFIG_VERSION } from "./schema";
+import {
+  analyticsSchema,
+  businessHoursSchema,
+  CURRENT_CONFIG_VERSION,
+  dariConfigSchema,
+} from "./schema";
 
 describe("dariConfigSchema", () => {
   const minimalValidInput = {
@@ -80,6 +85,97 @@ describe("dariConfigSchema", () => {
         }),
       ).toThrow();
     }
+  });
+
+  // ─── SSRF 방어 (security M-1, 재리뷰 CRITICAL 반영) ───
+  describe("analyticsSchema.webhookUrl SSRF 방어", () => {
+    it("정상 외부 https URL 은 통과", () => {
+      const ok = analyticsSchema.parse({
+        webhookUrl: "https://api.example.com/webhook",
+      });
+      expect(ok.webhookUrl).toBe("https://api.example.com/webhook");
+    });
+
+    it("http / file / ftp 스킴은 거부", () => {
+      for (const url of [
+        "http://example.com/x",
+        "ftp://example.com/x",
+        "file:///etc/passwd",
+      ]) {
+        expect(() => analyticsSchema.parse({ webhookUrl: url })).toThrow();
+      }
+    });
+
+    it("IPv4 사설/loopback 대역은 거부", () => {
+      for (const host of [
+        "127.0.0.1",
+        "10.0.0.1",
+        "192.168.1.1",
+        "172.16.0.1",
+        "172.31.255.255",
+        "169.254.169.254", // AWS IMDS
+        "0.0.0.0",
+        "localhost",
+      ]) {
+        expect(() =>
+          analyticsSchema.parse({ webhookUrl: `https://${host}/x` }),
+        ).toThrow();
+      }
+    });
+
+    it("IPv6 loopback / ULA / link-local / IPv4-mapped 는 거부", () => {
+      for (const host of [
+        "[::1]",
+        "[::]",
+        "[fc00::1]", // ULA
+        "[fd12::1]", // ULA
+        "[fe80::1]", // link-local
+        "[::ffff:127.0.0.1]", // IPv4-mapped loopback
+        "[::ffff:10.0.0.1]", // IPv4-mapped 사설
+        "[::ffff:7f00:1]", // 16진 IPv4-mapped
+      ]) {
+        expect(() =>
+          analyticsSchema.parse({ webhookUrl: `https://${host}/x` }),
+        ).toThrow();
+      }
+    });
+
+    it("정상 IPv6 (예: GitHub) 는 통과", () => {
+      // 2606:50c0::/32 = GitHub Pages, 외부 공인 IPv6.
+      const ok = analyticsSchema.parse({
+        webhookUrl: "https://[2606:50c0::1]/x",
+      });
+      expect(ok.webhookUrl).toBe("https://[2606:50c0::1]/x");
+    });
+
+    it("undefined (미설정) 은 통과", () => {
+      const ok = analyticsSchema.parse({});
+      expect(ok.webhookUrl).toBeUndefined();
+    });
+  });
+
+  // ─── timezone IANA 허용 범위 (security L-2 + 재리뷰 LOW) ───
+  describe("businessHoursSchema.timezone", () => {
+    it("일반 IANA + Etc/GMT+9 같은 +/- 표기 통과", () => {
+      for (const tz of [
+        "Asia/Seoul",
+        "America/Argentina/Buenos_Aires",
+        "Etc/GMT+9",
+        "Etc/GMT-3",
+      ]) {
+        expect(() =>
+          businessHoursSchema.parse({ enabled: true, timezone: tz }),
+        ).not.toThrow();
+      }
+    });
+
+    it("의도적으로 비정상인 값은 거부", () => {
+      for (const tz of ["Asia/Seoul; DROP", "../etc/passwd", "한국"]) {
+        expect(() =>
+          businessHoursSchema.parse({ enabled: true, timezone: tz }),
+        ).toThrow();
+      }
+    });
   });
 
   it("discriminated union: text source 파싱", () => {
