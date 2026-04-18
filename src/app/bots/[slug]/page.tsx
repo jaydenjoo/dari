@@ -96,7 +96,6 @@ export default async function BotDetailPage({
     .from("bots")
     .select("id, slug, name, status, config, created_at, updated_at")
     .eq("slug", slug)
-    .returns<BotDetail[]>()
     .maybeSingle();
 
   if (error) {

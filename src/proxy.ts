@@ -19,6 +19,25 @@ import { updateSession } from "@/core/db/proxy-client";
  * API 라우트 (`/api/*`) 는 matcher 에서 제외 — 각 핸들러가 자체 auth 검증 수행.
  */
 
+/**
+ * `updateSession` 이 갱신한 쿠키를 redirect response 에도 그대로 옮긴다 (Task 0-D-6).
+ *
+ * 문제: `NextResponse.redirect(url)` 는 빈 cookies 로 시작 — 세션 refresh 직후
+ *       redirect 시 새로 발급된 JWT 쿠키가 클라이언트에 전달되지 않아, 다음 요청에서
+ *       세션이 만료된 것으로 인식되거나 race condition 으로 흐름이 끊긴다.
+ * 해결: refreshed cookies (옵션·만료일 포함) 를 redirect response 에 복제.
+ */
+function redirectWithRefreshedCookies(
+  url: URL,
+  refreshedResponse: NextResponse,
+): NextResponse {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of refreshedResponse.cookies.getAll()) {
+    redirect.cookies.set(cookie);
+  }
+  return redirect;
+}
+
 export async function proxy(request: NextRequest) {
   const { user, response } = await updateSession(request);
   const pathname = request.nextUrl.pathname;
@@ -28,7 +47,7 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";
-    return NextResponse.redirect(url);
+    return redirectWithRefreshedCookies(url, response);
   }
 
   // 비로그인 + 보호 라우트 → /login 으로 (원래 목적지 + 쿼리스트링 보존)
@@ -42,7 +61,7 @@ export async function proxy(request: NextRequest) {
     if (isSafeNextPath(nextValue)) {
       url.searchParams.set("next", nextValue);
     }
-    return NextResponse.redirect(url);
+    return redirectWithRefreshedCookies(url, response);
   }
 
   return response;

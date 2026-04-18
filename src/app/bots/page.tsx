@@ -45,8 +45,7 @@ export default async function BotsListPage() {
     .from("bots")
     .select("id, slug, name, status, updated_at")
     .neq("status", "deleted")
-    .order("updated_at", { ascending: false })
-    .returns<BotListItem[]>();
+    .order("updated_at", { ascending: false });
 
   if (error) {
     throw new Error(error.message);

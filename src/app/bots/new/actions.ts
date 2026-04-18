@@ -115,12 +115,7 @@ export async function createBot(
     config,
   };
 
-  // supabase-js 타입 추론 한계: Database 타입의 `__InternalSupabase` 슬롯 부재로
-  // `.insert()` values 가 `never` 로 좁혀진다 (기존 /bots/page.tsx 의 `.returns<T>()`
-  // 회피와 동일 맥락). BotInsert 로 의도된 payload 타입을 명시한 뒤 assertion.
-  const { error: insertError } = await supabase
-    .from("bots")
-    .insert(payload as never);
+  const { error: insertError } = await supabase.from("bots").insert(payload);
 
   if (insertError) {
     // PostgreSQL 23505 = unique_violation (slug 중복).
