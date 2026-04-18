@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 진입 — 1-6-a Chat API ✅** (Epic 1-0 보안/안정성 1-0-a/1-0-b/γ(1·2) 완료, Epic 1-5 봇 CRUD 완결)
-- 상태: **Task 1-6-a Chat API 최소 구현 완료** (vitest 124 → 127, +3) / **코드 미커밋** → 다음 세션 **Task 1-6-b `/widget.js` 번들 스캐폴딩** (~90분) 또는 **Task 1-6-c RAG 연결** (~60분)
+- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 보안 보강 ✅** (옵션 D 일괄, 차단급 M-1 + N-1~N-6 모두 반영)
+- 상태: **Task 1-6-a 보안 보강 완료** (vitest 127 → 132, +5) / **이번 세션 변경 미커밋** / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Task 1-6-b `/widget.js` 번들** (~90분) 또는 **Task 1-6-c RAG** (~60분, Task 1-7 선행 필요)
 
 ## 완료된 Epic
 
@@ -59,7 +59,64 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야 Ⅲ) 완료 내역 — Task 1-6-a Chat API
+## 이번 세션(2026-04-18 심야 Ⅳ) 완료 내역 — Task 1-6-a 보안 보강 (옵션 A → 옵션 D 일괄)
+
+### 흐름 (~125분)
+
+1. **선행 — Task 1-6-a 본체 코드 1 커밋**: 7ffa34b (factory + origin-check + route + anthropic-client + bot-chat-limiter + 테스트, 6 파일 +463/-3, gitleaks pass)
+2. **옵션 A — security 재리뷰 1라운드**: 일괄 수정 5건 재검증 + 신규 6건 (CRITICAL/HIGH 0, MEDIUM 3 + LOW 3)
+3. **"리뷰" 단독 지시 — code+security 병렬 추가 라운드** (메모리 규칙 적용):
+   - 🔴 **차단급 M-1 발견 (둘 다 합의)**: `route.ts:267` 신규 conversation INSERT 가 `visitor_id` 없이 → `conversations_has_identity` check 위반 → **Task 1-6-a 신규 conversation 경로 항상 500** (Anthropic 도달 전)
+   - **N-3 폐기 권장**: D-3-a (OPTIONS rate limit) 가 정상 위젯 차단 + 실질 위협 작음 (Access-Control-Max-Age: 600 으로 preflight 이미 최소화). Phase 2 backlog 이동
+   - **N-4 변경**: 시그니처 변경 → IP 해시화 (PIPA·GDPR 평문 회피 + 함수 책임 분리)
+   - **N-1 보강**: JWT 패턴 + `api[_-]?key` prefix (`primary key constraint` false positive 회피)
+   - **N-2 보강**: `public.messages` 한정 + 롤백 SQL 필수 (search_path = '' 함정 회피)
+4. **옵션 D 일괄 (Step 3 v2) 적용**:
+   - **M-1**: `visitor_id: randomUUID()` 주입 (`node:crypto.randomUUID`)
+   - **N-1**: `redactSecretsInMessage` 7 패턴 (URL → JWT → Authorization → sk-ant → Bearer → api_key → token=), `\S+` / `[^\r\n]*` 로 base64 padding · 다중 단어 헤더 대응
+   - **N-1 회귀 테스트 +5**: sk-ant / JWT / api_key= / Authorization / false positive 보존 (`primary key constraint`)
+   - **N-2 마이그레이션 0007**: `check_message_limit()` BEFORE INSERT, `search_path = ''` + `public.messages` 명시 + 롤백 SQL + comment + TOCTOU race 한계 명시
+   - **N-4 IP 해시화**: `hashClientIp()` (SHA-256 prefix 8자) + `resolveConversationId(clientIpHash)` 시그니처 + `sensitiveFields.ts 'ip'` 추가 (raw 로깅 방어선)
+   - **N-5 주석**: factory.ts fail-open 분기에 "Phase 2 fail-closed 재검토" + ADR 예정 명시
+
+### 신규 / 수정 파일
+
+- **신규 1**: `supabase/migrations/0007_add_message_limit_trigger.sql` — Supabase 실 apply Jayden 수동 필요 (🟡 등급)
+- **수정 5**: `src/app/api/chat/[botId]/route.ts` (M-1 + N-4 호출처/시그니처) / `src/core/ratelimit/factory.ts` (N-1 + N-5) / `src/core/ratelimit/factory.test.ts` (+5 케이스) / `src/core/observability/sensitiveFields.ts` ('ip' 추가) / `PROGRESS.md` (이 항목)
+
+### 검증
+
+- **pnpm check**: tsc clean / lint 4 warning (기존 unused vars, 이번 변경 무관) / prettier clean (1회 자동 fix) / **vitest 127 → 132 (+5)**
+- **pnpm build**: Turbopack clean, `/api/chat/[botId]` Dynamic 등록 유지
+- E2E 미실행 (코드 변경은 anon API 보안 보강이라 기존 인증 플로우 회귀 없음)
+
+### 주요 결정 / 교훈
+
+- **M-1 차단급은 1차 보안 재리뷰에서 미포착** — 신규 코드 작성 직전이라도 "기존 코드 정합성"을 한 번 더 검증할 가치. 보안 재리뷰 후 "리뷰" 단독 지시로 code+security 병렬 라운드를 한 번 더 돌렸기에 발견. **수정 적용 전 추가 라운드 1회 = 차단급 1건 차단**
+- **N-3 보안 권장 코드 폐기** — security-reviewer 의 권장 코드 그대로 적용했으면 정상 위젯 cross-origin 요청 전부 차단되는 회귀. **권장 코드도 두 번째 관점(code-reviewer)으로 비판적 검토 필수** 교훈 재실증
+- **PII 해시화 + 이중 redact 패턴 정립** — `sensitiveFields.ts 'ip'` 로 raw IP 로깅 차단 (방어선) + 의도적 사용처는 `hashClientIp()` 로 SHA-256 prefix 변환 (`ipHash` 필드, redact 비대상). 추적 가치 유지 + raw 노출 차단
+- **마스킹 정규식 false positive 회피 균형** — 보안 강화 시 정상 디버깅 정보 보존이 운영 가시성에 직결. `api[_-]?key` prefix 강제 (`primary key` 등 정상 메시지 보존), `Authorization` 라인 끝까지 (다중 단어 스킴 + base64 padding)
+
+### learnings.md 추가 (+3, 총 40건)
+
+- 보안 재리뷰 후 추가 code+security 병렬 라운드의 가치 (M-1 차단급 발견 사례)
+- 보안 리뷰 권장 코드도 비판적 재검토 (N-3 D-3-a 사례 — 정상 트래픽 회귀 회피)
+- PII 해시화 + 이중 redact 방어선 패턴 (raw 필드 redact + hashed 필드 보존)
+
+### Backlog (다음 세션)
+
+- **🟡 0007 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` 트리거 활성화
+- **이번 세션 변경 1 커밋** — 5 수정 + 1 신규
+- **Task 1-6-b `/widget.js` 번들 스캐폴딩** (~90분)
+- **Task 1-6-c RAG 연결** (~60분, Task 1-7 지식 업로드 경로 선행)
+- **N-3 (Phase 2)**: OPTIONS DB DoS + bot enumeration timing oracle 잔존 — 트래픽 증가 시 in-memory LRU 캐시 또는 별도 limiter 재검토
+- **N-5 (Phase 2)**: rate limit fail-open ADR 작성 (과금 도입 전 fail-closed 정책 결정)
+- **N-6 (Task 1-6-c 전)**: 입력 토큰 상한 (`MAX_INPUT_TOKENS`) 설계 — multi-turn/RAG 도입 시 4000자 × N 메시지 = 입력 토큰 폭발
+- **Phase 2 backlog (이월)**: Anthropic 다중 text 블록 병합 / ERROR_MESSAGES i18n / sandboxed iframe 지원 / Prompt Injection 방어 (Task 1-0-c 이관)
+
+---
+
+## 직전 세션(2026-04-18 심야 Ⅲ) 완료 내역 — Task 1-6-a Chat API
 
 ### Task 1-6-a — 위젯 Chat API 최소 구현 (Epic 1-6 진입, ~120분)
 
@@ -73,8 +130,8 @@
   - `src/core/security/origin-check.ts` — JSDoc 에 null origin 차단 + sandboxed iframe 경고 명문화
 - **설계 결정 8건** (Jayden 승인):
   1. JSON 단일 응답 (스트리밍 Phase 2) / 2. Anthropic 우선 / 3. 복합키 `${botId}:${ip}` /
-  4. 100 req/1h 봇당 IP / 5. POST 마다 messages insert / 6. service_role + `status='active'` /
-  7. 구조화 JSON 에러 `{ error, code }` (enumeration 방지) / 8. 서버 conversationId UUID 할당
+  2. 100 req/1h 봇당 IP / 5. POST 마다 messages insert / 6. service_role + `status='active'` /
+  3. 구조화 JSON 에러 `{ error, code }` (enumeration 방지) / 8. 서버 conversationId UUID 할당
 - **독립 리뷰 2 에이전트 병렬**:
   - code Ship (M-1 warn 로깅 / M-2~M-4 Phase 2 backlog)
   - security Ship (MEDIUM 3: T12 Anthropic raw Error / T8 메시지 저장 DoS / T3 비용 공격)

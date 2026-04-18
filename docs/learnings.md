@@ -963,3 +963,82 @@ try {
 - `pnpm pre-commit` 또는 lint 규칙으로 `catch (err) { logger.error({ err`) 직접 기록 검출 가능하면 자동화 (Phase 2 backlog).
 
 ---
+
+### 2026-04-18 보안 재리뷰 후 추가 code+security 병렬 라운드의 가치 (설계 결정)
+
+**증상**: Task 1-6-a Chat API 보안 재리뷰(MEDIUM 3 + LOW 3 신규 발견, 일괄 수정 계획 수립) 직후 "리뷰" 단독 지시로 code+security 병렬 추가 라운드 실행. 결과: 🔴 차단급 M-1 (`route.ts:267` 새 conversation INSERT 에 `visitor_id` 누락 → `has_identity` check 위반 → 모든 신규 conversation 500 실패) 발견. **두 에이전트 모두 합의**. 이 버그는 직전 1차 보안 재리뷰 + 본체 1차 code+security 리뷰에서도 미포착 — production 배포 시점에야 첫 위젯 호출에서 드러났을 것.
+
+**원인**: 보안 재리뷰는 "수정안의 보안 적정성"에 집중하는 경향. 기존 코드의 **정합성 (스키마 제약 충족, 호출 흐름 일관성)** 은 사각지대. code-reviewer 가 별도 관점으로 "이 코드는 실제 동작하는가" 검증해야 발견. 또한 보안 권장 코드 자체가 회귀를 만들 수 있음 (N-3 D-3-a 가 정상 위젯 차단 → 둘 다 폐기 합의로 발견).
+
+**해결**: 보안 이슈 일괄 수정 직전에 **code+security 병렬 라운드 1회 추가** 정책. 단일 보안 라운드 → 수정 적용 → 코드 후속 라운드 패턴 대신, **수정 직전 양쪽 동시 검증**.
+
+**규칙** ⭐:
+
+- **신규 보안 함수 / 보안 수정 일괄 적용 직전에 code+security 병렬 라운드 1회 추가 의무**. 비용 ~10-15분, 가치 차단급 1건 = 1시간+ 디버깅 + production 사고 회피. ROI 명확.
+- 보안 리뷰 단일 관점은 "수정안 적정성"에 갇힘. **code-reviewer 가 "기존 코드 정합성" + "수정으로 인한 회귀" 검증 보완**.
+- "리뷰" 단독 지시 → code-reviewer + security-reviewer 병렬 (memory `feedback_review_dual_agents.md` 일치).
+- **두 에이전트가 합의한 발견은 강한 신호** — 단독 발견보다 우선순위 상위. 합의 = false positive 가능성 낮고 두 관점에서 위협 명확.
+- 1차 보안 리뷰 → 수정 → **추가 라운드 → 잔여 발견 반영** 의 3단 패턴이 신규 보안 함수의 표준. 1차만으로 ship 금지.
+
+---
+
+### 2026-04-18 보안 리뷰 권장 코드도 비판적 재검토 (설계 결정)
+
+**증상**: Task 1-6-a 보안 재리뷰의 N-3 (OPTIONS bot lookup → DB DoS + bot enumeration timing oracle) 권장 수정안:
+
+```typescript
+return new NextResponse(null, {
+  status: 204,
+  headers: { Vary: "Origin", "Access-Control-Max-Age": "600" },
+});
+```
+
+이 코드는 `Access-Control-Allow-Origin` 헤더 부재 → 브라우저가 cross-origin 응답 거부 → **정상 위젯의 cross-origin POST 요청 전부 차단**. 즉 위젯 기능 자체 무력화. code+security 추가 라운드에서 둘 다 폐기 합의 → Phase 2 backlog 이동.
+
+**원인**: 보안 권장 코드는 "이 위협을 막는다"에 집중하지만 **"정상 트래픽이 동작하는가"를 동시에 검증 안 하는 경우** 있음. CORS preflight 의 `Access-Control-Allow-Origin` 헤더는 브라우저 CORS 정책의 핵심이라, 빠뜨리면 cross-origin 자체가 깨짐. 또한 N-3 위협 자체 (bot enumeration timing oracle) 의 실질 영향이 작은데 폐기 비용이 큼 (정상 위젯 100% 차단).
+
+**해결**: N-3 폐기 → Phase 2 backlog. 대안 검토 (in-memory LRU 캐시 / 별도 limiter / `*` 단순 응답) 모두 트레이드오프 있음 → MVP 는 lookup 유지 + `Access-Control-Max-Age=600` 으로 preflight 자연 최소화에 의존.
+
+**규칙** ⭐:
+
+- **보안 리뷰 권장 코드는 그대로 적용 전 "정상 트래픽이 동작하는가" 검증**. 특히 CORS / 인증 / 헤더 조작 / 차단 응답 영역은 회귀 발생률 높음.
+- **위협 차단 비용 vs 위협 실질 영향** 비교 — 비용 ≫ 영향이면 backlog 또는 alternative.
+- code+security 병렬 라운드가 **상호 검증 메커니즘**. security 권장이 code 관점에서 회귀 만들면 둘 다 합의로 폐기.
+- 보안 리뷰 결과 정리 시 "권장 코드를 그대로 적용 시 부수 효과는?" 컬럼 추가 검토.
+- "권장 X 가 위협 Y 를 막지만 정상 트래픽 Z 를 차단" 패턴 발견 시 PROGRESS/learnings 즉시 기록 (다음 세션 재발 방지).
+
+---
+
+### 2026-04-18 PII 해시화 + 이중 redact 방어선 패턴 (설계 결정)
+
+**증상**: Task 1-6-a 보안 재리뷰(N-4) — 운영 가시성 위해 `logger.warn` 에 클라이언트 IP 포함 권장. 그러나 IP 는 PIPA 제2조 1항 / GDPR Recital 30 기준 **식별 가능 정보** — 평문 로깅은 컴플라이언스 위험 (장기 보존, 외부 로그 수집기 전송 시 더 큼). 한편 raw IP 없이는 동일 IP 의 반복 시도 추적이 불가능 (보안 가시성 손실).
+
+**원인**: PII 처리 시 "전혀 로깅 안 함" vs "평문 로깅" 이분법 사고. 실제로는 **"변환 후 로깅"** 이 균형점 — 추적 가치 (동일 IP → 동일 해시) 보존 + 원본 노출 방어.
+
+**해결**: **이중 방어선**:
+
+1. `hashClientIp(ip)` — SHA-256 prefix 8자 (`ipHash` 필드) 변환 후 의도적 사용처에서 로깅
+2. `sensitiveFields.ts 'ip'` 추가 — 실수로 raw IP 가 logger 객체에 들어가도 Pino redact 가 자동 마스킹
+
+`ipHash` 는 redact 대상 아님 (해시화로 PII 제거된 값). `ip` ↔ `ipHash` 명명 분리가 핵심.
+
+```ts
+// route.ts
+function hashClientIp(ip: string): string {
+  return createHash("sha256").update(ip).digest("hex").slice(0, 8);
+}
+
+logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
+// raw clientIp 가 실수로 들어가면 sensitiveFields.ts 'ip' 가 [Redacted]
+```
+
+**규칙** ⭐:
+
+- **PII 직접 노출 vs 로깅 가치 트레이드오프 시 해시화 패턴 우선 검토**. SHA-256 prefix 8자면 충돌 확률 충분히 낮으면서 추적 (동일 입력 → 동일 해시) 보존.
+- **이중 방어선** 필수 — (1) 의도적 사용처는 변환 헬퍼 경유, (2) raw 필드명은 `sensitiveFields` 에 등록해 실수 누출 차단. 둘 중 하나 빠지면 방어선 깨짐.
+- **변환 함수 명시화** — 인라인 정의보다 헬퍼 함수. `hashClientIp(ip)` 처럼 의도가 함수명에 드러나야 향후 다른 개발자가 raw 회귀 안 함.
+- 해시 필드명은 raw 와 구분 (`ip` vs `ipHash`, `email` vs `emailHash`). 같은 이름이면 Pino redact 가 양쪽 모두 잡아 의도 불분명.
+- 적용 가능 PII: IP (동일성 추적), 이메일 (해시 vs 부분 마스킹), 전화번호 (통계 파티셔닝), 결제 카드 번호 (PAN — 마지막 4자리 보존 패턴 별도). **목적별 변환 방식 선택**.
+- ADR 권장 (Phase 2): "PII 로깅 정책" — 어떤 PII 를 어떤 변환으로 다룰지 단일 진실.
+
+---
