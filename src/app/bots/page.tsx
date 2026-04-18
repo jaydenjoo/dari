@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
 import type { BotStatus } from "@/core/db/types";
 
@@ -55,15 +56,7 @@ export default async function BotsListPage() {
 
   return (
     <main className="relative min-h-screen bg-[#fafbfc] px-6 py-12">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, #dde0e4 0.5px, transparent 0.5px)",
-          backgroundSize: "22px 22px",
-        }}
-      />
+      <PageBackground />
 
       <div className="relative mx-auto w-full max-w-5xl">
         <header className="mb-10 flex flex-wrap items-end justify-between gap-4">

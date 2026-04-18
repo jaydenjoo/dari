@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { signOut } from "./auth/logout/actions";
+import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
 
 export default async function Home() {
@@ -10,15 +11,7 @@ export default async function Home() {
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#fafbfc] px-6 py-12">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, #dde0e4 0.5px, transparent 0.5px)",
-          backgroundSize: "22px 22px",
-        }}
-      />
+      <PageBackground />
 
       <div className="relative w-full max-w-xl rounded-3xl border border-gray-200/80 bg-white p-10 shadow-[0_4px_12px_rgba(0,0,0,0.03),0_20px_48px_rgba(0,0,0,0.08)]">
         <div className="mb-6 flex items-center gap-3">

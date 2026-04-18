@@ -5,7 +5,7 @@ import { useEffect } from "react";
 
 import { PageBackground } from "@/components/ui/page-background";
 
-export default function BotsListError({
+export default function BotDetailError({
   error,
   reset,
 }: {
@@ -14,7 +14,7 @@ export default function BotsListError({
 }) {
   useEffect(() => {
     Sentry.captureException(error, {
-      tags: { route: "/bots", scope: "list-page" },
+      tags: { route: "/bots/[slug]", scope: "detail-page" },
       extra: { digest: error.digest },
     });
   }, [error]);
@@ -25,7 +25,7 @@ export default function BotsListError({
 
       <div className="relative w-full max-w-md rounded-2xl border border-gray-200/80 bg-white p-10 text-center shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]">
         <h2 className="mb-2 text-xl font-bold tracking-[-0.02em] text-gray-900">
-          봇 목록을 불러오지 못했어요
+          봇 상세를 불러오지 못했어요
         </h2>
         <p className="mb-6 text-sm leading-relaxed text-gray-500">
           잠시 후 다시 시도해 주세요. 문제가 계속되면 관리자에게 알려주세요.

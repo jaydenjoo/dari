@@ -1,15 +1,9 @@
+import { PageBackground } from "@/components/ui/page-background";
+
 export default function Loading() {
   return (
     <main className="relative min-h-screen bg-[#fafbfc] px-6 py-12">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, #dde0e4 0.5px, transparent 0.5px)",
-          backgroundSize: "22px 22px",
-        }}
-      />
+      <PageBackground />
 
       <div className="relative mx-auto w-full max-w-5xl">
         <header className="mb-10">

@@ -28,6 +28,14 @@ export const SENSITIVE_FIELD_NAMES = [
   "phone",
   "phoneNumber",
   "phone_number",
+  // 주의: userId / user_id 는 redact 하지 않는다.
+  //   - UUID 형태의 auth.uid() 는 직접 PII 가 아니며, 요청 상관분석(incident
+  //     correlation)의 핵심 키. 프로덕션에서 "어떤 유저에게 발생한 에러"를
+  //     추적하려면 반드시 로그에 남아야 한다.
+  //   - OWASP Logging Cheat Sheet 도 UUID 식별자 로깅을 권장 (email/phone
+  //     같은 직접 PII 와 구분).
+  //   - Sentry 로 가는 내용은 별도 `beforeSend` redactDeep 이 2차 방어.
+  //   - 근거: Task 1-5-c security-reviewer H-1 재평가 (2026-04-18).
 ] as const;
 
 /** HTTP 헤더명 redact 대상 (case-insensitive 비교). */

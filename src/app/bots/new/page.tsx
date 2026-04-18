@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
 
 import CreateBotForm from "./create-bot-form";
@@ -39,15 +40,7 @@ export default async function NewBotPage() {
             "radial-gradient(circle, rgba(43,124,255,0.06) 0%, transparent 70%)",
         }}
       />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, #dde0e4 0.5px, transparent 0.5px)",
-          backgroundSize: "22px 22px",
-        }}
-      />
+      <PageBackground />
 
       <div className="relative mx-auto w-full max-w-2xl">
         <nav className="animate-in fade-in mb-6 duration-500">

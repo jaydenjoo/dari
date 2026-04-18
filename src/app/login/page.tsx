@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageBackground } from "@/components/ui/page-background";
 import { signInWithGoogle, signInWithPassword } from "./actions";
 
 type SearchParams = Promise<{ error?: string; next?: string }>;
@@ -55,16 +56,7 @@ export default async function LoginPage({
             "radial-gradient(circle, rgba(43,124,255,0.06) 0%, transparent 70%)",
         }}
       />
-      {/* 도트 텍스처 */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-50"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, #dde0e4 0.5px, transparent 0.5px)",
-          backgroundSize: "22px 22px",
-        }}
-      />
+      <PageBackground intensity="medium" />
 
       <Card className="relative w-full max-w-md border border-gray-200/80 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.03),0_20px_48px_rgba(0,0,0,0.08)]">
         <CardHeader className="space-y-3 pt-10 pb-6 text-center">
