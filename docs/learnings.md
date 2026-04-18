@@ -901,3 +901,65 @@ Next.js(dev/build/start) / Vitest(test) / Vercel(production) 은 각 빌드/런�
 - 배포 문서 (`docs/environments.md`) 에 "NODE_ENV 는 플랫폼에서 반드시 명시 주입" 체크리스트 항목으로 추가 권장 (backlog).
 
 ---
+
+### 2026-04-18 Anon Chat API 의 "6중 보안 레이어" 체크리스트 (설계 결정)
+
+**상황**: Task 1-6-a — 위젯 Chat API(`/api/chat/[botId]`) 는 **인증 없는 anon 요청** 을 처리하는 첫 엔드포인트. 기존 Supabase RLS 방어 계층이 동작하지 않는(service_role 경유) 상황에서 공격 표면이 급증. 독립 보안 리뷰는 MEDIUM 3건 (Anthropic raw Error 로깅 / 메시지 저장 DoS / max_tokens 비용 공격) 을 포착했고 모두 수용. 이 과정에서 anon 엔드포인트가 공통적으로 요구하는 방어 구조가 드러남.
+
+**원인**: anon API 는 "누가 호출하는지 모른다" 는 전제에서 각 요청이 어떤 봇에 속하는지 / 어디서 왔는지 / 얼마나 자주 오는지 / 어떤 대화에 쓸지 / 무엇을 반환할지 / 에러 시 어떻게 일반화할지를 **엔드포인트 코드가 직접 책임** 져야 한다. 한 레이어만 빠져도 bypass 경로 생김.
+
+**해결**: Dari 의 anon 엔드포인트는 아래 6개 레이어를 모두 관통해야 한다.
+
+```
+1. resource lookup     — service_role + status='active' 필터. 실패 시 404 일반화
+2. origin 검증          — matchAllowedDomain (`allowedDomains` 기준)
+3. rate limit          — factory 재사용, 복합키 `{resource}:${ip}` (리소스 간 쿼터 격리)
+4. 소유권 검증          — nested resource(conversationId 등) 의 부모 리소스 일치 확인
+5. 응답 최소화          — config 원문·systemPrompt·내부 식별자 미노출. 반환 필드 화이트리스트
+6. 에러 일반화          — 부재 / 정책 위반 / 포맷 오류 모두 동일 코드·메시지로 수렴 (enumeration 방지)
+```
+
+Task 1-6-a 의 `src/app/api/chat/[botId]/route.ts` 는 이 6개를 POST 진입 직후 시퀀셜 체크로 구현. 각 레이어는 helper 로 분리되어 재리뷰/확장이 용이.
+
+**규칙** ⭐:
+
+- **새 anon 엔드포인트(위젯 이외의 공개 API, 웹훅 수신 등)를 추가할 때 6 레이어 전부 통과 여부를 체크리스트로 검증**. 하나라도 빠지면 Plan 단계에서 명시적으로 유보 근거 기록.
+- 리소스 lookup 은 반드시 **status/활성 필터** 를 포함 (soft-delete 된 리소스 접근 차단). `status` 가 없는 테이블도 유사 플래그(예: `is_public`, `deleted_at IS NULL`) 필수.
+- Rate limit key 는 **리소스 식별자 + 호출자 식별자 복합** 이 기본. 한쪽만 사용하면 리소스 간 쿼터 간섭 또는 리소스별 격리 실패.
+- 응답 필드는 **화이트리스트 방식** — `const response = { conversationId, message }` 처럼 명시적 구성. DB row 전체 spread 금지 (internal 필드 노출 위험).
+- 에러 응답 코드/메시지는 **enumeration 일반화** — "bot 없음" vs "RLS 차단" 을 구분 가능한 응답은 scraping 도구에게 힌트 제공.
+- 비용·저장 공격 방어는 **레이어별 상한** — 요청 크기(Zod), 봇당 rate(factory), 리소스당 누적(message count), AI output(maxTokens clamp) 각각 별도로 체크.
+
+---
+
+### 2026-04-18 외부 SDK catch 로깅은 `sanitizeLoggableError` 경유 원칙 (설계 결정)
+
+**증상**: Task 1-6-a 보안 리뷰(MEDIUM T12) — `callAnthropic` / `loadActiveBot` / `resolveConversationId` 등 외부 SDK(Anthropic, Supabase) catch 블록에서 `logger.error({ err }, ...)` 로 raw Error 객체를 그대로 기록. Anthropic SDK `APIError.message` 는 Authorization 헤더·API 키 값을 포함할 수 있고, Supabase PostgrestError 도 URL 을 message 에 포함한다. Pino redact 는 필드명 기반이라 `err.message` 안 inline 문자열은 걸러내지 못함 → Sentry bridge 로 그대로 전달.
+
+**원인**: 기존에 `sanitizeLoggableError` 는 Task 1-0-a fail-open 전용으로 factory.ts 내부에 비공개 함수였음. 다른 외부 SDK catch 에서는 raw Error 그대로 로깅하는 관행이 확산. Anthropic/Supabase 처럼 **어떤 외부 서비스든 에러 메시지에 secret 이 들어갈 수 있다** 는 점을 간과.
+
+**해결**: `sanitizeLoggableError` 를 export 하고 **모든 외부 SDK catch 경로에서 필수 경유**.
+
+```ts
+// factory.ts
+export function sanitizeLoggableError(err: unknown): { name: string; message: string };
+
+// route.ts, ai/*, db/*, 외부 웹훅 핸들러 등
+try {
+  await externalSDK.call(...);
+} catch (err) {
+  logger.error({ err: sanitizeLoggableError(err), ...ctx }, "...");
+}
+```
+
+마스킹 규칙(URL / Bearer 토큰 / `token=` 쿼리) 은 기존 그대로. 필드명 redact(Pino) + message inline 마스킹(sanitize) 이 2중 방어선을 이룬다.
+
+**규칙** ⭐:
+
+- **외부 SDK(Anthropic, Supabase, Upstash, Stripe, Firecrawl 등) catch 블록의 logger.error 는 반드시 `sanitizeLoggableError` 경유**. 내부 로직 에러(직접 throw 한 Error)는 예외 — 자체 메시지 통제하에 있음.
+- `Error.message` 는 Pino redact 미도달 영역. inline 문자열 마스킹이 없으면 secret 이 Sentry/로그 파일로 유출. 이는 OWASP A09 (Security Logging Failures) 의 전형 패턴.
+- 신규 외부 SDK 도입 시 **그 SDK 가 에러 메시지에 secret 을 포함하는지를 먼저 조사**. 조사 없이 raw Error 로깅은 금지.
+- 중앙 마스킹 함수의 정규식은 공격자가 우회 쉽지만, 2중 방어(필드 redact + 메시지 마스킹)의 두 번째 layer 가 없는 것보다 크게 낫다. 정규식 확장은 새 secret 포맷(JWT, SSN 등) 발견 시 증분 추가.
+- `pnpm pre-commit` 또는 lint 규칙으로 `catch (err) { logger.error({ err`) 직접 기록 검출 가능하면 자동화 (Phase 2 backlog).
+
+---

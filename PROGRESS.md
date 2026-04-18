@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: 1-0 보안/안정성 — **1-0-a Rate Limit ✅ / 1-0-b CORS 유틸 ✅** + γ 정비(Pretendard/DM Sans/JetBrains Mono + CI Node 24) ✅
-- 상태: **Task 1-0-a + 1-0-b + γ 정비 완결** (vitest 93 → 124, +31) / 코드 **미커밋** 상태 → 다음 세션 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분) 또는 **Epic 1-6 위젯 런타임 스캐폴딩** 중 택 1
+- Epic: **Epic 1-6 위젯 런타임 진입 — 1-6-a Chat API ✅** (Epic 1-0 보안/안정성 1-0-a/1-0-b/γ(1·2) 완료, Epic 1-5 봇 CRUD 완결)
+- 상태: **Task 1-6-a Chat API 최소 구현 완료** (vitest 124 → 127, +3) / **코드 미커밋** → 다음 세션 **Task 1-6-b `/widget.js` 번들 스캐폴딩** (~90분) 또는 **Task 1-6-c RAG 연결** (~60분)
 
 ## 완료된 Epic
 
@@ -59,7 +59,62 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야 Ⅱ) 완료 내역
+## 이번 세션(2026-04-18 심야 Ⅲ) 완료 내역 — Task 1-6-a Chat API
+
+### Task 1-6-a — 위젯 Chat API 최소 구현 (Epic 1-6 진입, ~120분)
+
+- **신규 4파일**:
+  - `src/app/api/chat/[botId]/route.ts` (~285줄) — POST (anon 허용) + OPTIONS (preflight) + 6중 보안 레이어 (bot lookup → origin → rate limit → conv 소유권 → 응답 최소화 → 에러 일반화)
+  - `src/core/ai/anthropic-client.ts` — SDK 싱글턴 (`@anthropic-ai/sdk` 0.90)
+  - `src/core/ratelimit/bot-chat-limiter.ts` — 봇당 IP 100 req/h (factory 재사용, 복합키 `${botId}:${ip}`)
+  - `src/core/ratelimit/bot-chat-limiter.test.ts` — 3 테스트 (dev skip / prod 호출 / 차단)
+- **수정**:
+  - `src/core/ratelimit/factory.ts` — `sanitizeLoggableError` export (외부 SDK catch 공통 마스킹)
+  - `src/core/security/origin-check.ts` — JSDoc 에 null origin 차단 + sandboxed iframe 경고 명문화
+- **설계 결정 8건** (Jayden 승인):
+  1. JSON 단일 응답 (스트리밍 Phase 2) / 2. Anthropic 우선 / 3. 복합키 `${botId}:${ip}` /
+  4. 100 req/1h 봇당 IP / 5. POST 마다 messages insert / 6. service_role + `status='active'` /
+  7. 구조화 JSON 에러 `{ error, code }` (enumeration 방지) / 8. 서버 conversationId UUID 할당
+- **독립 리뷰 2 에이전트 병렬**:
+  - code Ship (M-1 warn 로깅 / M-2~M-4 Phase 2 backlog)
+  - security Ship (MEDIUM 3: T12 Anthropic raw Error / T8 메시지 저장 DoS / T3 비용 공격)
+- **일괄 수정 5건 반영**:
+  - Sec M-1 (T12): `sanitizeLoggableError` 4 경로 적용 (loadActiveBot / user msg / assistant msg / Anthropic catch)
+  - Sec M-2 (T8): `MAX_MESSAGES_PER_CONVERSATION=200` — 상한 초과 시 새 conversation 전환
+  - Sec M-3 (T3): `CHAT_MAX_OUTPUT_TOKENS=2048` Chat 레이어 clamp (비용 노출 819K→204K 토큰/h/봇)
+  - Code M-1: `resolveConversationId` bot_id 불일치 시 `logger.warn` (운영 가시성)
+  - 설계 문서화: null origin / sandboxed iframe JSDoc
+- **검증**: pnpm check (tsc + eslint + prettier + **vitest 127/127**) / pnpm build (Turbopack clean, `/api/chat/[botId]` Dynamic 등록)
+
+### 주요 결정 / 발견
+
+- **Epic 1-6 진입** — Phase 1 위젯 런타임의 첫 엔드포인트. 기존 Task 1-0-a (rate limit factory) + 1-0-b (origin-check) 유틸이 **실제 endpoint 에서 첫 실증**. 추상이 실전 커버 확인.
+- **Anon API 6중 보안 레이어 체크리스트** — 설계 결정으로 공식화. 향후 위젯 이외 공개 API / 웹훅 수신 등 신규 anon 엔드포인트 추가 시 반드시 통과. learnings 기록.
+- **`sanitizeLoggableError` export 원칙** — 외부 SDK(Anthropic/Supabase/Upstash/Stripe/Firecrawl 등) catch 블록의 logger.error 는 반드시 이 함수 경유. Pino 필드 redact + message inline 마스킹 2중 방어선 확립.
+- **max_tokens Chat 레이어 clamp** — 소유자 설정(8192)과 무관하게 엔드포인트에서 2048 강제. Phase 2 과금 모델 설계 시 재조정 예정.
+- **Anthropic ContentBlock type narrowing** — SDK 의 `ContentBlock` union 에 `ThinkingBlock` 포함되어 `.text` 접근 시 타입 에러. `for` 루프로 `block.type === "text"` 분기 후 첫 text 반환 패턴 채택.
+
+### learnings.md 추가 (+2, 총 37건)
+
+- Anon Chat API 의 "6중 보안 레이어" 체크리스트 (설계 결정, 향후 anon 엔드포인트 템플릿)
+- 외부 SDK catch 로깅은 `sanitizeLoggableError` 경유 원칙 (설계 결정, OWASP A09 방어)
+
+### Backlog (다음 세션)
+
+- **Task 1-6-b `/widget.js` 번들 스캐폴딩** (~90분) — 설치 스니펫 + float button + chat panel 최소 UI + Chat API 호출
+- **Task 1-6-c RAG 연결** (~60분) — knowledge_chunks 벡터 검색 + top-K system 주입 (단, Task 1-7 지식 업로드 경로가 선행되어야 풀 흐름 검증 가능)
+- **Task 1-6-a 보안 재리뷰 (선택)** — "신규 보안 함수 재리뷰 필수" 교훈 적용. 일괄 수정 5건 반영 후 재리뷰로 잔여 bypass 포착 가치
+- **코드 미커밋 처리** — Task 1-6-a 1 커밋 (factory export 포함)
+- **Phase 2 backlog** (이번 세션 리뷰에서 수용·유보):
+  - Anthropic 다중 text 블록 병합 (streaming/tool-use 도입 시)
+  - OPTIONS bot 조회 in-memory 캐시 (트래픽 증가 시)
+  - ERROR_MESSAGES i18n
+  - sandboxed iframe 지원 여부 (위젯 embed 가이드 작성 시 결정)
+  - Prompt Injection 방어 (Task 1-0-c 이관, Chat API 내부 흡수 가능성)
+
+---
+
+## 직전 세션(2026-04-18 심야 Ⅱ) 완료 내역
 
 ### Task 1-0-a — Rate Limit 인프라 (경로 α, ~100분)
 
@@ -571,23 +626,26 @@
 
 ### 🎯 경로 선택
 
-**경로 α (권장): γ-3 — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 도입**
+**경로 α (권장): Task 1-6-b — `/widget.js` 번들 스캐پ딩**
 
-- 브라우저 Sentry 이벤트 preview/prod 분리 (ADR-008 backlog)
-- 스코프: env.ts `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum + `instrumentation-client.ts` 반영 + docs/environments.md 갱신
-- 소요: 45m
+- 설치 스니펫 `<script src="https://dari.example.com/widget.js" data-bot-id="slug"></script>`
+- float button + chat panel 최소 UI + conversationId localStorage
+- Task 1-6-a Chat API 첫 호출 실증 → CORS 종단간 검증
+- 번들러 결정 포인트: Next.js Route `/widget.js` vs 별도 esbuild 빌드
+- 소요: Plan 20m + 구현 90m
 
-**경로 β: Epic 1-6 위젯 런타임 스캐폴딩**
+**경로 β: Task 1-6-c — RAG 연결**
 
-- `/widget.js` + `/api/chat/*` Chat API + RAG 연결 + `withAllowedOrigin` wrapper 배선
-- allowedDomains 빈 배열 정책 재평가 (위젯 공개 시점)
-- Task 1-0-a/b 유틸 실증. Phase 1 핵심
-- 소요: Plan 30m + 첫 Task 90~120m (2~3 세션 연장)
+- knowledge_chunks 벡터 검색 + top-K 임베딩 유사도 (pgvector)
+- Chat API `messages.create({ system: systemPrompt + context, ... })`
+- 선제 요건: **Task 1-7 지식 업로드 경로가 있어야 실데이터 검증 가능** → 지식 업로드 먼저 고려 가능
+- 소요: 60m (단독) / 150m (지식 업로드 포함)
 
-**경로 γ: 코드 커밋 + 리뷰 미소화**
+**경로 γ: Task 1-6-a 보안 재리뷰 + 미커밋 커밋**
 
-- 이번 세션 코드 커밋 1~3건 분할
-- 1-5-c/d 미반영 리뷰 backlog (generateMetadata / error.tsx digest-only / Optimistic locking) 중 1~2건
+- 신규 보안 함수 재리뷰 교훈 적용 (SSRF IPv6 / CORS TLD 선례)
+- 일괄 수정 5건 후 잔여 bypass 포착
+- 커밋 1건 분할 (Task 1-6-a)
 - 소요: 30~45m
 
 ### 그 외 대기
@@ -643,6 +701,7 @@
 - [x] **Task 1-0-a: Rate Limit 인프라 — Upstash factory 공통화 + 봇 생성 per-user 20/day + 독립 리뷰 2 (Fix-then-ship, 일괄 5건) + sanitizeLoggableError + env.NODE_ENV fail-fast**
 - [x] **Task 1-0-b: CORS allowedDomains 검증 유틸 — normalize/match/cors 3함수 + 재리뷰 HIGH+MH+LOW 9건 일괄 반영 + 30 테스트 (TLD/IP/userinfo/trailing dot/IDN)**
 - [x] **γ 정비(1·2): Pretendard variable + DM Sans + JetBrains Mono + CI Node 24 승격**
+- [x] **Task 1-6-a: 위젯 Chat API 최소 구현 (Epic 1-6 진입) — anon `/api/chat/[botId]` POST + OPTIONS + Anthropic SDK 싱글턴 + bot-chat-limiter 봇당 IP 100/h + 6중 보안 레이어 + 독립 리뷰 2 + 일괄 5건 반영 (sanitize / 메시지 상한 200 / max_tokens clamp 2048 / warn 로깅 / null origin 문서화)**
 
 ## 세션 이력
 
@@ -658,9 +717,10 @@
 - **2026-04-18 (낮): Task INFRA-1 + 0-D-3 + 1-5-a — Playwright 로컬 인프라 + id/pw 로그인 폼 + /bots 목록 페이지 + 교훈 3건**
 - **2026-04-18 (오후): Task 0-D-4 + 0-D-5 + gitleaks hook — 로그인 rate limit + 비번 8자 + Husky v9 pre-commit + 교훈 2건**
 - **2026-04-18 (저녁): Task 1-5-b — /bots/new 봇 생성 폼 + RLS INSERT 정책 첫 실증 + 독립 리뷰 2 (code Fix then ship + security Ship as-is) + 교훈 2건 (supabase-js insert as never / React 19 useEffect 금지) — Phase 1 진입**
-- **2026-04-18 (심야 Ⅱ): Task 1-0-a Rate Limit + Task 1-0-b CORS 유틸 + γ 정비(폰트/CI24) — vitest +38 (93 → 124) / 독립 리뷰 3회 + 재리뷰 1회 / 교훈 3건 (server-only vitest alias / CORS TLD bypass / NODE_ENV Zod default) — 코드 미커밋**
+- **2026-04-18 (심야 Ⅱ): Task 1-0-a Rate Limit + Task 1-0-b CORS 유틸 + γ 정비(폰트/CI24) — vitest +38 (93 → 124) / 독립 리뷰 3회 + 재리뷰 1회 / 교훈 3건 (server-only vitest alias / CORS TLD bypass / NODE_ENV Zod default) — 3 커밋 완료**
+- **2026-04-18 (심야 Ⅲ): Task 1-6-a 위젯 Chat API 최소 (Epic 1-6 진입) — anon `/api/chat/[botId]` + 6중 보안 레이어 + Anthropic SDK + bot-chat-limiter / vitest 124 → 127 (+3) / 독립 리뷰 2 + 일괄 5건 반영 / 교훈 2건 (anon 6중 레이어 / 외부 SDK sanitize 원칙) — 코드 미커밋**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-18 심야 Ⅱ (Task 1-0-a + 1-0-b + γ 완료, Epic 1-0 보안/안정성 2/3)
+- 날짜: 2026-04-18 심야 Ⅲ (Task 1-6-a 완료, Epic 1-6 위젯 런타임 1/4)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)
