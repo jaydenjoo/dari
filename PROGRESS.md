@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: 0 (기반 공사)
-- Epic: 0-D 인증 — Task 0-D-1 (OAuth) + 0-D-2 (RLS) 완료
-- 상태: **owner 기반 RLS 활성화 완결** → 다음 경로 선택 (0-E-6 관찰성 탐지 / Phase 1 진입 / 짧은 정비)
+- Phase: 0 (기반 공사) + Phase 1 착수
+- Epic: 0-D 인증 완결 (0-D-1 OAuth / 0-D-2 RLS / 0-D-3 id·pw) + INFRA Playwright + Task 1-5-a 목록 페이지 + E2E 5건
+- 상태: **관리자 초대 모델 + Playwright E2E 자동화 가동** → 다음 경로 (Task 1-5-b 생성 폼 / 0-E-6 / 짧은 정비)
 
 ## 완료된 Epic
 
@@ -46,7 +46,70 @@
   - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
   - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
 
-## 이번 세션(2026-04-18 오전) 완료 내역
+## 이번 세션(2026-04-18 낮) 완료 내역
+
+### Task INFRA-1 — Playwright 로컬 인프라
+
+- `@playwright/test` 1.59 + `dotenv` 17.4 devDep + Chromium 바이너리
+- `playwright.config.ts`: baseURL 4000 / globalSetup·Teardown / webServer reuseExistingServer / trace·video retain-on-failure
+- `tests/e2e/package.json` `{"type": "module"}` — 서브스코프 ESM 격리 (루트 tsconfig 무관, Playwright ESM/CJS 판정 해소)
+- `tests/e2e/support/test-accounts.ts` — Supabase admin client (`Authorization: Bearer <service_role>` 명시) + `createTestUser` / `deleteTestUser` / `deleteTestUserByEmail`
+- `tests/e2e/global-setup.ts` / `global-teardown.ts` — 테스트 계정 `e2e-main@dari.test` lifecycle + state 파일 + self-heal
+- `tests/e2e/support/auth-helpers.ts` — `loginWithPassword` / `logout` 헬퍼
+- `tests/e2e/smoke.spec.ts` — 인프라 검증 1건
+- `pnpm test:e2e` / `pnpm test:e2e:ui` scripts
+
+### Task 0-D-3 — id/pw 로그인 폼 (관리자 초대 모델)
+
+- `src/app/login/actions.ts`: `signInWithPassword` Server Action (Zod `email()`+`min(6)` + `isSafeNextPath` 재사용)
+- `src/app/login/page.tsx`: 폼 + "또는" 구분선 + 기존 Google 버튼 병행, `data-testid` 5종
+- 에러 메시지 enumeration 방지 — `invalid_credentials` 단일 코드로 일반화
+- `email` PII 는 기존 0-E-5 redact 정책에 이미 포함 → 로거에서 자동 `*REDACTED*`
+
+### Task 1-5-a-E2E — /bots 빈 상태 E2E 스펙
+
+- `tests/e2e/bots-list.spec.ts`: 4 spec
+  1. 비로그인 접근 → `/login?next=%2Fbots` 리디렉트
+  2. 로그인 후 /bots → 빈 상태 + 새 봇 만들기 CTA
+  3. 로그아웃 → /login 복귀
+  4. 로그인 상태 /login 재접근 → 홈 리디렉트 (재로그인 화면 숨김)
+- 전체 E2E: **5/5 PASS** (smoke 1 + bots-list 4)
+
+### Task 1-5-a 본체 — /bots 목록 페이지 (구현)
+
+- `src/app/bots/page.tsx` — Server Component, RLS 자동 적용 `.returns<BotListItem[]>()` 타입 annotation
+- `src/app/bots/loading.tsx` — Skeleton 3건
+- `src/app/bots/error.tsx` — Sentry.captureException + 재시도 버튼
+- 디자인 시스템 v2 9/10 충족 (2레이어 그림자 / 도트 / 자간 / 순차 등장 / 호버 / 상태 배지 / CTA 화살표 / sm·lg 반응형)
+
+### 검증
+
+- pnpm check (typecheck + lint + format + vitest 67/67) PASS
+- pnpm build (7/7 static + /bots Dynamic 등록) PASS
+- Playwright 5/5 PASS
+- 독립 리뷰 2 에이전트 병렬 → 양쪽 **Fix then ship**; CRITICAL "email 로그 노출 우려" 는 redact 정책에 이미 포함되어 실제로는 해소, 주석 보강만 적용
+
+### 주요 결정 / 발견
+
+- **관리자 초대 모델 확정** — 회원가입 없음. Phase 3 까지 유지. 셀프가입은 별도 Task 로 분리.
+- **Google OAuth 유지 + id/pw 병행** — OAuth 기투자 보존 + E2E 자동화 표준 폼 확보. 경로 B 선택.
+- **SUPABASE_SERVICE_ROLE_KEY 가 실은 anon 이었음** — JWT role claim 디코드로 즉시 발견. Jayden 이 Dashboard 에서 실 service_role 로 교체.
+- **`.returns<T[]>()` 패턴 채택** — supabase-js select literal 복잡도 한계 우회. 2개 이상 컬럼 + 체인 쿼리에서 기본 패턴.
+
+### learnings.md 추가 (+3, 총 21건)
+
+- supabase-js select 문자열 literal 파싱 실패 — `.returns<T[]>()` 회피 (기술 이슈)
+- Playwright ESM 스코프 격리 — `tests/e2e/package.json` (기술 이슈)
+- Supabase admin API Authorization 헤더 명시 필요 (기술 이슈)
+
+### Backlog (다음 세션 또는 별도 Task)
+
+- **Task 0-D-4**: `signInWithPassword` 에 Upstash ratelimit IP 기반 (10회/15분) 적용 — 이미 `@upstash/ratelimit` 설치됨
+- **Task 0-D-5**: 비밀번호 최소 길이 6 → 8자 (OWASP 2025 권장). Zod + `page.tsx` + Supabase 정책 3곳 동기화
+- **gitleaks pre-commit hook 설치** — sec-reviewer 재지적
+- **`email_confirm: true` 셀프서비스 전환 시 제거 TODO** — ADR 또는 주석 권장
+
+## 이전 세션(2026-04-18 오전) 완료 내역
 
 ### Task 0-D-2 (Epic 0-D 완결) — owner 기반 RLS
 

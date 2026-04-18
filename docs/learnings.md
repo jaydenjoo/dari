@@ -353,6 +353,83 @@ training data 는 `middleware.ts` 기준이고 Supabase SSR 공식 가이드도 
 
 ---
 
+### 2026-04-18 supabase-js select 문자열 literal 파싱 실패 — `.returns<T[]>()` 회피 (기술 이슈)
+
+**증상**: Server Component 에서
+```ts
+const { data } = await supabase.from("bots")
+  .select("id, slug, name, status, updated_at")
+  .neq("status", "deleted")
+  .order("updated_at", { ascending: false });
+```
+로 작성한 쿼리에서 `data` 가 `never[] | null` 로 추론됨. 이후 `data.map((bot) => bot.name)` 사용 시 TS2339 `Property 'name' does not exist on type 'never'` 에러 8건 폭발.
+
+**원인**: `@supabase/supabase-js` v2.103 의 select literal 타입 추론은 chain 메서드 (`neq` → `order`) 를 거치면서 narrowing 이 풀려 `never[]` 로 떨어지는 경우가 있음. 공식 타입 정의가 복잡한 computed type 연산을 시도하나 TS 가 depth limit 이나 복잡도에서 포기하면 `never`.
+
+**해결**: 체인 마지막에 `.returns<BotListItem[]>()` 을 덧붙이고 `type BotListItem = { ... }` 를 명시. supabase-js 가 명시된 타입으로 데이터 역직렬화.
+
+```ts
+type BotListItem = { id: string; slug: string; name: string; status: BotStatus; updated_at: string };
+
+const { data, error } = await supabase
+  .from("bots")
+  .select("id, slug, name, status, updated_at")
+  .neq("status", "deleted")
+  .order("updated_at", { ascending: false })
+  .returns<BotListItem[]>();
+```
+
+**규칙** ⭐:
+
+- supabase-js 쿼리에서 select 컬럼 목록이 **2개 이상**이거나 **필터·정렬 체인**이 붙으면 `.returns<T[]>()` 로 명시적 타입 annotation 을 기본 패턴으로 사용. 단일 컬럼 `.select("id")` 는 추론 가능.
+- 타입은 `Database["public"]["Tables"]["bots"]["Row"]` 의 `Pick<...>` 보다 **로컬 `type`** 정의가 가독성·유지보수 나음 (select 컬럼 목록과 필드 목록이 같은 파일에 인접).
+- `select("*")` 로 회피는 금지 (글로벌 규칙 + 번들 크기 증가 + 과다 노출).
+- 한 번 `.returns<T[]>()` 를 붙이면 이후 추가되는 메서드 (`.single()`, `.maybeSingle()`) 도 타입 보존. 체인 **맨 끝**에 붙이는 게 원칙.
+
+---
+
+### 2026-04-18 Playwright + Next.js ESM — `tests/e2e/package.json` 로 서브스코프 격리 (기술 이슈)
+
+**증상**: Playwright 실행 시 `ReferenceError: exports is not defined in ES module scope` 가 `global-setup.ts` 에서 발생. 루트 `tsconfig.json` 은 `module: "esnext"`, `moduleResolution: "bundler"`. 테스트 서브디렉토리용 `tsconfig.json` 에 `module: "commonjs"` override 해봤으나 무시됨. `.mts` 확장자로 변경 시 이번엔 import 한 `./support/fixtures.ts` 에서 `SyntaxError: Named export '...' not found. CommonJS module.` 로 갈아타는 식으로 오류 이동.
+
+**원인**: Playwright 1.59 는 자체 ESM loader 를 쓰는데, 대상 파일의 확장자 + 가장 가까운 `package.json` 의 `type` 필드 조합으로 CJS/ESM 판정. `.ts` 는 기본 CJS 로 처리되고, `.mts` 만 ESM. 확장자 섞이면 import 경로를 따라 타입이 뒤섞임. 루트 tsconfig 의 `module: esnext` 는 **출력 포맷** 힌트일 뿐, Node/Playwright 의 **런타임 모듈 판정** 과 무관.
+
+**해결**: `tests/e2e/package.json` 을 추가해 `{"type": "module"}` 로 서브스코프를 ESM 로 명시. 그 이후 디렉토리 아래 `.ts` 전체가 ESM 로 일관 처리되어 import/export 혼선 해소. 이 방식은 루트 패키지의 `type` 을 변경하지 않아 Next.js 와 기타 모듈에 영향 없음.
+
+**규칙** ⭐:
+
+- Monorepo 성격의 서브프로젝트 (tests/e2e, scripts 등) 에서 **ESM/CJS 판정을 격리** 해야 하면 `package.json` 을 서브디렉토리에 두고 `type` 필드로 분리. `tsconfig.json` 의 `module` 옵션은 런타임 판정에 영향 없음.
+- 혼선이 나면 확장자 (`.ts` / `.mts` / `.cts`) 를 바꿔 끼우기 전에 먼저 "가장 가까운 package.json 의 `type`" 을 확인.
+- Playwright 1.40+ 는 ESM 지원이지만 global-setup/teardown 은 런타임 require() 경로가 섞일 수 있어 이 분리가 특히 중요.
+
+---
+
+### 2026-04-18 Supabase admin API — `Authorization: Bearer <service_role>` 헤더 명시 필요 (기술 이슈)
+
+**증상**: `supabase.auth.admin.createUser({ email, password, email_confirm: true })` 호출 시 `User not allowed` (HTTP 401) 에러. `SUPABASE_SERVICE_ROLE_KEY` 를 `createClient(url, key)` 의 두 번째 인자로 넘겼는데도 거부됨. 처음엔 env 값이 anon 키인 줄 알았으나 JWT 의 role claim 디코드 결과 `service_role` 확인됨.
+
+**원인**: `@supabase/supabase-js` v2.103 는 두 번째 인자를 `apikey` 헤더로만 자동 설정하고 `Authorization` 은 세션 토큰이 있을 때만 설정. admin API (`/auth/v1/admin/*`) 는 `apikey` 로는 권한 인식 안 함 — **반드시 `Authorization: Bearer <service_role>`** 이 필요. 사용자 세션이 없는 admin 전용 클라이언트에서는 이를 수동으로 지정해야 함.
+
+**해결**:
+
+```ts
+const admin = createClient(url, serviceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+  global: {
+    headers: { Authorization: `Bearer ${serviceRoleKey}` },
+  },
+});
+```
+
+**규칙** ⭐:
+
+- Supabase admin 클라이언트 생성 시 `global.headers.Authorization` 을 반드시 명시. `persistSession: false` + `autoRefreshToken: false` 와 세트.
+- `auth.admin.*` API 호출이 `User not allowed` 반환하면 **가장 먼저 확인할 것**: (1) env 값이 실제 service_role JWT 인지 (`role` claim 디코드), (2) `Authorization` 헤더 명시 여부. apikey 만으로는 불가.
+- Supabase 공식 문서의 "Admin API" 섹션은 이 헤더 요구를 명시하지만 JS SDK 예시는 암묵적으로 처리된 듯 보이는 함정. E2E 인프라 같이 admin 으로만 작동하는 코드에서는 반드시 수동 설정.
+- JWT role 확인 스크립트: `node -e "require('dotenv').config({path:'.env.local'}); const k = process.env.SUPABASE_SERVICE_ROLE_KEY; const p = JSON.parse(Buffer.from(k.split('.')[1], 'base64').toString()); console.log(p.role, p.ref)"`.
+
+---
+
 ### 2026-04-18 SQL 기반 RLS 시뮬레이션을 UI E2E 대체 수단으로 활용 (설계 결정)
 
 **증상**: Task 0-D-2 RLS 정책 14개 적용 후 두 계정 교차 검증 필요. 실제로 두 Google OAuth 계정을 로그인 → 전환 → 로그아웃 → UI 로 SELECT/UPDATE/DELETE 교차 시도하려면 ~20-30분 소요. E2E Playwright 로 자동화해도 Google OAuth UI 자동화 제약 + 계정 2개 준비 비용 큼.

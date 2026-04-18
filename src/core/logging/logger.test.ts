@@ -225,11 +225,9 @@ describe("Sentry bridge (error/fatal 자동 캡처)", () => {
   });
 
   it("bridge 내부에서 예외가 나도 앱을 깨지 않고 silent 로 처리된다", () => {
-    const parseSpy = vi
-      .spyOn(JSON, "parse")
-      .mockImplementationOnce(() => {
-        throw new Error("forced parse failure");
-      });
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+      throw new Error("forced parse failure");
+    });
 
     expect(() =>
       logger.error({ err: new Error("boom") }, "during parse failure"),

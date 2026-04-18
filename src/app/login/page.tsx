@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { signInWithGoogle } from "./actions";
+import { signInWithGoogle, signInWithPassword } from "./actions";
 
 type SearchParams = Promise<{ error?: string; next?: string }>;
 
@@ -14,8 +14,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_code:
     "로그인 과정에서 필요한 정보를 받지 못했어요. 다시 시도해주세요.",
   auth_failed: "Google 로그인 중 문제가 생겼어요. 다시 시도해주세요.",
-  oauth_init_failed:
-    "로그인을 시작하지 못했어요. 잠시 후 다시 시도해주세요.",
+  oauth_init_failed: "로그인을 시작하지 못했어요. 잠시 후 다시 시도해주세요.",
+  invalid_input: "이메일 형식과 비밀번호(6자 이상)를 확인해주세요.",
+  invalid_credentials: "이메일 또는 비밀번호가 올바르지 않아요.",
 };
 
 function resolveErrorMessage(code: string | undefined): string | null {
@@ -73,25 +74,87 @@ export default async function LoginPage({
             Dari 에 오신 걸 환영해요
           </CardTitle>
           <CardDescription className="text-base leading-relaxed text-gray-500">
-            Google 계정으로 로그인하면 <br className="sm:hidden" />
+            초대받은 계정으로 로그인하면 <br className="sm:hidden" />
             봇과 대화를 이어갈 수 있어요.
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-4 px-8 pb-10">
+        <CardContent className="space-y-5 px-8 pb-10">
           {errorMsg && (
             <div
               role="alert"
+              data-testid="login-error"
               className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700"
             >
               {errorMsg}
             </div>
           )}
 
+          <form action={signInWithPassword} className="space-y-3">
+            {safeNext && <input type="hidden" name="next" value={safeNext} />}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="login-email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                이메일
+              </label>
+              <input
+                id="login-email"
+                data-testid="login-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="name@example.com"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[15px] text-gray-900 placeholder-gray-400 transition outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="login-password"
+                className="block text-sm font-medium text-gray-700"
+              >
+                비밀번호
+              </label>
+              <input
+                id="login-password"
+                data-testid="login-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                minLength={6}
+                placeholder="6자 이상"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[15px] text-gray-900 placeholder-gray-400 transition outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <button
+              type="submit"
+              data-testid="login-submit"
+              className="group flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-[15px] font-semibold text-white shadow-[0_2px_8px_rgba(43,124,255,0.15),0_8px_24px_rgba(43,124,255,0.18)] transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-[0_4px_12px_rgba(43,124,255,0.2),0_12px_32px_rgba(43,124,255,0.25)]"
+            >
+              <span>로그인</span>
+              <span className="text-blue-200 transition-colors group-hover:text-white">
+                →
+              </span>
+            </button>
+          </form>
+
+          <div
+            aria-hidden
+            className="flex items-center gap-3 text-xs tracking-[0.05em] text-gray-400 uppercase"
+          >
+            <span className="h-px flex-1 bg-gray-200" />
+            <span>또는</span>
+            <span className="h-px flex-1 bg-gray-200" />
+          </div>
+
           <form action={signInWithGoogle}>
             {safeNext && <input type="hidden" name="next" value={safeNext} />}
             <button
               type="submit"
+              data-testid="login-google-submit"
               className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-[15px] font-medium text-gray-800 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.08)]"
             >
               <GoogleIcon className="h-5 w-5" />

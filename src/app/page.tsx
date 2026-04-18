@@ -50,6 +50,7 @@ export default async function Home() {
             <form action={signOut}>
               <button
                 type="submit"
+                data-testid="logout-button"
                 className="group flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
               >
                 <span>로그아웃</span>
