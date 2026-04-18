@@ -32,9 +32,57 @@
 
 ## 기록
 
+### 2026-04-18 공개 응답의 화이트리스트 명시 복제 — spread 금지 (설계 결정)
+
+**증상**: Task 1-6-d `/api/widget-config/[botSlug]` GET 엔드포인트가 `DariConfig` 에서 위젯에 필요한 필드를 선별해야 했다. 전체 config 는 10+ 섹션으로, `identity` / `appearance` 외에 `ai.systemPrompt` (8000자 봇 로직), `knowledge.sources` (비공개 문서), `allowedDomains` (CORS 화이트리스트), `analytics.webhookUrl` (SSRF 검증된 외부 URL), `behavior.*` 등 **절대 노출하면 안 되는 필드**가 다수.
+
+**원인**: "필요한 필드 추가" 방식으로 짜면 편하지만, 스키마 확장 시 새 필드가 **자동 노출되는 fail-open 경로**가 된다. 반대로 "민감 필드 제외" 블랙리스트 방식은 체크 누락 시 즉시 유출. 공개 API response shape 는 **명시적 화이트리스트만 안전**.
+
+**해결**: `pickPublicConfig(config: DariConfig): WidgetPublicConfig` 단일 출처에서:
+
+- **spread 금지** (`...config.identity` 도 금지) — 필드를 하나씩 이름으로 복제
+- 9 필드만 명시: `name / welcomeMessage / placeholder / language / avatar / primaryColor / position / buttonSize / borderRadius / fontFamily`
+- 반환 타입 `WidgetPublicConfig` 를 readonly interface 로 — TS 가 shape 불일치 감지
+- 새 필드가 스키마에 추가돼도 `pickPublicConfig` 가 자동 **누락** (안전 fail)
+
+**규칙** ⭐:
+
+- **공개(anon) response DTO 는 spread 금지** — 필드를 한 줄씩 이름으로 명시 복제. 타입이 `Pick<Config, …>` 라도 런타임 객체 리터럴은 명시 필수.
+- **블랙리스트(제외 방식) 금지** — 새 필드가 생겼을 때 리뷰어가 "이거 빼야 하나?" 체크해야 하는 구조는 결국 샌다.
+- **DTO 인터페이스는 readonly** — 클라이언트가 원본 객체 의도 오인 방지. 서버 `WidgetPublicConfig` 와 클라 `WidgetBrand` 를 거울처럼 매칭.
+- **스키마 전체 대조를 파일 상단 주석으로 유지** — pickPublicConfig 상단에 "절대 노출 금지 필드" 체크리스트 명시 (현재 route.ts 파일 상단 docblock).
+
+---
+
+### 2026-04-18 Enumeration 방어 — HTTP status + response code 둘 다 통일 (설계 결정)
+
+**증상**: Task 1-6-d 1차 구현에서 "bot 부존재" = `404 + bot_not_available`, "origin 거부" = `403 + origin_not_allowed`. 코드 주석엔 "모두 404 계열로 위장(enumeration 방지)" 로 적혀 있었지만 실제로는 status + code 모두 구분됨.
+
+**원인**: **HTTP status 하나만 통일하면 충분하다는 착각**. 공격자가 응답 body 를 파싱하면 `code` 필드에서 구분 가능. 반대로 `code` 만 통일하고 status 가 다르면 네트워크 탭/cURL 로 구분. 둘 중 하나라도 다르면 slug enumeration 경로가 열린다.
+
+**해결**: `origin_not_allowed` 분기를 제거하고 bot 부존재와 **완전히 동일한 응답**:
+
+```ts
+if (!matchAllowedDomain(origin, bot.config.allowedDomains)) {
+  return jsonError("bot_not_available", 404, origin, bot.config.allowedDomains);
+}
+```
+
+`ErrorCode` union 에서 `origin_not_allowed` 자체를 제거 — 타입 레벨에서도 재사용 경로 차단.
+
+**규칙** ⭐:
+
+- **Enumeration 방어는 `HTTP status + response body code + 응답 지연` 3요소 모두 통일**. 하나라도 다르면 timing oracle / response diff 로 식별됨.
+- **"봇 존재 + 권한 거부" 는 "봇 부존재" 와 동일 응답** — 공개 endpoint 에서 존재 여부 누출은 그 자체가 정보 유출.
+- **rate limit 응답(429) 만 예외 허용** — 브라우저가 retry-after 해석해야 하므로 다른 status 필요. 대신 rate limit 을 botId+IP 복합키로 단시간 probing 어렵게.
+- **타입 union 에서도 제거** — ErrorCode 에 남아 있으면 미래 리팩터 때 재사용 위험. "쓰이지 않는 상수" 는 제거가 안전.
+
+---
+
 ### 2026-04-18 신규 보안 함수 3건 포함 위젯 번들 재리뷰에서 bypass 3건 추가 포착 (설계 결정)
 
 **증상**: Task 1-6-b 위젯 스캐폴딩 1차 리뷰(code + security 병렬)에서 9건을 일괄 반영한 뒤 Ship 직전 security 단독 재리뷰를 돌렸다. 차단급(CRITICAL)·HIGH 0 + 회귀 0 이었지만 MEDIUM 3건이 **신규 보안 함수 3종(`BOT_ID_PATTERN` / `sanitizeUserInput` / `extractKnownCode`)의 bypass 경로**로 포착됐다:
+
 1. `sanitizeUserInput` 의 C1 제어문자(`\x80-\x9F`) 미필터
 2. `sanitizeUserInput` 의 Unicode 방향 제어(U+202A-E) · isolate(U+2066-9) · BOM(U+FEFF) · Tag characters(U+E0000-7F) 미필터
 3. `config.ts` 의 `.trim()` 이 비ASCII 공백(NBSP/BOM/라인구분자) 을 놓쳐 `\uFEFFslug` 형태의 invisible DoS 가능
@@ -42,6 +90,7 @@
 **원인**: 보안 함수의 "정상 입력 보존 vs 공격 입력 차단" 트레이드오프는 1차 리뷰 시야에서 **현재 구현이 커버하는 범위**에 집중된다. "아직 커버 안 하는 범위의 공격 벡터"는 2차 관점에서야 탐지된다. 특히 LLM Prompt Injection 의 Unicode 층위(방향 제어, Tag chars)는 2024-2025 새 연구 결과라 일반 1차 리뷰 체크리스트에 미편입.
 
 **해결**:
+
 - `CONTROL_CHAR_RE` 를 `\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F` 로 확장 (C1 포함)
 - `UNICODE_CONTROL_RE` 신규 추가 (`[\u202A-\u202E\u2066-\u2069\uFEFF]|[\u{E0000}-\u{E007F}]` / `u` 플래그)
 - `config.ts` 에 `EXT_TRIM_RE` (일반 공백 + NBSP + BOM + 라인/단락 구분자 + 방향 제어 + isolate) 로 trim 확장
@@ -64,6 +113,7 @@
 **원인**: pnpm 7+ 부터 `pre*` / `post*` 스크립트는 **보안상 기본 비활성화** 되었다 (supply chain 공격 방어 — 악성 dep 이 `postinstall` 등으로 임의 실행되는 벡터 차단). npm/yarn 은 여전히 실행한다. `enable-pre-post-scripts=true` 로 켤 수는 있으나 전역 리스크 증가.
 
 **해결**:
+
 - `"build": "pnpm build:widget && next build"` 로 명시 체인 전환
 - `"prebuild"` 스크립트 제거
 - 모든 pipeline 관계는 `&&` / `;` 로 명시, 훅 의존 금지

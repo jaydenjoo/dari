@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 보안 보강 ✅ + 1-6-b 번들 스캐폴딩 ✅** (1차 리뷰 9건 + 재리뷰 3건 반영)
-- 상태: **Task 1-6-b `/widget.js` 번들 완료** (vitest 132 → 182, +50 / 번들 4.4KB gzip) / **이번 세션 변경 미커밋** / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Jayden 브라우저 스모크 + 커밋** 후 **Task 1-6-c RAG** (Task 1-7 선행 필요) 또는 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분)
+- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 1-6-b 번들 스캐폴딩 ✅ + 1-6-d DariConfig 로더 ✅**
+- 상태: **Task 1-6-d 완료** (vitest 132 → 202, +70 / 번들 5.4KB gzip / 8d0be49 + ceb3b1c 커밋) / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Jayden 브라우저 스모크** 후 **Task 1-6-c RAG** (Task 1-7 선행 필요) 또는 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분)
 
 ## 완료된 Epic
 
@@ -59,7 +59,44 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야 Ⅴ) 완료 내역 — Task 1-6-b `/widget.js` 번들 스캐폴딩
+## 이번 세션(2026-04-18 심야 Ⅴ+Ⅵ) 완료 내역 — Task 1-6-b 번들 + Task 1-6-d DariConfig 로더
+
+### Task 1-6-d DariConfig 로더 (심야 Ⅵ, ~90분) ✅
+
+봇별 브랜드(이름·인사말·색상·위치·폰트·아바타) 를 위젯 부팅 시 서버에서 로드. 1-6-b 하드코딩 해소.
+
+**신규 5 파일** (총 745 라인 / 50 삭제):
+- `src/app/api/widget-config/[botId]/route.ts` — GET + OPTIONS anon 엔드포인트 (4 레이어 보안)
+- `src/widget/widget-config-client.ts` — `loadWidgetBrand` + `normalizeBrand` (defense in depth)
+- `src/core/ratelimit/bot-config-limiter.ts` — `${botId}:${ip}` 복합키 1000 req/h
+- 관련 테스트 3 (widget-config-client 16 케이스 + bot-config-limiter 3 + 자체)
+
+**수정 3 파일**:
+- `src/widget/ui.ts` — `mountShadowRoot(host, brand)` CSS 변수(`--dari-brand` 등) + `data-position` 4 방향
+- `src/widget/widget.ts` — `startWidget(config, brand)` 시그니처, welcome/placeholder 주입
+- `src/widget/index.ts` — `Promise.all([loadWidgetBrand, waitForDomReady])` 병렬
+
+**화이트리스트 설계**:
+- `pickPublicConfig` 가 `DariConfig` 10+ 섹션 중 identity + appearance 의 9 필드만 **명시 복제** (spread 금지)
+- `systemPrompt / knowledge / allowedDomains / webhooks / behavior / ai` 등 전부 비노출
+- 향후 스키마 확장 시 자동 누락(안전 fail) 원칙
+
+**독립 리뷰 2 병렬 + 일괄 반영 6건**:
+- sec H-1 **enumeration 차단** — origin 거부도 404 + `bot_not_available` 통일 (HTTP status + response code 둘 다)
+- code H-2 `language` 필드 서버↔클라 일관 — `WidgetLanguage` union + `pickLanguage`
+- sec M-1 + code M-4 **복합키** — `checkBotConfigRatelimit(botId, ip)` (chat limiter 와 일관)
+- sec M-2 **avatar Referer leak** — `<img referrerpolicy="no-referrer">`
+- sec M-3 + code M-1 **fontFamily 작은따옴표** — 클라 정규식에서 `'` 제거 (CSS 파서 왜곡 방어)
+- code M-2 pickUrl 이중 호출 → avatar 변수 캐싱
+- code L-1 waitForDomReady 중복 typeof 체크 제거
+
+**검증**: vitest 199 → 202 (+3) / tsc+lint+prettier clean / build clean / 번들 5.3 → 5.4KB gzip
+
+**커밋**: `ceb3b1c feat(widget): Task 1-6-d DariConfig 로더 + 리뷰 6건 반영`
+
+---
+
+### Task 1-6-b `/widget.js` 번들 스캐폴딩 (심야 Ⅴ, ~180분) ✅
 
 ### 흐름 (~180분)
 
@@ -125,12 +162,17 @@
 ### Backlog (다음 세션)
 
 - **🟡 0007 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` 트리거 활성화 (이전 세션 이월)
-- **이번 세션 변경 1 커밋** — 9 신규 + 3 수정 + devDep 추가
-- **Jayden 브라우저 스모크** — `pnpm dev` + 샘플 HTML 페이지에 `<script src="http://localhost:4000/widget.js" data-bot-id="…" async>` 삽입 → 플로팅 버튼/메시지 송수신/conversationId 영속 확인
+- **Jayden 브라우저 스모크** (Auto 제약, 수동 필요) — `pnpm dev` + 샘플 HTML 페이지에 `<script src="http://localhost:4000/widget.js" data-bot-id="…" async>` 삽입 → 플로팅 버튼 / 메시지 송수신 / conversationId 영속 / 봇별 브랜드 반영 확인
 - **Task 1-6-c RAG 연결** (~60분, Task 1-7 지식 업로드 경로 선행)
-- **Task 1-6-d DariConfig 로더** — headerTitle/색상/아바타/인사말을 config.ui 로 주입 (botTitle 하드코딩 해소)
 - **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분, 이월) — 브라우저 Sentry preview/prod 분리
-- **Phase 2 backlog (이월)**: 스트리밍 응답 / 마크다운 렌더 + DOMPurify / CSS 파일 분리(code M-5) / smooth scroll / AbortSignal 취소 에러 별도 UX / Prompt Injection 서버 방어(Task 1-0-c) / `data-api-url` 재도입 필요 시 허용 origin 화이트리스트
+- **Phase 2 backlog (이월)**:
+  - chat API `origin_not_allowed` → 404 통일 (widget-config 와 enumeration 일관성)
+  - OPTIONS preflight DB 이중 호출 리팩터 (chat + widget-config 동시)
+  - CDN purge API 경로 (현 `s-maxage=300` 지연 수용)
+  - `loadActiveBot` / `ERROR_MESSAGES` 공통화
+  - 스트리밍 응답 / 마크다운 렌더 + DOMPurify / CSS 파일 분리 / smooth scroll / AbortSignal 취소 에러 별도 UX
+  - Prompt Injection 서버 방어 (Task 1-0-c) / `data-api-url` 재도입 시 허용 origin 화이트리스트
+  - welcomeMessage 콘텐츠 정책 (피싱 링크 검사, 설계 수준)
 
 ---
 
