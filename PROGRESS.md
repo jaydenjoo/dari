@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: 0 (기반 공사) + Phase 1 착수
-- Epic: 0-D 인증 완결 + 보안 정비 3종 (0-D-4 rate limit / 0-D-5 비번 8자 / gitleaks hook) + INFRA Playwright + Task 1-5-a 목록 페이지
-- 상태: **관리자 초대 모델 + Playwright E2E 자동화 + 3중 보안 안전망 가동** → 다음 경로 (**Task 1-5-b 봇 생성 폼** 또는 Task 0-D-6 proxy cookie 버그)
+- Phase: 1 (MVP 기능) 진입
+- Epic: 1-5 봇 CRUD (Task 1-5-a 목록 + **1-5-b 생성 완료**)
+- 상태: **RLS INSERT 정책 첫 실증 + 관리자 초대 모델 + Playwright E2E 자동화 + 3중 보안 안전망** → 다음 경로 (**Task 1-5-c 상세 페이지** 또는 Task 0-D-6 proxy cookie 버그, 또는 types.ts `__InternalSupabase` 근본 수정)
 
 ## 완료된 Epic
 
@@ -46,7 +46,55 @@
   - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
   - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
 
-## 이번 세션(2026-04-18 오후) 완료 내역
+## 이번 세션(2026-04-18 저녁) 완료 내역
+
+### Task 1-5-b — /bots/new 봇 생성 폼 (RLS INSERT 정책 첫 실증)
+
+- **신규 파일 6건** (src 5 + tests/e2e 1):
+  - `src/app/bots/new/slug-util.ts` — slugify + isValidSlug + SLUG_PATTERN/MIN/MAX 단일 진실 공급원 (bots 테이블 CHECK + DariConfig.botId 와 동일 정규식)
+  - `src/app/bots/new/slug-util.test.ts` — Vitest 11 케이스 (영문/특수문자/한글 빈문자열/64자 경계/패턴 검증)
+  - `src/app/bots/new/actions.ts` — `createBot` Server Action (Zod → `getUser()` → DariConfig.parse → `bots.insert` → redirect)
+  - `src/app/bots/new/create-bot-form.tsx` — Client Component (`useActionState` + `useFormStatus` + controlled 4필드)
+  - `src/app/bots/new/page.tsx` — Server Component (`getUser` 2중 방어 + 디자인 시스템 v2)
+  - `tests/e2e/bot-create.spec.ts` — Playwright 3 spec (비로그인 / 성공 플로우 / slug 중복 충돌)
+- **3중 방어**: proxy + page `getUser()` + Action `getUser()` + RLS INSERT `WITH CHECK owner_id = auth.uid()`
+- **owner_id 서버 주입**: FormData 에서 읽지 않음 → 클라이언트 조작 불가. 앱 레이어가 뚫려도 RLS 가 2차 차단
+- **DariConfig 구성**: 최소 4필드 (name/slug/welcomeMessage/systemPrompt) 만 사용자 입력, 나머지 60+ 필드는 Zod default 자동 채움
+- **독립 리뷰 2 에이전트 병렬** (code + security):
+  - code: Fix then ship → MEDIUM 3건 + LOW 1건 반영
+    - welcomeMessage/systemPrompt `defaultValue` → controlled `useState` 전환 (에러 복구 시 입력 손실 방지)
+    - `bots.slug` ↔ `config.botId` 이중 저장 유지보수 주석
+    - `SLUG_MIN_LENGTH` ↔ `SLUG_PATTERN` 동기화 주석
+    - `let config: DariConfig` 타입 annotation
+  - security: Ship as-is → CRITICAL/HIGH 0. MEDIUM 4건은 명시적 backlog
+- 검증: `pnpm check` (tsc + eslint + prettier + **78/78 vitest**) / `pnpm build` (Turbopack, `/bots/new` Dynamic 등록) / `pnpm test:e2e --workers=1` **8/8 PASS** (smoke 1 + bots-list 4 + bot-create 3)
+
+### 주요 결정 / 발견
+
+- **Phase 1 진입** — Phase 0 완결 후 봇 CRUD 첫 기능. RLS 정책 (Task 0-D-2) 이 실제 INSERT 를 허용함을 E2E 로 실증
+- **supabase-js INSERT 도 `as never` 회피 필요** — SELECT `.returns<T[]>()` 와 동일 근본 원인 (Database 타입 `__InternalSupabase.PostgrestVersion` 슬롯 부재). `BotInsert` 타입 annotation 으로 의도 보존 후 assertion
+- **React 19 `react-hooks/set-state-in-effect`** — useEffect 내 setState 금지. 파생 상태 (name → slug) 는 이벤트 핸들러에서 동기화 (`handleNameChange` 패턴)
+- **폼 UX 패턴** — 모든 input controlled (useState 4개) → 서버 에러 반환 시 사용자 입력 유지. `defaultValue` 는 uncontrolled 되어 재렌더 시 리셋 위험
+
+### learnings.md 추가 (+2, 총 25건)
+
+- supabase-js INSERT 도 타입 추론 한계로 `as never` 회피 (기술 이슈)
+- React 19 — 파생 상태는 이벤트 핸들러에서 동기화, useEffect 금지 (기술 이슈)
+
+### Backlog (다음 세션 또는 별도 Task)
+
+- **Task 1-5-c**: `/bots/:slug` 상세 페이지 — 봇 정보 표시 + 편집 진입점 + 위젯 설치 코드 (Phase 1 후반)
+- **Task 1-5-d**: 봇 편집 폼 — DariConfig 6섹션 UI (Identity/AI/Knowledge/Behavior/Appearance/Analytics)
+- **Task 0-D-6**: proxy redirect 시 `updateSession` 쿠키 전파 + E2E worker 격리 (병렬 E2E flaky 해소)
+- **types.ts 근본 수정**: Database 타입에 `__InternalSupabase.PostgrestVersion` 슬롯 추가 → `as never` 제거 (자동 생성 파이프라인 논의 병행)
+- **Task 1-0 재평가**: `systemPrompt` prompt injection 완화 (Phase 1 위젯 구현 시점)
+- **인증 사용자 봇 생성 상한**: per-user 50개 or rate limit (DoS 방어)
+- **slug 변경 UI 시점**: `config.botId` 동기화 로직 + 위젯 설치 ID 마이그레이션
+- **폰트 Pretendard/DM Sans 전역 교체** / CI Node 24 전환 / NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입 / gitleaks 오탐 선제 정리
+
+---
+
+## 이전 세션(2026-04-18 오후) 완료 내역
 
 ### 커밋 3건
 
@@ -300,38 +348,45 @@
 
 ### 🎯 경로 선택
 
-**경로 α (권장): Phase 1 진입 — 봇 CRUD + DariConfig UI**
+**경로 α (권장): Task 1-5-c — `/bots/:slug` 상세 페이지**
 
-- `/bots` 목록 → `/bots/new` 생성 폼 → `/bots/:id` 상세
-- `owner_id = auth.uid()` 자동 주입 (RLS 통과 필수)
-- DariConfig 입력 UI (Phase 0-C 스키마 활용)
-- 소요: 여러 세션 (Task 분해 필요)
+- 봇 1개 상세 정보 표시 + 편집 진입점 + 위젯 설치 코드 (Phase 1 후반)
+- RLS SELECT 정책 실증 (owner 격리 확인)
+- Task 1-5-d (편집 폼) 의 전제
+- 소요: 60~90m
 
-**경로 β: Task 0-E-6 (관찰성 탐지 지표, 0-E-5 backlog 묶음)**
+**경로 β: Task 0-D-6 — proxy redirect cookie 유실 수정**
 
-- `redactDeep` depth-exceeded sentinel (운영 모니터링 트리거)
-- bridge JSON.parse 실패 탐지 (stderr 또는 별도 metric)
-- `redact.ts` 자체 단위 테스트 (경계값 direct 검증)
-- 소요: 45~60m
+- 병렬 E2E flaky 해소 (CI 품질 향상, 현재 `--workers=1` 강제)
+- `NextResponse.redirect(url)` 에 `updateSession` response.cookies 복사 로직 추가
+- 재현·검증이 까다로워 약간 tricky
+- 소요: 45~75m
 
-**경로 γ (Phase 1 전 짧은 정비, 선택)**
+**경로 γ: types.ts `__InternalSupabase` 추가 → `as never` 제거 (근본 수정, ROI 높음)**
 
-- **디자인 폰트 전역 교체**: Geist → Pretendard + DM Sans (디자인 시스템 v2 완전 준수, ~20m)
-- **CI Node 24 전환**: `actions/*@v4` → `@v5` (2026-06-02 전, 10~15m)
-- **NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입**: 브라우저 preview/prod 구분 (Stage 2 진입 전, 30~45m)
-- **`proxy-client.ts` ESLint no-restricted-imports 규칙**: proxy 외 import 강제 차단 (~15m)
+- 1 파일 수정으로 SELECT `.returns<T[]>()` + INSERT `as never` 양쪽 모두 해소 가능성
+- 실패 시 롤백 간단 (타입 정의만 변경)
+- 소요: 20~30m
 
-### 그 외 대기 중
+**경로 δ: 짧은 정비 번들**
 
-- **테스트 유저 cleanup**: Supabase Dashboard 에서 `rls-test-b@example.com` 삭제 (30초, 또는 재검증용 보존)
-- **gitleaks 오탐 선제 정리**: `env-template.md` 의 `sk-ant-xxxxx` 등을 `<placeholder>` 각괄호로 통일 (보안 리뷰 부가 제안, CI 통과 중이라 우선순위 낮음)
-- **gitleaks pre-commit hook 설치**: 팀 확장 전 (sec-reviewer M3, 여전히 backlog)
-- **conversations/messages 로그인 방문자(user_id) 정책 확장**: Phase 1 위젯 로그인 지원 시점에 추가
-- **위젯 anon 라우트 service_role 경유 설계**: Phase 1 위젯 구현 시 `bot_id` 소유권 검증 + rate limiting 필수
+- 폰트 Pretendard/DM Sans 전역 교체 (~20m)
+- CI Node 24 전환 (10~15m)
+- NEXT_PUBLIC_SENTRY_ENVIRONMENT 도입 (30~45m)
+- gitleaks 오탐 선제 정리 (10m)
+
+### 그 외 대기
+
+- **Task 1-0 재평가**: systemPrompt prompt injection 완화 (위젯 구현 시점)
+- **인증 사용자 봇 생성 상한**: per-user 50개 or rate limit (DoS 방어)
+- **slug 변경 UI 시점**: `config.botId` 동기화 + 위젯 설치 ID 마이그레이션
+- **conversations/messages 로그인 방문자 정책 확장**: Phase 1 위젯 로그인 지원 시
+- **위젯 anon 라우트 service_role 경유 설계**: Phase 1 위젯 구현 시 `bot_id` 소유권 검증 + rate limiting
+- **`proxy-client.ts` ESLint no-restricted-imports**: proxy 외 import 강제 차단 (~15m)
 
 ## 차단 요소
 
-**없음** — Phase 1 진입 가능 (RLS 완결). 경로 α 직행 또는 γ 정비 후 경로 α 선택지.
+**없음** — Phase 1 진입 완료. 경로 α/β/γ/δ 자유 선택.
 
 ## 완료한 Task (누적)
 
@@ -368,6 +423,7 @@
 - [x] **Task 0-E-5: logger ↔ Sentry bridge + redact 단일 출처 (독립 리뷰 2라운드, MEDIUM 7 + LOW 2 반영)**
 - [x] **Task 0-D-1: Google OAuth + Next 16 proxy 세션 게이트 + isSafeNextPath 단일 출처 (독립 리뷰 2라운드, 옵션 X 5건 반영, Playwright E2E 9/9)**
 - [x] **Task 0-D-2: owner 기반 RLS 정책 14 활성화 + `bots.owner_id` NOT NULL + 독립 리뷰 2 에이전트 Ship as-is + SQL 시뮬레이션 10/10 PASS (Epic 0-D 완결)**
+- [x] **Task 1-5-b: /bots/new 봇 생성 폼 (Phase 1 첫 기능) — Server Action + DariConfig default 활용 + 3중 방어 + 독립 리뷰 2 에이전트 (MEDIUM 3+LOW 1 반영) + E2E 3 spec (RLS INSERT 실증)**
 
 ## 세션 이력
 
@@ -380,8 +436,11 @@
 - **2026-04-17 (마감): Epic 0-F 100% 완결 — 0-F-3 환경 분리 + 0-F-4 모듈 README + 독립 리뷰 4회 (MEDIUM 7건 반영) + 커밋 2건 + 교훈 2건 + 메모리 1건**
 - **2026-04-17 (야간): Task 0-E-5 + Task 0-D-1 — logger↔Sentry bridge 완결 + Google OAuth 첫 로그인 흐름 + Playwright E2E 자동화 도입 + 교훈 2건 (Next16 proxy 리네임 / server-only 금지)**
 - **2026-04-18 (오전): Task 0-D-2 — owner 기반 RLS 14 정책 활성화 + Epic 0-D 완결 + 독립 리뷰 2 Ship as-is + SQL 시뮬레이션 10/10 PASS + 교훈 1건 (SQL 기반 RLS 시뮬레이션)**
+- **2026-04-18 (낮): Task INFRA-1 + 0-D-3 + 1-5-a — Playwright 로컬 인프라 + id/pw 로그인 폼 + /bots 목록 페이지 + 교훈 3건**
+- **2026-04-18 (오후): Task 0-D-4 + 0-D-5 + gitleaks hook — 로그인 rate limit + 비번 8자 + Husky v9 pre-commit + 교훈 2건**
+- **2026-04-18 (저녁): Task 1-5-b — /bots/new 봇 생성 폼 + RLS INSERT 정책 첫 실증 + 독립 리뷰 2 (code Fix then ship + security Ship as-is) + 교훈 2건 (supabase-js insert as never / React 19 useEffect 금지) — Phase 1 진입**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-18 오전 (Task 0-D-2 완료, Epic 0-D 완결, Phase 1 진입 준비)
+- 날짜: 2026-04-18 저녁 (Task 1-5-b 완료, Phase 1 진입)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)

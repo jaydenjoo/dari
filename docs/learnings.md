@@ -515,3 +515,71 @@ const admin = createClient(url, serviceRoleKey, {
 - 실행 컨텍스트가 다른 유사 모듈을 만들 때 **"당연히 같은 패턴이 통하리라" 는 가정 금지** — Server Component / Server Action / Route Handler / Proxy / Edge / Client 각각 제약이 다름. 기존 파일 복붙 대신 해당 런타임의 공식 예시 우선 확인.
 
 ---
+
+### 2026-04-18 supabase-js INSERT 도 타입 추론 한계로 `as never` 회피 (기술 이슈)
+
+**증상**: `supabase.from("bots").insert(payload)` 에서 TS2769 `No overload matches this call. values: never`. `payload` 에 유효한 `bots.Insert` 타입 객체를 넘겨도 `values` 가 `never` 로 좁혀짐. 에러 시그니처에 `PostgrestFilterBuilder<{ PostgrestVersion: "12"; }, never, never, null, "bots", never, "POST">` 가 보이고 `Row = Relationships = never` 상태.
+
+**원인**: `@supabase/ssr` + postgrest-js 최신 버전은 `Database` 타입에서 `__InternalSupabase.PostgrestVersion` 필드를 먼저 읽고, 그다음 `Tables[TableName]` 을 추론한다. 현재 프로젝트의 `src/core/db/types.ts` 는 수동 유지 (ADR: 자동 생성이 `DariConfig`/`MessageSource` 등 Zod 구조 타입을 `Json` 으로 평탄화) 로, `__InternalSupabase` 슬롯이 빠져 있다. 이 때문에 postgrest-js 가 PostgrestVersion 만 추출하고 실제 스키마 구조는 읽지 못해 values 가 기본 `never` 로 fallback.
+
+기존에 SELECT 쪽은 `.returns<BotListItem[]>()` 제네릭 주입으로 우회 (learnings.md 2026-04-18 항목). INSERT 쪽은 제네릭 주입 슬롯이 없어 값 타입 자체를 캐스트해야 한다.
+
+**해결**: `BotInsert` 타입으로 payload 를 명시해 의도를 보존한 뒤 `insert(payload as never)` 로 호출. 타입 정보는 컴파일러에 보이되 postgrest 시그니처 제약만 우회.
+
+```ts
+type BotInsert = Database["public"]["Tables"]["bots"]["Insert"];
+
+const payload: BotInsert = { slug, name, owner_id: user.id, config };
+// supabase-js 타입 추론 한계 — __InternalSupabase 슬롯 부재
+const { error } = await supabase.from("bots").insert(payload as never);
+```
+
+**규칙** ⭐:
+
+- **INSERT/UPDATE/UPSERT 타입 에러 시 같은 패턴 적용**: `const payload: <Table>Insert = {...}; .insert(payload as never)`. BotInsert 로 의도를 선언해두면 필드 오타/누락은 잡을 수 있다 (진짜 `any` 와 다름).
+- **근본 해결은 types.ts Database 타입에 `__InternalSupabase.PostgrestVersion: "12"` 추가**. 1 파일 1 필드 수정으로 SELECT `.returns<T[]>()` + INSERT `as never` 양쪽 모두 제거 가능성 — backlog 로 관리 (별도 Task, 실패 시 롤백 간단).
+- **에러 시그니처 `PostgrestFilterBuilder<{ PostgrestVersion: ... }, never, never, ...>` 를 보면 즉시 이 이슈** — Database 타입 구조가 아니라 supabase-js internal 슬롯이 원인이라고 확정.
+- **`as never` 는 임시 회피 주석 필수** — 코드에 "왜" 를 남겨 후속 개발자가 근본 해결 루트로 이어가도록. "__InternalSupabase 슬롯 부재" 키워드를 주석에 포함.
+- **자동 생성 타입으로 전환 검토 시점**: Zod 기반 구조 타입 손실이 한 번이라도 런타임 버그를 일으키기 전. 현재까지는 수동 유지가 이득이나 테이블 수가 늘면 재평가.
+
+---
+
+### 2026-04-18 React 19 — 파생 상태는 이벤트 핸들러에서 동기화, useEffect 금지 (기술 이슈)
+
+**증상**: 봇 생성 폼에서 `name` 입력에 따라 `slug` 자동 생성하려고 `useEffect` + `setSlug(slugify(name))` 작성. ESLint 에서 `react-hooks/set-state-in-effect` 에러.
+
+```
+error  Error: Calling setState synchronously within an effect can trigger cascading renders
+```
+
+**원인**: React 19 의 강화된 lint 규칙. `useEffect` 는 외부 시스템 동기화 전용 (DOM 직접 조작 / 구독 / 타이머 등) 이고, **파생 상태 계산은 렌더 중 또는 이벤트 핸들러에서 처리해야 한다**. `useEffect` 내 `setState` 는 cascading renders (첫 렌더 → effect 실행 → setState → 재렌더 → ...) 를 유발해 성능 저하 + 중간 상태 노출 위험.
+
+React 팀 공식 가이드 "You Might Not Need an Effect" 의 첫 번째 패턴: "다른 state/props 에서 state 를 도출하는 경우" → 이벤트 핸들러에서 동기화.
+
+**해결**: `useEffect` 제거 → onChange 핸들러에서 직접 계산.
+
+```tsx
+// ❌ BAD
+useEffect(() => {
+  if (!slugEdited) setSlug(slugify(name));
+}, [name, slugEdited]);
+
+// ✅ GOOD
+function handleNameChange(next: string): void {
+  setName(next);
+  if (!slugEdited) setSlug(slugify(next));
+}
+
+<input onChange={(e) => handleNameChange(e.target.value)} />;
+```
+
+**규칙** ⭐:
+
+- **input A 의 값이 input B 에 파생되는 패턴 → useEffect 절대 금지**. 이벤트 핸들러 함수 하나에서 `setA + setB` 동시 호출.
+- 여러 파생이 있으면 `handleXxx` 함수로 묶어 이벤트 핸들러와 분리 (가독성 + 재사용).
+- **useEffect 를 써야 할 때만 써라**: (1) DOM 수동 조작, (2) 외부 라이브러리 구독, (3) 타이머/애니메이션, (4) 데이터 fetch (Server Component 아닐 때). 그 외 "A 가 바뀌면 B 를 업데이트" 는 대부분 이벤트 핸들러 or 렌더 중 계산.
+- **파생 상태 자체를 없앨 수 있는지 먼저 검토**: 매 렌더마다 `const slug = slugEdited ? userInput : slugify(name);` 처럼 계산만 하면 상태가 불필요. 사용자가 수정한 값을 "기억" 해야 할 때만 상태 분리.
+- **에러 메시지가 lint 에 나오는 시점에 바로 잡을 것** — 런타임에는 문제 없어 보여도 React 19/20 업데이트에서 정식 에러로 승격될 가능성. 설계 단계에서 effect 사용 여부를 체크리스트화.
+- 참조: https://react.dev/learn/you-might-not-need-an-effect
+
+---
