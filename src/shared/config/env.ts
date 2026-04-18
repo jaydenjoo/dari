@@ -28,9 +28,11 @@ const clientSchema = z.object({
 
 // 서버 전용 (API keys, secrets)
 const serverSchema = clientSchema.extend({
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
+  // NODE_ENV 는 런타임 플랫폼이 반드시 명시 주입해야 한다 (Next.js: dev/build/start 자동,
+  // Vitest: "test" 자동, Vercel: "production" 자동). default 를 두지 않아 플랫폼 주입이
+  // 누락되면 부팅이 실패(fail-fast) 하게 한다 — rate limit 같은 skip 분기 정책이
+  // 무음으로 비활성화되는 사고 방지. 커스텀 런타임/Docker 직접 배포 시 명시 필수.
+  NODE_ENV: z.enum(["development", "production", "test"]),
 
   // ─── Database (Supabase Postgres) ───
   // migration CLI 전용 — 앱 런타임은 @supabase/ssr 만 사용 (ADR-002).

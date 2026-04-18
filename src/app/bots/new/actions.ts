@@ -7,6 +7,7 @@ import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
+import { checkBotCreateRatelimit } from "@/core/ratelimit/bot-create-limiter";
 
 import { isValidSlug, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from "./slug-util";
 
@@ -89,6 +90,16 @@ export async function createBot(
 
   if (userError || !user) {
     redirect("/login?next=%2Fbots%2Fnew");
+  }
+
+  // Rate limit — 사용자당 하루 20개 봇 생성.
+  // Zod/세션 검증 이후에 둬야 정상 사용자가 폼 오타로 제출해도 카운터가 깎이지 않는다.
+  // dev/test 에서는 자동 skip, prod Upstash 장애 시 fail-open + Sentry 알림.
+  const rl = await checkBotCreateRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error: "봇 생성 한도에 도달했어요. 잠시 후 다시 시도해 주세요.",
+    };
   }
 
   // DariConfig 구성 — Zod default 로 나머지 필드 자동 채움.
