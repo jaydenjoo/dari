@@ -1,40 +1,35 @@
 /**
  * 위젯 런타임 — Shadow DOM 루트 + 대화 상태 + Chat API 송수신.
  *
- * 외부에서 `startWidget(config)` 호출 시 body 에 host div 를 생성하고 닫힌 Shadow DOM 으로
- * UI 를 구성. conversationId 는 localStorage 에 botId 별로 영속.
+ * Task 1-6-d: `startWidget(config, brand)` 로 봇별 브랜드(이름·인사말·색상·위치·폰트) 주입.
+ * brand 로드 실패는 `DEFAULT_BRAND` 로 폴백 — 위젯 자체는 반드시 표시.
  *
- * 설계 결정 (리뷰 반영):
+ * 설계 결정:
  *   - try/finally 로 input lock 영구 고착 방지 (code H-3)
  *   - AbortController 로 패널 닫기 / 중복 submit 시 요청 취소 (code M-2)
- *   - 사용자 입력 제어문자 사전 제거 — Prompt Injection 선제 완화 (sec M-4).
- *     완전한 인젝션 방어는 서버 Task 1-0-c 에서 수행.
- *   - 헤더 타이틀 하드코딩 — Task 1-6-d (DariConfig 로더) 에서 config.ui.headerTitle 로 대체 예정.
- *     MVP 는 봇별 브랜드 대신 범용 문구. (code H-2 유보)
+ *   - 사용자 입력 제어문자 사전 제거 — Prompt Injection 선제 완화 (sec M-4, M-α, M-β)
+ *   - 완전한 인젝션 방어는 서버 Task 1-0-c 에서 수행
  */
 
 import { errorLabelFor, sendChatMessage, type SendMessageResult } from "./chat";
 import type { WidgetConfig } from "./config";
 import { mountShadowRoot, type ShadowRootRefs } from "./ui";
+import type { WidgetBrand } from "./widget-config-client";
 
 const STORAGE_PREFIX = "dari.widget.cid.";
-const DEFAULT_HEADER_TITLE = "도움이 필요하세요?";
 
 // 제어문자 차단 — C0 (0x00-0x1F) + DEL (0x7F) + C1 (0x80-0x9F).
 // tab(0x09)·개행(0x0A)·CR(0x0D) 은 정상 입력으로 보존. (재리뷰 sec M-α)
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
 
 // Unicode 방향 제어 + isolate + BOM + Tag characters 차단.
-// - U+202A..U+202E: LRE/RLE/PDF/LRO/RLO (방향 override, 렌더 공격)
-// - U+2066..U+2069: LRI/RLI/FSI/PDI (isolate 제어)
-// - U+FEFF: BOM / Zero Width No-Break Space
-// - U+E0000..U+E007F: Tag characters (LLM Prompt Injection 최근 벡터)
 // ZWSP(U+200B)/ZWNJ(U+200C)/ZWJ(U+200D) 는 이모지 결합 등 정상 입력에 쓰여 제외. (재리뷰 sec M-β)
 const UNICODE_CONTROL_RE =
   /[\u202A-\u202E\u2066-\u2069\uFEFF]|[\u{E0000}-\u{E007F}]/gu;
 
 interface WidgetState {
   config: WidgetConfig;
+  brand: WidgetBrand;
   refs: ShadowRootRefs;
   conversationId: string | null;
   panelOpen: boolean;
@@ -42,7 +37,7 @@ interface WidgetState {
   inflight: AbortController | null;
 }
 
-export function startWidget(config: WidgetConfig): void {
+export function startWidget(config: WidgetConfig, brand: WidgetBrand): void {
   if (document.getElementById("dari-widget-host")) {
     // 중복 주입 방어 — 같은 페이지에 스크립트가 두 번 로드돼도 단일 위젯 유지.
     return;
@@ -52,9 +47,10 @@ export function startWidget(config: WidgetConfig): void {
   host.id = "dari-widget-host";
   document.body.appendChild(host);
 
-  const refs = mountShadowRoot(host, DEFAULT_HEADER_TITLE);
+  const refs = mountShadowRoot(host, brand);
   const state: WidgetState = {
     config,
+    brand,
     refs,
     conversationId: readStoredConversation(config.botId),
     panelOpen: false,
@@ -78,7 +74,7 @@ export function startWidget(config: WidgetConfig): void {
     void submit(state);
   });
 
-  appendAssistant(state, "안녕하세요! 무엇이든 물어보세요.");
+  appendAssistant(state, brand.welcomeMessage);
 }
 
 function togglePanel(state: WidgetState): void {
