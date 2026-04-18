@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: 1 (MVP 기능) 진입
-- Epic: 1-5 봇 CRUD (Task 1-5-a 목록 + **1-5-b 생성 완료**)
-- 상태: **RLS INSERT 정책 첫 실증 + 관리자 초대 모델 + Playwright E2E 자동화 + 3중 보안 안전망** → 다음 경로 (**Task 1-5-c 상세 페이지** 또는 Task 0-D-6 proxy cookie 버그, 또는 types.ts `__InternalSupabase` 근본 수정)
+- Phase: 1 (MVP 기능) 진행 중
+- Epic: 1-5 봇 CRUD — Task 1-5-a 목록 ✅ / 1-5-b 생성 ✅ / **1-5-c 상세 ✅ 완료**
+- 상태: **Task 1-5-c 상세 페이지 완료 + PageBackground 추출로 도트 패턴 10→1 DRY** → 다음 경로 (**Task 1-5-d 편집 폼** — DariConfig 6섹션 UI, 또는 Task 0-D-6 proxy cookie 버그 / types.ts `__InternalSupabase` 근본 수정)
 
 ## 완료된 Epic
 
@@ -46,7 +46,59 @@
   - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
   - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
 
-## 이번 세션(2026-04-18 저녁) 완료 내역
+## 이번 세션(2026-04-18 밤) 완료 내역
+
+### Task 1-5-c — /bots/[slug] 상세 페이지 (Phase 1 사용자 흐름 닫기)
+
+- **신규 파일 6건**:
+  - `src/app/bots/[slug]/page.tsx` — Server Component (3중 방어 + DariConfig safeParse + 위젯 스니펫 생성)
+  - `src/app/bots/[slug]/copy-snippet.tsx` — Client Component (clipboard + copyState idle/copied/failed + sr-only live region)
+  - `src/app/bots/[slug]/not-found.tsx` — 404 (디자인 시스템 v2)
+  - `src/app/bots/[slug]/loading.tsx` — Suspense skeleton
+  - `src/app/bots/[slug]/error.tsx` — Error boundary + Sentry capture
+  - `tests/e2e/bot-detail.spec.ts` — Playwright 4 spec (비로그인 / 본인 봇 / 타인 봇 RLS / 없는 slug)
+- **3중 방어 실증**: proxy(Task 0-D-1) + page `getUser()` + RLS `bots_select_owner`. 타인 봇 slug 접근 시 RLS 0-row → `notFound()` → 일반 not-found 렌더 (enumeration 방어)
+- **`maybeSingle()` + `.returns<BotDetail[]>()`** 조합: 타인/없는 slug 를 동일 코드 경로로 처리 (`.single()` 의 PGRST116 에러 분기 회피)
+- **slug 형식 선검증**: `isValidSlug(slug)` 통과 못하면 DB 왕복 없이 즉시 404 (security L-2)
+- **독립 리뷰 2 에이전트 병렬** (code + security):
+  - 반영 5건: copy 실패 UX (code H-1) + `aria-live` 별도 region (code M-2) + not-found 문구 (sec M-2) + E2E teardown `Promise.allSettled` (sec M-3) + loading 두 번째 skeleton aria-label (code L-3)
+  - **롤백 1건**: `sensitiveFields.ts` userId redact 추가 (sec H-1) — logger/beforeSend 테스트 2건 충돌 + UUID 는 OWASP Logging 권장 식별자. 근거 주석 명시
+- 검증: `pnpm check` (tsc + eslint + prettier + **78/78 vitest**) / `pnpm build` (Turbopack, `/bots/[slug]` Dynamic 등록) / `pnpm test:e2e --workers=1` **12/12 PASS** (smoke 1 + bots-list 4 + bot-create 3 + bot-detail 4)
+
+### Backlog 1건 — PageBackground 컴포넌트 추출 (도트 패턴 10→1 DRY)
+
+- **신규**: `src/components/ui/page-background.tsx` (`intensity`: "subtle"/"medium" 2 변형)
+- **수정 10 파일**: 홈 + 로그인 + `/bots` + `/bots/new` + `/bots/[slug]` 하위 5 → 각 파일 도트 블록 8줄 → `<PageBackground />` 1줄 + import
+- `grep "radial-gradient(circle, #dde0e4"` 로 **10곳 → 1곳** (`page-background.tsx` 만) 확인
+- 블롭(큰 원형 그라디언트)은 페이지별 위치·개수·opacity 가 달라 일반화 부적합 — 각 페이지 inline 유지
+- code-reviewer M-3 "별도 리팩토링 Task 권장" 을 같은 세션에서 즉시 소화. 순 라인 -33 + 향후 새 페이지 배경 복제 0
+
+### 주요 결정 / 발견
+
+- **notFound() Turbopack dev 모드 200 응답** — Playwright 의 `response.status()` 체크가 dev 에서 404 예상이었으나 200 수신. 프로덕션 빌드는 404 정상. E2E 는 콘텐츠(heading "봇을 찾을 수 없어요") 로 판정으로 교체
+- **리뷰 제안 ≠ 기계적 반영** — security H-1 (userId redact) 수정 시 기존 테스트 2건 실패. UUID 는 요청 상관분석 키이자 OWASP Logging 권장 필드. 롤백 + 근거 주석이 올바른 판정
+- **Next.js 16.2 `params: Promise<{ slug }>`** 패턴 — async params, `await params` 필수
+- **`maybeSingle() + .returns<T[]>()`** — `single()` 의 PGRST116 에러 분기 없이 단일 null-check 로 분기 단순화
+
+### learnings.md 추가 (+2, 총 27건)
+
+- Next.js App Router notFound() Turbopack dev 모드 200 응답 (기술 이슈)
+- sensitiveFields redact 대상은 직접 PII 만 — UUID 식별자 예외 (설계 결정)
+
+### Backlog (다음 세션 또는 별도 Task)
+
+- **Task 1-5-d**: 봇 편집 폼 — DariConfig 6섹션 UI (Identity/AI/Knowledge/Behavior/Appearance/Analytics). Phase 1 Epic 1-5 마지막
+- **Task 0-D-6**: proxy cookie 전파 (여전히 open)
+- **types.ts 근본**: `__InternalSupabase.PostgrestVersion` 슬롯 추가 → `as never` / `.returns<T[]>()` 제거
+- **리뷰 Backlog 미소화**:
+  - `generateMetadata` 동적 title (code M-1)
+  - `error.tsx` Sentry digest-only 전송 (sec M-1)
+  - `WIDGET_URL` → `env.NEXT_PUBLIC_WIDGET_URL` (Phase 2 위젯 런타임 배포 시점)
+  - E2E `waitForURL` 타임아웃 10→7초 (flaky 마진 재검토)
+
+---
+
+## 지난 세션(2026-04-18 저녁) 완료 내역
 
 ### Task 1-5-b — /bots/new 봇 생성 폼 (RLS INSERT 정책 첫 실증)
 

@@ -539,7 +539,7 @@ const { error } = await supabase.from("bots").insert(payload as never);
 - **INSERT/UPDATE/UPSERT 타입 에러 시 같은 패턴 적용**: `const payload: <Table>Insert = {...}; .insert(payload as never)`. BotInsert 로 의도를 선언해두면 필드 오타/누락은 잡을 수 있다 (진짜 `any` 와 다름).
 - **근본 해결은 types.ts Database 타입에 `__InternalSupabase.PostgrestVersion: "12"` 추가**. 1 파일 1 필드 수정으로 SELECT `.returns<T[]>()` + INSERT `as never` 양쪽 모두 제거 가능성 — backlog 로 관리 (별도 Task, 실패 시 롤백 간단).
 - **에러 시그니처 `PostgrestFilterBuilder<{ PostgrestVersion: ... }, never, never, ...>` 를 보면 즉시 이 이슈** — Database 타입 구조가 아니라 supabase-js internal 슬롯이 원인이라고 확정.
-- **`as never` 는 임시 회피 주석 필수** — 코드에 "왜" 를 남겨 후속 개발자가 근본 해결 루트로 이어가도록. "__InternalSupabase 슬롯 부재" 키워드를 주석에 포함.
+- **`as never` 는 임시 회피 주석 필수** — 코드에 "왜" 를 남겨 후속 개발자가 근본 해결 루트로 이어가도록. "\_\_InternalSupabase 슬롯 부재" 키워드를 주석에 포함.
 - **자동 생성 타입으로 전환 검토 시점**: Zod 기반 구조 타입 손실이 한 번이라도 런타임 버그를 일으키기 전. 현재까지는 수동 유지가 이득이나 테이블 수가 늘면 재평가.
 
 ---
@@ -581,5 +581,67 @@ function handleNameChange(next: string): void {
 - **파생 상태 자체를 없앨 수 있는지 먼저 검토**: 매 렌더마다 `const slug = slugEdited ? userInput : slugify(name);` 처럼 계산만 하면 상태가 불필요. 사용자가 수정한 값을 "기억" 해야 할 때만 상태 분리.
 - **에러 메시지가 lint 에 나오는 시점에 바로 잡을 것** — 런타임에는 문제 없어 보여도 React 19/20 업데이트에서 정식 에러로 승격될 가능성. 설계 단계에서 effect 사용 여부를 체크리스트화.
 - 참조: https://react.dev/learn/you-might-not-need-an-effect
+
+---
+
+### 2026-04-18 Next.js App Router notFound() 가 Turbopack dev 모드에서 200 응답 (기술 이슈)
+
+**증상**: Playwright E2E 에서 `/bots/[slug]` 상세 페이지의 "존재하지 않는 slug" / "타인 봇 slug" 접근 시 `expect(response?.status()).toBe(404)` 가 `Expected 404 / Received 200` 으로 실패. `not-found.tsx` 는 정상 렌더되어 "봇을 찾을 수 없어요" heading 은 노출됨 (error-context page snapshot 확인).
+
+**원인**: Next.js 16.2 의 Turbopack dev 서버가 App Router `notFound()` 호출 시 HTTP 상태를 **200 으로 응답** (내용은 정확히 `not-found.tsx`). 프로덕션 빌드 (`pnpm build && pnpm start`) 에서는 404 로 응답하는 것이 정상. Next.js 공식 문서 상은 dev/prod 모두 404 가 맞지만 Turbopack dev 가 이를 지키지 않는 구현 차이.
+
+**해결**: E2E 에서 `response.status()` 체크를 제거하고 **콘텐츠(heading "봇을 찾을 수 없어요")** 로 not-found 상태를 판정. 판정 의도(RLS 필터 + notFound 렌더)는 그대로 검증하면서 dev/prod HTTP 상태 차이를 우회.
+
+```ts
+// ❌ BAD — Turbopack dev 에서 실패
+expect(response?.status()).toBe(404);
+
+// ✅ GOOD — dev/prod 양쪽에서 통과
+await expect(
+  page.getByRole("heading", { name: "봇을 찾을 수 없어요" }),
+).toBeVisible();
+```
+
+**규칙** ⭐:
+
+- **App Router `notFound()` 의 HTTP 상태는 E2E 에서 신뢰하지 말 것**. Turbopack dev 모드에서 200, 프로덕션 빌드에서 404 차이. 콘텐츠 기반 판정 (`not-found.tsx` 가 렌더한 고유 heading/문구) 이 호환성 높고 의도 명확.
+- **Next.js E2E 일반 원칙**: proxy redirect / notFound / error boundary 등 **프레임워크 내부 렌더 경로는 HTML 콘텐츠로 판정**. status code 는 네트워크·프레임워크 구현에 의존 — dev vs prod 차이 가능.
+- **반대로 Route Handler(API 라우트)** 에서 `NextResponse.json(..., { status: 404 })` 처럼 **명시적** status 반환은 dev/prod 동일. status 체크 OK.
+- 프로덕션 빌드로 E2E 돌리면 status 체크도 통과하지만 dev 피드백 루프가 매우 느림. 콘텐츠 판정이 기본 전략.
+
+---
+
+### 2026-04-18 sensitiveFields redact 대상은 직접 PII 만 — UUID 식별자 예외 (설계 결정)
+
+**증상**: security-reviewer HIGH 지적: "logger.error 에서 `userId` 가 redact 없이 평문 노출 — OWASP A09/A01". `SENSITIVE_FIELD_NAMES` 에 `userId` / `user_id` 추가했더니 `logger.test.ts` + `beforeSend.test.ts` **기존 테스트 2건 실패** (기존 테스트가 `userId: "user-42"` 가 child logger 바인딩에 그대로 남고, Sentry `contexts.auth.userId` 가 치환되지 않는 것을 명시적으로 assert).
+
+**원인**: userId(Supabase `auth.uid()` UUID) 는 **직접 PII 가 아니라 "요청 상관분석 키(correlation id)"**. email/phone 같이 사용자를 직접 식별할 수 있는 PII 와 구분됨. 프로덕션 로그에서 userId 가 없으면 "어떤 유저에게 발생한 오류인지" 파악 불가 → 디버깅 원천 차단. 기존 테스트 2건은 이 설계 의도를 의도적으로 보호하던 것.
+
+OWASP Logging Cheat Sheet:
+
+- **DO log**: user identifier (UUID) for audit/debug
+- **DO NOT log**: secrets, tokens, passwords, direct PII (email, phone)
+
+security 리뷰 지적은 **이론상 타당** 했으나 (로그 파이프라인 유출 시 account enumeration 근거), 실무에서 userId 는 로깅 필수. **Sentry 로 가는 내용은 별도 `beforeSend` 의 `redactDeep` 이 2차 방어** — 외부 유출 경로는 이미 이중 보호.
+
+**해결**: userId / user_id redact **취소 (롤백)**. `sensitiveFields.ts` 에 근거 주석 남김 — 같은 지적이 반복되지 않도록.
+
+```ts
+// 주의: userId / user_id 는 redact 하지 않는다.
+//   - UUID 형태의 auth.uid() 는 직접 PII 가 아니며, 요청 상관분석 키.
+//   - OWASP Logging Cheat Sheet 도 UUID 식별자 로깅을 권장.
+//   - Sentry 로 가는 내용은 별도 beforeSend redactDeep 이 2차 방어.
+//   - 근거: Task 1-5-c security-reviewer H-1 재평가 (2026-04-18).
+```
+
+**규칙** ⭐:
+
+- **redact 대상 결정 기준**: "이 필드가 없으면 디버깅 불가능한가?" Yes → **기본 redact 대상 아님**.
+  - 직접 PII (email, phone, fullName, SSN 등): redact O
+  - 요청 상관분석 식별자 (userId UUID, requestId, botId, sessionId): redact X
+  - 비밀 자체 (password, token, secret, apiKey, serviceRoleKey): redact O
+- **리뷰 제안이 기존 테스트와 충돌하면 재평가 우선**. 테스트는 "의도된 동작 보호" 역할 — 리뷰가 이를 깨면 둘 중 하나가 틀린 것. 리뷰 지적의 합리성과 테스트가 보호하는 설계 의도를 **비교해 판정**하고, reject 결정 시 **근거를 코드 주석 + learnings 에 기록** (미래 동일 제안 반복 방지).
+- **Sentry redact 이중 방어 원칙**: 로그 파이프라인에 상관분석 키가 남아도 OK. 외부 Sentry 전송은 별도 redact 함수가 있으므로 외부 유출 보호됨.
+- redact 정책은 **단일 출처(SENSITIVE_FIELD_NAMES)** 로 관리. 필드 추가/제외 시 **근거 주석 필수** — "왜 이건 제외했나" 기록이 후속 리뷰 반복 차단의 핵심.
 
 ---
