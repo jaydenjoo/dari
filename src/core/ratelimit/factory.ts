@@ -68,9 +68,21 @@ export function sanitizeLoggableError(err: unknown): {
 }
 
 function redactSecretsInMessage(msg: string): string {
+  // 순서 주의:
+  //   1. URL 이 다른 토큰을 흡수할 수 있어 가장 먼저.
+  //   2. JWT 는 다른 패턴이 부분 매칭하기 전에 통째로 마스킹.
+  //   3. Authorization 은 라인 끝까지 (Basic/Bearer/Digest 등 다중 스킴 + base64 padding 포함).
+  //   4~6. 명시적 prefix 가 있는 단일 토큰 패턴 (sk-ant / Bearer / api_key).
+  //   7. URL 쿼리 token=.
+  // false positive 회피: api_key 는 `primary key constraint` 같은 정상 메시지 잠식 회피 위해
+  // `api[_-]?` prefix 강제. value 에 base64 padding(=) 포함 가능성 대비 `\S+` 매칭.
   return msg
     .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
-    .replace(/bearer\s+[\w.\-]+/gi, "Bearer [REDACTED]")
+    .replace(/eyJ[\w\-=.]+\.eyJ[\w\-=.]+\.[\w\-=.]+/g, "[REDACTED_JWT]")
+    .replace(/authorization:[^\r\n]*/gi, "Authorization: [REDACTED]")
+    .replace(/sk-ant-[\w\-]+/gi, "[REDACTED_ANTHROPIC_KEY]")
+    .replace(/bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/api[_-]?key\s*[=:]\s*\S+/gi, "api_key=[REDACTED]")
     .replace(/token=[^\s&]+/gi, "token=[REDACTED]");
 }
 
@@ -89,6 +101,9 @@ function redactSecretsInMessage(msg: string): string {
  *   - 가용성 > 완결성 (rate limit 장애로 정상 요청 전원 차단은 과잉 피해)
  *   - `logger.error` → Sentry bridge 로 운영자 알림. `err` 는 `sanitizeLoggableError`
  *     로 URL/토큰을 마스킹한 뒤 기록한다.
+ *   - **Phase 2 재검토**: 과금 모델 도입 시 fail-closed 또는 로컬 LRU fallback
+ *     으로 전환 검토. Redis 장애 + 비용 공격 동시 발생 = Anthropic 비용 무제한
+ *     노출. ADR 작성 예정. (security N-5)
  *
  * 차단 시 `reset` 은 epoch ms. 호출부가 UX 메시지로 변환.
  * 차단 이벤트는 observability 목적으로 debug 레벨 로그를 함께 남긴다.

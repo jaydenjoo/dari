@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -60,6 +62,16 @@ const ERROR_MESSAGES: Record<ErrorCode, string> = {
   invalid_body: "요청 형식이 올바르지 않아요.",
   upstream_error: "응답을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
 };
+
+/**
+ * IP 해시화 — 로그 컨텍스트에 raw IP 대신 SHA-256 prefix 8자.
+ *
+ * 🟡 프로젝트는 IP 를 PIPA·GDPR 식별 가능 정보로 다룬다 (sensitiveFields.ts 'ip').
+ * 동일 IP 의 반복 시도 추적 가치는 유지하면서 raw 노출을 방어. (security N-4)
+ */
+function hashClientIp(ip: string): string {
+  return createHash("sha256").update(ip).digest("hex").slice(0, 8);
+}
 
 function jsonError(
   code: ErrorCode,
@@ -158,6 +170,7 @@ export async function POST(
     admin,
     bot.id,
     requestedConvId,
+    hashClientIp(clientIp),
   );
   if (!conversationId) {
     return jsonError("internal_error", 500, origin, bot.config.allowedDomains);
@@ -218,6 +231,7 @@ async function resolveConversationId(
   admin: ReturnType<typeof createAdminClient>,
   botId: string,
   requestedConvId: string | undefined,
+  clientIpHash: string,
 ): Promise<string | null> {
   if (requestedConvId) {
     const { data: existing, error: readError } = await admin
@@ -236,7 +250,12 @@ async function resolveConversationId(
       // 존재하지 않는 UUID 는 조용히 새 대화 생성 (공격 벡터로 보기엔 false positive 많음)
     } else if (existing.bot_id !== botId) {
       logger.warn(
-        { requestedConvId, actualBotId: existing.bot_id, expectedBotId: botId },
+        {
+          requestedConvId,
+          actualBotId: existing.bot_id,
+          expectedBotId: botId,
+          ipHash: clientIpHash,
+        },
         "conversationId bot_id 불일치 — 새 conversation 생성",
       );
     } else {
@@ -264,9 +283,11 @@ async function resolveConversationId(
     }
   }
 
+  // visitor_id 필수 — conversations 테이블의 has_identity 제약 (visitor_id IS NOT NULL
+  // OR user_id IS NOT NULL) 충족. anon 위젯은 user_id 없음 → 서버 생성 UUID. (M-1)
   const { data: created, error: createError } = await admin
     .from("conversations")
-    .insert({ bot_id: botId })
+    .insert({ bot_id: botId, visitor_id: randomUUID() })
     .select("id")
     .maybeSingle();
   if (createError || !created) {

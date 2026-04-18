@@ -28,6 +28,9 @@ export const SENSITIVE_FIELD_NAMES = [
   "phone",
   "phoneNumber",
   "phone_number",
+  // 클라이언트 IP — PIPA·GDPR 식별 가능 정보. 로깅 시 hash 형태(`ipHash`)로 변환할 것.
+  // 'ipHash' 는 redact 대상 아님 (해시화로 PII 제거됨). 근거: security N-4 (Task 1-6-a).
+  "ip",
   // 주의: userId / user_id 는 redact 하지 않는다.
   //   - UUID 형태의 auth.uid() 는 직접 PII 가 아니며, 요청 상관분석(incident
   //     correlation)의 핵심 키. 프로덕션에서 "어떤 유저에게 발생한 에러"를
