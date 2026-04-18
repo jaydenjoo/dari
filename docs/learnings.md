@@ -353,6 +353,40 @@ training data 는 `middleware.ts` 기준이고 Supabase SSR 공식 가이드도 
 
 ---
 
+### 2026-04-18 외부 의존 보안 레이어의 로컬/E2E fallback 은 설계 단계에서 정의 (설계 결정)
+
+**증상**: Upstash rate limit 을 로그인에 추가 후 로컬 개발 + Playwright E2E 에서 11번째 로그인부터 `too_many_attempts` 로 자가 차단. Plan 승인 이후 실제 E2E 실행에서 발견.
+
+**원인**: `resolveClientIp` 가 헤더 없을 때 `"unknown"` fallback 사용. 로컬/E2E 환경은 `x-forwarded-for` 가 없어 모든 요청이 `"unknown"` 버킷에 몰림. 실 Upstash 인스턴스와 연결된 상태에서 반복 테스트로 카운트가 빠르게 소진. Plan 에 로컬 fallback 조항이 없어 발생.
+
+**해결**: `checkLoginRatelimit` 맨 앞에 `if (env.NODE_ENV !== "production") return { ok: true }` 가드. 로컬/E2E 는 항상 skip, prod 만 실 Redis 로 방어. 기존 catch 의 fail-open 은 유지 (prod 에서 Redis 장애 대응).
+
+**규칙** ⭐:
+
+- **외부 의존 보안 레이어** (rate limit, captcha, SSO, WAF 등) 추가 시 Plan 에 **로컬/E2E 모드 fallback 을 명시적으로 정의**. 기본 패턴: "로컬 DX 유지 + prod 만 실 활성화".
+- 구현 방법 2가지: (a) `NODE_ENV` 기반 분기, (b) `ENABLE_*` 플래그 env 변수. (a) 가 단순해서 권장, 복수 환경 구분 필요 시 (b).
+- **Plan 에 해당 조항이 없으면 "실행 직전 재평가"에서 반드시 추가**. 2026-04-17 Drizzle 재평가 교훈의 구체 적용 사례.
+- `x-forwarded-for` 없을 때 `"unknown"` 버킷 공유는 단일 공격자가 전원 차단할 수 있는 DoS 벡터 — Vercel 전제에서는 안전하나 비-Vercel 배포 시 재평가.
+
+---
+
+### 2026-04-18 proxy redirect 시 updateSession 세션 쿠키 유실 (기술 이슈)
+
+**증상**: Playwright `fullyParallel: true` 로 5 spec 동시 실행 시 `/login → / 리디렉트 후 "로그인됨" 배지 미노출` 1~2건 랜덤 실패. `--workers=1` 순차 실행은 5/5 통과.
+
+**원인**: Next.js 16 `src/proxy.ts` 에서 로그인 유저가 `/login` 에 접근하면 `NextResponse.redirect(url)` 을 **새 응답 객체로** 반환. 이 과정에서 `updateSession(request)` 이 리턴한 `response` 의 `Set-Cookie` 헤더가 복사되지 않아 refresh 된 세션 쿠키가 유실. 다음 요청(`/` 홈) 에서 낡은 쿠키 사용 → 비로그인 상태로 렌더링. 공용 `MAIN_TEST_USER` 계정을 여러 worker 가 공유하면서 세션 refresh 타이밍 race 증폭.
+
+**해결 (우회)**: `--workers=1` 순차 실행으로 증상 회피. 근본 수정은 Task 0-D-6 로 분리.
+
+**규칙** ⭐:
+
+- **Next.js 16 proxy 에서 새 `NextResponse.redirect/rewrite` 반환 시**, `updateSession` 이 미리 설정한 `response.cookies` 를 복사해야 함. 패턴: `const redirect = NextResponse.redirect(url); response.cookies.getAll().forEach(c => redirect.cookies.set(c.name, c.value)); return redirect;` (또는 헤더 단위 복사).
+- **E2E 병렬 실행은 테스트 계정 격리** — worker 별 독립 이메일 (`e2e-w${workerIndex}@...`) 을 global-setup 에서 생성. 공용 계정은 race 의 온상.
+- **"한 번은 통과, 한 번은 실패" = race condition 신호** — 순차 실행 (`--workers=1`) 으로 재현해서 결정론 확인 후 원인 조사. flaky 를 "재시도로 덮는" 습관 금지.
+- proxy / middleware 의 응답 객체 재생성은 항상 "쿠키/헤더 merge" 가 누락 가능한 지점 — 체크리스트로 학습.
+
+---
+
 ### 2026-04-18 supabase-js select 문자열 literal 파싱 실패 — `.returns<T[]>()` 회피 (기술 이슈)
 
 **증상**: Server Component 에서

@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 0 (기반 공사) + Phase 1 착수
-- Epic: 0-D 인증 완결 (0-D-1 OAuth / 0-D-2 RLS / 0-D-3 id·pw) + INFRA Playwright + Task 1-5-a 목록 페이지 + E2E 5건
-- 상태: **관리자 초대 모델 + Playwright E2E 자동화 가동** → 다음 경로 (Task 1-5-b 생성 폼 / 0-E-6 / 짧은 정비)
+- Epic: 0-D 인증 완결 + 보안 정비 3종 (0-D-4 rate limit / 0-D-5 비번 8자 / gitleaks hook) + INFRA Playwright + Task 1-5-a 목록 페이지
+- 상태: **관리자 초대 모델 + Playwright E2E 자동화 + 3중 보안 안전망 가동** → 다음 경로 (**Task 1-5-b 봇 생성 폼** 또는 Task 0-D-6 proxy cookie 버그)
 
 ## 완료된 Epic
 
@@ -45,6 +45,69 @@
   - 소프트 삭제 봇(`status='deleted'`) 접근 허용 명시 (휴지통/복구 UI 여지)
   - 독립 리뷰 2 에이전트 병렬 → Ship as-is (CRITICAL/HIGH 0)
   - **SQL 기반 RLS 시뮬레이션으로 10/10 시나리오 PASS** (owner 격리, owner 이전 공격 차단, 2단 EXISTS, anon 자동 배제)
+
+## 이번 세션(2026-04-18 오후) 완료 내역
+
+### 커밋 3건
+
+- `93df558` feat(auth): 로그인 폼 rate limit — IP 기반 10회/15분 (Task 0-D-4)
+- `939b56a` feat(auth): 비밀번호 최소 길이 6→8자 상향 (Task 0-D-5)
+- `94c5e62` chore(security): gitleaks pre-commit hook (Husky v9)
+
+### Task 0-D-4 — 로그인 폼 rate limit (IP 기반 10회/15분)
+
+- `src/core/ratelimit/{redis-client,login-limiter}.ts` 신규 — Upstash slidingWindow 팩토리
+- `signInWithPassword` 흐름: Zod 파싱 → rate limit → Supabase 인증 (잘못된 입력은 카운터 소모 안 함)
+- `NODE_ENV !== "production"` 이면 skip — 로컬/E2E 에서 `"unknown"` IP 버킷 공유로 인한 자가 차단 방지
+- fail-open catch 에 `logger.error` → Sentry bridge 로 장애 자동 캡처
+- 에러 코드 `too_many_attempts` 신규 (`invalid_credentials` 와 분리, UX 우선)
+- 독립 리뷰 병렬 (code + security) → 양쪽 Fix then ship. 3건 반영 (pre-check 순서 / union 단순화 / catch 로깅)
+
+### Task 0-D-5 — 비밀번호 최소 길이 6→8자 (OWASP 2025 + 🟡 PII 기준)
+
+- Zod `min(6)` → `min(8)` + 주석 (Supabase Dashboard 동기화 필요 명시)
+- UI 3곳 동기화: `minLength={8}` / placeholder "8자 이상" / error message "8자 이상"
+- E2E fixtures 주석 갱신 (실 계정 비번 18자라 영향 없음)
+- 리뷰 생략 (변경 규모 작음 + positive security change)
+- **Jayden 수동 작업 미완**: Supabase Dashboard → Auth → Password Settings → Minimum Length 8
+
+### gitleaks pre-commit hook (Husky v9)
+
+- `pnpm add -D husky@9.1.7` + `husky init` → `.husky/` 세팅, `package.json.scripts.prepare="husky"` 자동 추가
+- `.husky/pre-commit`: gitleaks graceful 스크립트 (`--staged --redact`, 미설치 시 exit 0)
+- 3중 안전망 완성: 글로벌 hook + CI gitleaks-action + 프로젝트 로컬 hook
+- 타인 clone 시 `pnpm install` 만으로 자동 활성화
+- 실동작 검증: 이 변경 커밋 자체가 `1.15 KB scanned in 24ms → no leaks found`
+
+### 검증
+
+- `pnpm check` (typecheck + lint + format + vitest) **67/67 PASS** (3회 반복)
+- `pnpm build` (Turbopack) **PASS**
+- `pnpm test:e2e --workers=1` **5/5 PASS** (3회 반복)
+- 병렬 E2E 는 **사전 버그로 flaky** (Task 0-D-6 로 분리)
+
+### 주요 결정 / 발견
+
+- **rate limit 로컬/E2E 자가 차단 회피 패턴** — `NODE_ENV !== "production"` skip. Plan 승인 이후 E2E 실패로 발견, 실행 직전 재평가로 반영. Plan 의 fail-open 철학 확장
+- **pre-check 순서** — Zod 파싱이 rate limit 보다 먼저. 정상 사용자가 오타로 반복 제출해도 카운터가 깎이지 않게
+- **fail-open + Sentry 알림** — Redis 장애 무음 실패 방지. `logger.error` 1줄이 운영 가시성 핵심
+- **Husky v9 graceful 전략** — gitleaks 미설치 환경 (온보딩) 은 exit 0. CI 가 백업 레이어
+- **proxy redirect cookie 유실 (사전 버그)** — `NextResponse.redirect(url)` 반환 시 `updateSession` 가 세팅한 response.cookies 복사 누락. 병렬 E2E flaky 원인. Task 0-D-6 로 분리
+
+### learnings.md 추가 (+2, 총 23건)
+
+- 외부 의존 보안 레이어의 로컬/E2E fallback 은 설계 단계에서 정의 (설계 결정)
+- proxy redirect 시 updateSession 세션 쿠키 유실 (기술 이슈)
+
+### Backlog (다음 세션 또는 별도 Task)
+
+- **Task 1-5-b**: 봇 생성 폼 (/bots 빈 상태 CTA 연결) — Server Action + Zod + slug 생성 정책
+- **Task 0-D-6**: proxy redirect 시 `updateSession` 쿠키 전파 + E2E worker 격리 (MAIN_TEST_USER 병렬 race 해소)
+- Security MED-2 (unknown 버킷 DoS) — Vercel 아닌 플랫폼 이동 시 재평가
+- IP 로그 정책 문서화 (개인정보 처리방침)
+- `email_confirm: true` 셀프서비스 전환 시 제거 TODO
+
+---
 
 ## 이번 세션(2026-04-18 낮) 완료 내역
 
