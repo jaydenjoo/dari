@@ -356,12 +356,15 @@ training data 는 `middleware.ts` 기준이고 Supabase SSR 공식 가이드도 
 ### 2026-04-18 supabase-js select 문자열 literal 파싱 실패 — `.returns<T[]>()` 회피 (기술 이슈)
 
 **증상**: Server Component 에서
+
 ```ts
-const { data } = await supabase.from("bots")
+const { data } = await supabase
+  .from("bots")
   .select("id, slug, name, status, updated_at")
   .neq("status", "deleted")
   .order("updated_at", { ascending: false });
 ```
+
 로 작성한 쿼리에서 `data` 가 `never[] | null` 로 추론됨. 이후 `data.map((bot) => bot.name)` 사용 시 TS2339 `Property 'name' does not exist on type 'never'` 에러 8건 폭발.
 
 **원인**: `@supabase/supabase-js` v2.103 의 select literal 타입 추론은 chain 메서드 (`neq` → `order`) 를 거치면서 narrowing 이 풀려 `never[]` 로 떨어지는 경우가 있음. 공식 타입 정의가 복잡한 computed type 연산을 시도하나 TS 가 depth limit 이나 복잡도에서 포기하면 `never`.
@@ -369,7 +372,13 @@ const { data } = await supabase.from("bots")
 **해결**: 체인 마지막에 `.returns<BotListItem[]>()` 을 덧붙이고 `type BotListItem = { ... }` 를 명시. supabase-js 가 명시된 타입으로 데이터 역직렬화.
 
 ```ts
-type BotListItem = { id: string; slug: string; name: string; status: BotStatus; updated_at: string };
+type BotListItem = {
+  id: string;
+  slug: string;
+  name: string;
+  status: BotStatus;
+  updated_at: string;
+};
 
 const { data, error } = await supabase
   .from("bots")

@@ -17,6 +17,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   oauth_init_failed: "로그인을 시작하지 못했어요. 잠시 후 다시 시도해주세요.",
   invalid_input: "이메일 형식과 비밀번호(6자 이상)를 확인해주세요.",
   invalid_credentials: "이메일 또는 비밀번호가 올바르지 않아요.",
+  too_many_attempts: "로그인 시도가 너무 잦아요. 잠시 후 다시 시도해주세요.",
 };
 
 function resolveErrorMessage(code: string | undefined): string | null {
