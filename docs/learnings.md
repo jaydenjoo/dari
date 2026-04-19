@@ -32,6 +32,43 @@
 
 ## 기록
 
+### 2026-04-19 side-effect import 모듈 테스트 — vi.hoisted + process.env 사전 주입 (설계 결정)
+
+**증상**: Task γ-3 에서 `src/shared/config/env.test.ts` 를 작성. `env.ts` 는 import 시점에 `parseEnv()` 를 즉시 호출하고 필수 환경변수 누락 시 throw 한다 (fail-fast 설계). `import { clientSchema } from "./env"` 하는 순간 test 환경이 production 수준 env 를 갖추지 않아 즉시 실패 (`GOOGLE_GENERATIVE_AI_API_KEY`, `UPSTASH_REDIS_REST_URL` 등 "Invalid input: expected string, received undefined"). Vitest 는 기본적으로 `NODE_ENV=test` 만 주입.
+
+**원인**: ES 모듈 spec 에 따라 top-level statement 는 import 구문보다 먼저 실행되지 않는다 (import hoist). 테스트 파일 상단에 `process.env.X = ...` 를 작성해도 `import` 가 먼저 실행되어 env.ts 의 side-effect 가 먼저 터진다. `beforeAll` / `beforeEach` 는 describe 블록 진입 이후이므로 역시 늦다.
+
+**해결**: `vi.hoisted()` 콜백은 vitest 런타임이 **import 구문보다 먼저 실행되도록 hoist** 한다. 그 안에서 `process.env.X ??= "..."` 로 필수 env 주입 후 `import` 실행.
+
+```ts
+// src/shared/config/env.test.ts
+import { vi, describe, it, expect } from "vitest";
+
+vi.hoisted(() => {
+  process.env.ANTHROPIC_API_KEY ??= "sk-fake-anthropic-test-placeholder";
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??=
+    "fake-supabase-service-role-test-key";
+  // ... 나머지 필수 env
+});
+
+import { clientSchema } from "./env"; // 이제 parseEnv 통과
+```
+
+추가 주의사항:
+
+- **`NODE_ENV` 재할당 금지** — `@types/node` + Next tsconfig 조합으로 readonly literal union 이라 TS2540. vitest 가 자동 주입하므로 재할당 불요·불가.
+- **플레이스홀더에 `fake-*` prefix + `test-placeholder` suffix** — gitleaks / truffleHog 패턴 회피. "이게 실 키 아니다" 를 정규식과 코드 리뷰어 눈으로 모두 구분 가능.
+- **`??=` 로 기존 환경변수 보존** — 실 환경에서 테스트 실행 시 실 값 유지, 각 테스트 파일이 독립적으로 주입해도 충돌 없음.
+
+**규칙** ⭐:
+
+- **부팅 시 fail-fast 하는 환경 검증 모듈 (env / config / bootstrap)** 을 test 하려면 `vi.hoisted` 로 import 전 주입. describe 내 `beforeAll` 은 늦다. Jest 의 `jest.setMock` hoist 와 유사한 패턴.
+- **대안 고려**: 모듈이 복잡해지면 "schema 정의" 와 "parse 실행" 을 별도 파일로 분리 (`env.schema.ts` + `env.ts`) 하면 side-effect free import 로 테스트 용이. 이번은 vi.hoisted 로 충분해서 분리 보류 — 테스트가 3개 이상 늘거나 schema 자체를 런타임에 재사용해야 할 때 분리 승격.
+- **테스트 키에 `fake-*` prefix 강제** — gitleaks / truffleHog / GitHub secret scanner 정규식 회피. 공개 리포 (GitHub) 사용 시 필수.
+- **NODE_ENV 는 런타임 플랫폼이 주입** — vitest (test), Next (dev/prod), Vercel (production) 각각 담당. 테스트 코드는 신뢰만.
+
+---
+
 ### 2026-04-18 공개 응답의 화이트리스트 명시 복제 — spread 금지 (설계 결정)
 
 **증상**: Task 1-6-d `/api/widget-config/[botSlug]` GET 엔드포인트가 `DariConfig` 에서 위젯에 필요한 필드를 선별해야 했다. 전체 config 는 10+ 섹션으로, `identity` / `appearance` 외에 `ai.systemPrompt` (8000자 봇 로직), `knowledge.sources` (비공개 문서), `allowedDomains` (CORS 화이트리스트), `analytics.webhookUrl` (SSRF 검증된 외부 URL), `behavior.*` 등 **절대 노출하면 안 되는 필드**가 다수.

@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 1-6-b 번들 스캐폴딩 ✅ + 1-6-d DariConfig 로더 ✅**
-- 상태: **Task 1-6-d 완료** (vitest 132 → 202, +70 / 번들 5.4KB gzip / 8d0be49 + ceb3b1c 커밋) / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** → 다음 **Jayden 브라우저 스모크** 후 **Task 1-6-c RAG** (Task 1-7 선행 필요) 또는 **γ-3 `NEXT_PUBLIC_SENTRY_ENVIRONMENT`** (~45분)
+- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 1-6-b 번들 ✅ + 1-6-d DariConfig ✅** + **γ-3 브라우저 Sentry 환경 분리 ✅**
+- 상태: **Task γ-3 완료** (vitest 202 → 212, +10 / clientSchema enum + schema export / 독립 리뷰 2 Ship as-is + 선제 보강 3건) / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** + **🟡 Vercel 환경변수 등록 필요** (`NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production) → 다음 **Jayden 브라우저 스모크** / **Task 1-7 지식 업로드 (→ 1-6-c RAG 선행)**
 
 ## 완료된 Epic
 
@@ -59,29 +59,97 @@
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
 
-## 이번 세션(2026-04-18 심야 Ⅴ+Ⅵ) 완료 내역 — Task 1-6-b 번들 + Task 1-6-d DariConfig 로더
+## 이번 세션(2026-04-19) 완료 내역 — Task γ-3 브라우저 Sentry 환경 분리
+
+봇 운영자가 Vercel Preview 와 Production 의 브라우저 에러를 Sentry UI 에서 구분할 수 있도록, 클라이언트 번들에 `environment` 태그를 development / preview / production 3종으로 분리.
+
+### 흐름 (~70분)
+
+1. **Plan → Approve → Build** (~45분)
+   - 3경로 비교표 (명시 enum / `NEXT_PUBLIC_VERCEL_ENV` / 빌드별 `.env` 분기) → 경로 A 명시 enum 채택
+   - 4 파일 수정 + 1 신규 테스트
+2. **검증 문제 2건 해결** (~10분)
+   - env.ts side-effect import 로 test 파일 실패 → `vi.hoisted + process.env ??=` 패턴 (learnings 기록)
+   - `process.env.NODE_ENV = "test"` TS2540 readonly → vitest 자동 주입 신뢰, 라인 제거
+3. **독립 리뷰 2 병렬** (code + security)
+   - CRITICAL/HIGH 0 / MEDIUM 2 (한 건은 범위 밖) / LOW 2 / FYI 1
+   - 두 에이전트 **Ship as-is** 합의
+4. **선제 보강 3건 반영** (~15분, 경로 β)
+   - [sec M-1] `env.ts` throw 메시지에 `summarizeFieldErrors()` 로 필드별 오류 요약 포함 → Vercel 배포 로그 원인 파악 가속
+   - [code L-3] `docs/env-template.md` 빌드 타임 인라인 동작 주석 부연 ("로컬 dev = `.env.local` 값 / Vercel 빌드 = Dashboard 등록값 우선")
+   - [sec FYI-5] `env.test.ts` 테스트 플레이스홀더를 `fake-*` prefix + `test-placeholder` suffix 로 명시화 → gitleaks 오탐 회피
+
+### 신규 / 수정 파일
+
+- **신규 1**: `src/shared/config/env.test.ts` (10 케이스 / 68 라인)
+- **수정 4**:
+  - `src/shared/config/env.ts` — clientSchema 에 `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum(development/preview/production) optional + `clientSchema`/`serverSchema` export + 에러 메시지 `summarizeFieldErrors()` 경유
+  - `instrumentation-client.ts` — `environment: NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? NODE_ENV ?? "development"` + 주석 갱신 (서버·엣지와 패턴 일관)
+  - `docs/env-template.md` — 복사 블록 + 발급처 표 + 환경별 매트릭스 3종 모두 갱신 + 빌드 인라인 주석
+  - `docs/environments.md` §3 매트릭스 + §7 Sentry 섹션 (서버·엣지·브라우저 3개 스니펫 + Stage 2 옵션 B 완료 처리)
+
+### 검증
+
+- **pnpm typecheck**: clean
+- **pnpm lint**: 기존 4 warning (unused vars, 내 변경 무관)
+- **pnpm prettier** (수정 5 파일): clean (PROGRESS.md 는 이전 세션부터 위반 상태, 범위 밖)
+- **pnpm test**: **212 passed** (202 → 212, +10 — clientSchema 5 + clientSchema 거부 4 + serverSchema 상속 1)
+- **pnpm build**: clean (Next 16.2 Turbopack, 11 routes 정상 빌드)
+
+### 주요 결정 / 교훈
+
+- **3경로 비교 → 명시 enum 채택** — Vercel lock-in 회피 + enum 타입 안전성 + 서버·엣지 기존 패턴과 일관. `NEXT_PUBLIC_VERCEL_ENV` 는 Vercel 의존적이고 로컬·Docker 비호환.
+- **side-effect import 모듈 테스트 패턴 확립** — env.ts 가 import 즉시 `parseEnv()` throw. `vi.hoisted + process.env ??=` 로 사전 주입. `beforeAll` 은 import 후 실행이라 늦음. **learnings.md 에 교훈 1건 기록** (+43건째).
+- **fail-fast 의 원인 진단 개선** — throw 메시지에 필드별 오류 요약 포함 → Vercel 배포 로그만 봐도 어느 변수가 왜 실패했는지 즉시 파악 (이전엔 `console.error` 로만 출력, throw 는 generic).
+- **`fake-*` prefix 테스트 플레이스홀더** — gitleaks / truffleHog / GitHub secret scanner 정규식 오탐 회피. 공개 리포에서 필수 패턴.
+- **선제 보강의 비용 vs 가치** — 15분 투입으로 Vercel 오타 디버깅 분 수십 분 절약. Stage 2 이전 낮은 비용 때 고치는 게 ROI 큼.
+
+### Backlog (다음 세션)
+
+- **🟡 Vercel 환경변수 등록 (Jayden 수동)** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview scope = `preview`, Production scope = `production`. Dashboard → Project → Settings → Environment Variables.
+- **🟡 0007 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` 트리거 활성화 (이월 2회차)
+- **Jayden 브라우저 스모크 (Auto 제약)** — `pnpm dev` + 샘플 HTML `<script src="http://localhost:4000/widget.js" data-bot-id="…" async>` 로 플로팅 버튼 / 메시지 송수신 / conversationId 영속 / 봇별 브랜드 반영 확인
+- **Task 1-7 지식 업로드 경로** (~120분) — Task 1-6-c RAG 연결의 선행 조건. 업로드 UI + 임베딩 파이프라인 + knowledge_chunks INSERT
+- **Task 1-6-c RAG 연결** (~60분, Task 1-7 후) — `match_knowledge_chunks` RPC 호출 + system prompt 에 삽입
+- **Phase 2 backlog (이월)**:
+  - code M-1 `env.ts:102` `as ServerEnv` 타입 단언 개선 (별도 Task) — 클라이언트에서 서버 필드 참조 시 타입 에러 누락
+  - chat API `origin_not_allowed` → 404 통일 (widget-config 와 enumeration 일관성)
+  - OPTIONS preflight DB 이중 호출 리팩터 (chat + widget-config 동시)
+  - CDN purge API 경로 (현 `s-maxage=300` 지연 수용)
+  - `loadActiveBot` / `ERROR_MESSAGES` 공통화
+  - 스트리밍 응답 / 마크다운 렌더 + DOMPurify / CSS 파일 분리 / smooth scroll / AbortSignal 취소 에러 별도 UX
+  - Prompt Injection 서버 방어 (Task 1-0-c) / `data-api-url` 재도입 시 허용 origin 화이트리스트
+  - welcomeMessage 콘텐츠 정책 (피싱 링크 검사, 설계 수준)
+
+---
+
+## 직전 세션(2026-04-18 심야 Ⅴ+Ⅵ) 완료 내역 — Task 1-6-b 번들 + Task 1-6-d DariConfig 로더
 
 ### Task 1-6-d DariConfig 로더 (심야 Ⅵ, ~90분) ✅
 
 봇별 브랜드(이름·인사말·색상·위치·폰트·아바타) 를 위젯 부팅 시 서버에서 로드. 1-6-b 하드코딩 해소.
 
 **신규 5 파일** (총 745 라인 / 50 삭제):
+
 - `src/app/api/widget-config/[botId]/route.ts` — GET + OPTIONS anon 엔드포인트 (4 레이어 보안)
 - `src/widget/widget-config-client.ts` — `loadWidgetBrand` + `normalizeBrand` (defense in depth)
 - `src/core/ratelimit/bot-config-limiter.ts` — `${botId}:${ip}` 복합키 1000 req/h
 - 관련 테스트 3 (widget-config-client 16 케이스 + bot-config-limiter 3 + 자체)
 
 **수정 3 파일**:
+
 - `src/widget/ui.ts` — `mountShadowRoot(host, brand)` CSS 변수(`--dari-brand` 등) + `data-position` 4 방향
 - `src/widget/widget.ts` — `startWidget(config, brand)` 시그니처, welcome/placeholder 주입
 - `src/widget/index.ts` — `Promise.all([loadWidgetBrand, waitForDomReady])` 병렬
 
 **화이트리스트 설계**:
+
 - `pickPublicConfig` 가 `DariConfig` 10+ 섹션 중 identity + appearance 의 9 필드만 **명시 복제** (spread 금지)
 - `systemPrompt / knowledge / allowedDomains / webhooks / behavior / ai` 등 전부 비노출
 - 향후 스키마 확장 시 자동 누락(안전 fail) 원칙
 
 **독립 리뷰 2 병렬 + 일괄 반영 6건**:
+
 - sec H-1 **enumeration 차단** — origin 거부도 404 + `bot_not_available` 통일 (HTTP status + response code 둘 다)
 - code H-2 `language` 필드 서버↔클라 일관 — `WidgetLanguage` union + `pickLanguage`
 - sec M-1 + code M-4 **복합키** — `checkBotConfigRatelimit(botId, ip)` (chat limiter 와 일관)
