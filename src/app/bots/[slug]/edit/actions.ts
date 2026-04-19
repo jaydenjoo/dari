@@ -2,15 +2,23 @@
 
 import { redirect } from "next/navigation";
 
-import { dariConfigSchema, type DariConfig } from "@/core/config";
+import {
+  dariConfigSchema,
+  type DariConfig,
+  type KnowledgeSource,
+} from "@/core/config";
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
+import { ingestTextKnowledge, sanitizeKnowledgeText } from "@/core/knowledge";
 import { logger } from "@/core/logging";
 
 import { isValidSlug } from "../../new/slug-util";
 
 type BotUpdate = Database["public"]["Tables"]["bots"]["Update"];
-type BotConfigRow = { config: DariConfig };
+
+// Task 1-7-a: text 지식 허용 최대 길이 (textSourceSchema 와 일치).
+const MAX_KNOWLEDGE_TEXT_LENGTH = 100_000;
+const MIN_KNOWLEDGE_TEXT_LENGTH = 10;
 
 export type UpdateBotFormState = {
   // 폼 전체 또는 시스템 단의 에러.
@@ -129,11 +137,11 @@ export async function updateBot(
     redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
   }
 
-  // 3. 기존 봇 조회 — knowledge.sources 보존을 위해 필요.
+  // 3. 기존 봇 조회 — knowledge.sources 보존 + text 지식 재임베딩에 bot.id 필요.
   //    RLS bots_select_owner 가 owner 자동 필터 → 타인 봇/미존재 = data null.
   const { data: existing, error: selectErr } = await supabase
     .from("bots")
-    .select("config")
+    .select("id, config")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -162,25 +170,93 @@ export async function updateBot(
     return { fieldErrors };
   }
 
-  // 5. 폼 미수신 필드 보존 — existing.config 가 깨져있을 수 있으므로 safeParse 한번 더.
-  //    - knowledge.sources: Phase 2 에서 별도 편집 UI 제공 예정
+  // 5. 기존 config 복구 + knowledge.sources 편집 (text 타입만).
   //    - allowedDomains: CORS 화이트리스트. 편집 UI 가 아직 없지만 타 경로로 설정될 수 있음
   //      → silent 초기화를 막기 위해 명시적으로 보존 (code H-1).
+  //    - knowledge.sources[type!=='text'] (url/file): 편집 UI 미지원 → 그대로 보존.
+  //    - knowledge.sources[type==='text']: Task 1-7-a — 단일 textarea 로 교체/삭제.
+  //
+  // code M-4: existingParsed 실패 시 fail-fast. success=false 로 두고 기본값 []
+  // 로 진행하면 url/file 같은 비편집 소스가 조용히 삭제된다 (데이터 손실).
+  // Task 1-7-b 이후 url/file 소스 존재 가능 → 반드시 에러 응답.
   const existingParsed = dariConfigSchema.safeParse(existing.config);
-  const preservedSources = existingParsed.success
-    ? existingParsed.data.knowledge.sources
-    : [];
-  const preservedAllowedDomains = existingParsed.success
-    ? existingParsed.data.allowedDomains
-    : [];
+  if (!existingParsed.success) {
+    logger.error(
+      {
+        err: existingParsed.error,
+        slug,
+        userId: user.id,
+      },
+      "기존 봇 config 파싱 실패 (저장 중단)",
+    );
+    return {
+      error:
+        "봇 설정을 불러오는 중 오류가 발생했어요. 관리자에게 문의해 주세요.",
+    };
+  }
+
+  const preservedNonTextSources: KnowledgeSource[] =
+    existingParsed.data.knowledge.sources.filter((s) => s.type !== "text");
+  const existingTextContent =
+    existingParsed.data.knowledge.sources.find((s) => s.type === "text")
+      ?.content ?? "";
+  const preservedAllowedDomains = existingParsed.data.allowedDomains;
+
+  // 6. 새 text 지식 추출 + sanitize + 검증.
+  //    sec H-2: NULL byte (Postgres 22021) + Unicode 방향 제어 (Trojan Source)
+  //    는 trim 전에 먼저 제거 — "빈 문자열 = 삭제 의도" 분기가 정확히 동작하도록.
+  const rawText = String(formData.get("knowledge.text.content") ?? "");
+  const newTextContent = sanitizeKnowledgeText(rawText).trim();
+
+  if (newTextContent.length > MAX_KNOWLEDGE_TEXT_LENGTH) {
+    return {
+      fieldErrors: {
+        "knowledge.text.content": `최대 ${MAX_KNOWLEDGE_TEXT_LENGTH.toLocaleString()}자까지 저장할 수 있어요.`,
+      },
+    };
+  }
+  if (
+    newTextContent.length > 0 &&
+    newTextContent.length < MIN_KNOWLEDGE_TEXT_LENGTH
+  ) {
+    return {
+      fieldErrors: {
+        "knowledge.text.content": `${MIN_KNOWLEDGE_TEXT_LENGTH}자 이상 입력하거나 비워두세요.`,
+      },
+    };
+  }
+
+  // 7. text 지식 변경된 경우만 재임베딩 (knowledge RPC → 실패 시 bots UPDATE 건너뜀).
+  //    Gemini API 느림 (초 단위) → 미변경 시 건너뛰어 저장 속도 유지.
+  const knowledgeChanged = newTextContent !== existingTextContent;
+  if (knowledgeChanged) {
+    try {
+      await ingestTextKnowledge(supabase, existing.id, newTextContent);
+    } catch (err) {
+      logger.error(
+        { err, botId: existing.id, userId: user.id },
+        "text 지식 재임베딩 실패",
+      );
+      return {
+        error:
+          "지식 저장에 실패했어요. 잠시 후 다시 시도해 주세요. (다른 섹션은 저장되지 않았습니다)",
+      };
+    }
+  }
+
+  // 8. sources 재계산 (빈 content = text 항목 제거, 있으면 단일 text 항목 추가).
+  const newSources: KnowledgeSource[] =
+    newTextContent.length > 0
+      ? [...preservedNonTextSources, { type: "text", content: newTextContent }]
+      : preservedNonTextSources;
 
   const newConfig: DariConfig = {
     ...parsed.data,
-    knowledge: { sources: preservedSources },
+    knowledge: { sources: newSources },
     allowedDomains: preservedAllowedDomains,
   };
 
-  // 6. UPDATE — RLS bots_update_owner USING + WITH CHECK 자동 적용.
+  // 9. UPDATE — RLS bots_update_owner USING + WITH CHECK 자동 적용.
   //    name 동기화: bots.name = identity.name (단일 출처).
   //    .select('id') 로 영향받은 row 확인 → 0 이면 RLS 거부 또는 race condition.
   const payload: BotUpdate = {

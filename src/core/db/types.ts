@@ -25,6 +25,13 @@ import type { DariConfig } from "@/core/config";
 export type BotStatus = "active" | "paused" | "deleted";
 export type ConversationStatus = "active" | "closed" | "handed_off";
 export type MessageRole = "user" | "assistant" | "system";
+// DB `knowledge_chunks.source_type` 의 CHECK 제약값 (0005 마이그레이션).
+// 주의: `@/core/config` 의 `KnowledgeSource.type` ("url"|"file"|"text") 는 **다른 값 체계**.
+//   - 앱 config "text" → DB source_type "manual"   (Task 1-7-a: src/core/knowledge/ingest.ts)
+//   - 앱 config "file" → DB source_type "pdf"|"markdown"  (Task 1-7-c 예정)
+//   - 앱 config "url"  → DB source_type "url"      (Task 1-7-b 예정)
+// 분리 이유: DariConfig 는 사용자 입력 추상화(파일 확장자 불특정), DB 는 파서/렌더러
+// 분기용 구체 식별자. 변환 지점은 각 ingest* 함수 단일 진입점에 집중.
 export type KnowledgeSourceType = "url" | "pdf" | "manual" | "markdown";
 
 // ─── Sub-structures ───
@@ -43,6 +50,17 @@ export type KnowledgeChunkMatch = {
   source_identifier: string;
   chunk_index: number;
   metadata: Record<string, unknown>;
+};
+
+// RPC replace_text_knowledge_chunks 페이로드. DB 내부 캐스팅:
+//   content:string / chunk_index:int / embedding:number[] → vector(768) /
+//   tokens:int|null / metadata:jsonb.
+export type TextKnowledgeChunkPayload = {
+  content: string;
+  chunk_index: number;
+  embedding: number[];
+  tokens?: number | null;
+  metadata?: Record<string, unknown>;
 };
 
 // ─── Database ───
@@ -216,6 +234,15 @@ export type Database = {
           p_min_score?: number;
         };
         Returns: KnowledgeChunkMatch[];
+      };
+      // Task 1-7-a: text("manual") 청크 원자적 재임베딩.
+      // p_chunks = [{ content, chunk_index, embedding, tokens?, metadata? }, ...]
+      replace_text_knowledge_chunks: {
+        Args: {
+          p_bot_id: string;
+          p_chunks: TextKnowledgeChunkPayload[];
+        };
+        Returns: number;
       };
     };
     Enums: Record<string, never>;

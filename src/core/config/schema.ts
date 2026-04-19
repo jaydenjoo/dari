@@ -256,6 +256,7 @@ export type Identity = z.infer<typeof identitySchema>;
 export type AIConfig = z.infer<typeof aiSchema>;
 export type AIModel = z.infer<typeof aiModelSchema>;
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
+export type Knowledge = z.infer<typeof knowledgeSchema>;
 export type BehaviorMode = z.infer<typeof behaviorModeSchema>;
 export type Behavior = z.infer<typeof behaviorSchema>;
 export type Appearance = z.infer<typeof appearanceSchema>;

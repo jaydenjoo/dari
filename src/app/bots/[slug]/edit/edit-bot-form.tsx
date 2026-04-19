@@ -11,7 +11,7 @@ import { AnalyticsSection } from "./analytics-section";
 import { AppearanceSection } from "./appearance-section";
 import { BehaviorSection } from "./behavior-section";
 import { IdentitySection } from "./identity-section";
-import { KnowledgePlaceholder } from "./knowledge-placeholder";
+import { KnowledgeSection } from "./knowledge-section";
 
 const initialState: UpdateBotFormState = {};
 
@@ -93,9 +93,9 @@ export default function EditBotForm({
       <SectionCard
         id="knowledge"
         title="지식 베이스"
-        description="등록된 지식에서 답변 근거 검색 (Phase 2)"
+        description="봇이 답변 근거로 사용할 텍스트 (URL·파일 업로드는 Phase 2)"
       >
-        <KnowledgePlaceholder sourceCount={config.knowledge.sources.length} />
+        <KnowledgeSection initial={config.knowledge} errors={errors} />
       </SectionCard>
 
       <SubmitBar />
