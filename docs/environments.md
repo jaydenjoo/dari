@@ -46,22 +46,23 @@ Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환�
 
 ## 3. 환경변수 차이 매트릭스
 
-| 변수                            | `local`                        | `preview`                   | `prod`                            |
-| ------------------------------- | ------------------------------ | --------------------------- | --------------------------------- |
-| `NODE_ENV`                      | `development`                  | `production` (Vercel 자동)  | `production`                      |
-| `NEXT_PUBLIC_APP_URL`           | `http://localhost:4000`        | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`              |
-| `NEXT_PUBLIC_SUPABASE_URL`      | dari-dev URL                   | dari-dev URL                | **dari-prod URL** (교체)          |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dari-dev anon                  | dari-dev anon               | **dari-prod anon** (교체)         |
-| `SUPABASE_SERVICE_ROLE_KEY`     | dari-dev service_role          | dari-dev service_role       | **dari-prod service_role** (교체) |
-| `DATABASE_URL`                  | (선택, migration CLI 전용)     | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI) |
-| `ANTHROPIC_API_KEY`             | 개인 개발 키 (저비용)          | 개인 개발 키                | **프로덕션 키** (사용량 분리)     |
-| `GOOGLE_GENERATIVE_AI_API_KEY`  | 개인 개발 키                   | 개인 개발 키                | **프로덕션 키**                   |
-| `UPSTASH_REDIS_REST_URL`        | dari-dev Redis                 | dari-dev Redis              | **dari-prod Redis** (교체)        |
-| `UPSTASH_REDIS_REST_TOKEN`      | dari-dev token                 | dari-dev token              | **dari-prod token**               |
-| `SENTRY_DSN`                    | (선택, 로컬 디버그용)          | prod 와 동일 DSN            | prod DSN                          |
-| `NEXT_PUBLIC_SENTRY_DSN`        | (선택)                         | prod 와 동일 DSN            | prod DSN                          |
-| `SENTRY_ENVIRONMENT`            | `development`                  | `preview`                   | `production`                      |
-| `FIRECRAWL_API_KEY`             | (선택, 미설정 시 cheerio 폴백) | 개인 개발 키                | **프로덕션 키**                   |
+| 변수                             | `local`                        | `preview`                   | `prod`                            |
+| -------------------------------- | ------------------------------ | --------------------------- | --------------------------------- |
+| `NODE_ENV`                       | `development`                  | `production` (Vercel 자동)  | `production`                      |
+| `NEXT_PUBLIC_APP_URL`            | `http://localhost:4000`        | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`              |
+| `NEXT_PUBLIC_SUPABASE_URL`       | dari-dev URL                   | dari-dev URL                | **dari-prod URL** (교체)          |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | dari-dev anon                  | dari-dev anon               | **dari-prod anon** (교체)         |
+| `SUPABASE_SERVICE_ROLE_KEY`      | dari-dev service_role          | dari-dev service_role       | **dari-prod service_role** (교체) |
+| `DATABASE_URL`                   | (선택, migration CLI 전용)     | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI) |
+| `ANTHROPIC_API_KEY`              | 개인 개발 키 (저비용)          | 개인 개발 키                | **프로덕션 키** (사용량 분리)     |
+| `GOOGLE_GENERATIVE_AI_API_KEY`   | 개인 개발 키                   | 개인 개발 키                | **프로덕션 키**                   |
+| `UPSTASH_REDIS_REST_URL`         | dari-dev Redis                 | dari-dev Redis              | **dari-prod Redis** (교체)        |
+| `UPSTASH_REDIS_REST_TOKEN`       | dari-dev token                 | dari-dev token              | **dari-prod token**               |
+| `SENTRY_DSN`                     | (선택, 로컬 디버그용)          | prod 와 동일 DSN            | prod DSN                          |
+| `NEXT_PUBLIC_SENTRY_DSN`         | (선택)                         | prod 와 동일 DSN            | prod DSN                          |
+| `SENTRY_ENVIRONMENT`             | `development`                  | `preview`                   | `production`                      |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`                  | `preview`                   | `production`                      |
+| `FIRECRAWL_API_KEY`              | (선택, 미설정 시 cheerio 폴백) | 개인 개발 키                | **프로덕션 키**                   |
 
 > **원칙**: **dev 비용 ≠ prod 비용**. AI 키·Redis·Supabase 는 환경별로 **반드시 분리**. 한 key 공유 시 prod 트래픽이 dev 크레딧을 소진하거나 반대로 개발 실수가 prod 데이터를 오염시킨다.
 
@@ -170,7 +171,7 @@ supabase db push                         # prod 반영 (⚠️ 되돌리기 어�
 
 ## 7. Sentry 환경 태그
 
-각 환경의 에러·성능 데이터를 Sentry UI 에서 구분하려면 `SENTRY_ENVIRONMENT` 를 세팅한다. Dari 는 fallback chain 을 적용해 미설정 시 `NODE_ENV` 로 대체한다.
+각 환경의 에러·성능 데이터를 Sentry UI 에서 구분하려면 환경 변수 2개를 세팅한다. Dari 는 fallback chain 을 적용해 미설정 시 `NODE_ENV` 로 대체한다.
 
 ```ts
 // sentry.server.config.ts + sentry.edge.config.ts
@@ -181,9 +182,18 @@ Sentry.init({
     process.env.NODE_ENV ?? // fallback
     "development",
 });
+
+// instrumentation-client.ts (브라우저)
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  environment:
+    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? // 빌드 타임 인라인
+    process.env.NODE_ENV ?? // fallback
+    "development",
+});
 ```
 
-> ⚠️ **브라우저 제약**: `instrumentation-client.ts` 는 `NEXT_PUBLIC_*` 접두사 없는 `SENTRY_ENVIRONMENT` 를 주입 받지 못한다. 브라우저 측 에러는 `NODE_ENV` 기반으로만 분류되어 **preview 와 prod 가 동일하게 `production` 으로 묶임**. 서버/엣지 측만 3종 구분 가능. 필요 시 별도 `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 도입 검토 (현재는 오버엔지니어링 판단).
+> 📌 **브라우저 특성**: `NEXT_PUBLIC_*` 접두사 변수는 Next.js 빌드 타임에 번들로 인라인된다. 따라서 Vercel Preview 와 Production **각각 등록**해야 값이 빌드별로 주입된다 (동적 주입 불가). 미등록 시 `NODE_ENV` fallback 으로 Preview/Prod 가 `production` 으로 병합된다.
 
 ### Sentry UI 에서 활용
 
@@ -193,10 +203,11 @@ Sentry.init({
 
 ### Stage 2 (지인 베타 10명) 진입 전 대비
 
-브라우저 측이 preview/prod 를 하나로 묶으므로 사고 triage 지연 위험 — 아래 중 하나로 완화:
+브라우저·서버·엣지 모두 3종 환경 구분 완료 (Task γ-3, 2026-04-19). 운영 체크리스트:
 
-- **옵션 A** (단기, 즉시 적용): Sentry Alert 규칙을 `environment:production AND level:error AND !platform.browser` 로 조정 — 브라우저 에러 노이즈 제외
-- **옵션 B** (근본, 별도 Task 권장): `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 도입으로 브라우저도 3종 구분. Stage 2 진입 전 backlog 에서 승격.
+- **Vercel 환경 등록 확인**: `NEXT_PUBLIC_SENTRY_ENVIRONMENT` 가 Preview(`preview`) / Production(`production`) 각각 등록되었는지 Settings → Environment Variables 에서 검증
+- **Sentry UI 필터 준비**: Issues 목록에서 `environment:production` 필터로 실사용자 에러만 집계
+- **Alert 규칙**: `environment:production AND level:error` → Jayden 알림. preview 는 PR 단위 사전 검증용으로 노이즈 감안하고 관찰
 
 ---
 

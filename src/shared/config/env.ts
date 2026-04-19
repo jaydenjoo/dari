@@ -19,15 +19,20 @@ import { z } from "zod";
  */
 
 // 클라이언트 안전 (브라우저에 노출됨 — 민감 정보 포함 금지)
-const clientSchema = z.object({
+export const clientSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:4000"),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+  // 브라우저 Sentry 이벤트 `environment` 태그. `NEXT_PUBLIC_*` 접두사 필수 —
+  // 빌드 타임 인라인이므로 Vercel Preview/Production 각각 등록 (docs/environments.md §7).
+  NEXT_PUBLIC_SENTRY_ENVIRONMENT: z
+    .enum(["development", "preview", "production"])
+    .optional(),
 });
 
 // 서버 전용 (API keys, secrets)
-const serverSchema = clientSchema.extend({
+export const serverSchema = clientSchema.extend({
   // NODE_ENV 는 런타임 플랫폼이 반드시 명시 주입해야 한다 (Next.js: dev/build/start 자동,
   // Vitest: "test" 자동, Vercel: "production" 자동). default 를 두지 않아 플랫폼 주입이
   // 누락되면 부팅이 실패(fail-fast) 하게 한다 — rate limit 같은 skip 분기 정책이
@@ -63,15 +68,23 @@ type ClientEnv = z.infer<typeof clientSchema>;
 
 const isServer = typeof window === "undefined";
 
+function summarizeFieldErrors(
+  fieldErrors: Record<string, string[] | undefined>,
+): string {
+  return Object.entries(fieldErrors)
+    .map(([field, errors]) => `${field}: ${errors?.join(", ") ?? "unknown"}`)
+    .join(" | ");
+}
+
 function parseEnv(): ServerEnv | ClientEnv {
   if (isServer) {
     const parsed = serverSchema.safeParse(process.env);
     if (!parsed.success) {
-      console.error(
-        "❌ 환경변수 검증 실패 (서버):",
-        parsed.error.flatten().fieldErrors,
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      console.error("❌ 환경변수 검증 실패 (서버):", fieldErrors);
+      throw new Error(
+        `Invalid server environment variables — ${summarizeFieldErrors(fieldErrors)}. See docs/env-template.md`,
       );
-      throw new Error("Invalid server environment variables. See .env.example");
     }
     return parsed.data;
   }
@@ -82,13 +95,14 @@ function parseEnv(): ServerEnv | ClientEnv {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
   });
   if (!parsed.success) {
-    console.error(
-      "❌ 환경변수 검증 실패 (클라이언트):",
-      parsed.error.flatten().fieldErrors,
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    console.error("❌ 환경변수 검증 실패 (클라이언트):", fieldErrors);
+    throw new Error(
+      `Invalid client environment variables — ${summarizeFieldErrors(fieldErrors)}. See docs/env-template.md`,
     );
-    throw new Error("Invalid client environment variables. See .env.example");
   }
   return parsed.data;
 }
