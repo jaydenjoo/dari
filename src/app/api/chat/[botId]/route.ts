@@ -6,6 +6,11 @@ import { z } from "zod";
 import { getAnthropicClient } from "@/core/ai/anthropic-client";
 import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createAdminClient } from "@/core/db/client-admin";
+import type { KnowledgeChunkMatch } from "@/core/db/types";
+import {
+  augmentSystemPromptWithKnowledge,
+  retrieveRelevantChunks,
+} from "@/core/knowledge";
 import { logger } from "@/core/logging";
 import { checkBotChatRatelimit } from "@/core/ratelimit/bot-chat-limiter";
 import { sanitizeLoggableError } from "@/core/ratelimit/factory";
@@ -27,9 +32,9 @@ const MAX_MESSAGES_PER_CONVERSATION = 200;
 /**
  * 위젯 Chat API — anon origin 접근 허용 엔드포인트.
  *
- * Phase 1 최소 구현 (Task 1-6-a):
+ * Phase 1 구현 (Task 1-6-a + 1-6-c):
  *   - 응답 방식: JSON 단일 (스트리밍은 1-6-d 또는 Phase 2)
- *   - RAG 없음 (Task 1-6-c 에서 knowledge_chunks 연결)
+ *   - RAG: Task 1-6-c 로 `match_knowledge_chunks` 연결 — 실패 시 빈 청크로 fallback
  *   - Preflight OPTIONS 분기 지원
  *
  * 보안 레이어 (6중):
@@ -189,7 +194,15 @@ export async function POST(
     return jsonError("internal_error", 500, origin, bot.config.allowedDomains);
   }
 
-  const assistantText = await callAnthropic(bot, message);
+  // RAG: 사용자 메시지 → 임베딩 → 상위 K 청크. 실패 시 빈 배열 반환(내부 warn 로깅)
+  // → 기존 systemPrompt 로 fallback. chat 자체는 중단되지 않는다.
+  const chunks = await retrieveRelevantChunks(bot.id, message);
+  logger.debug(
+    { botId: bot.id, chunkCount: chunks.length },
+    "RAG chunks retrieved",
+  );
+
+  const assistantText = await callAnthropic(bot, message, chunks);
   if (assistantText === null) {
     return jsonError("upstream_error", 502, origin, bot.config.allowedDomains);
   }
@@ -301,7 +314,11 @@ async function resolveConversationId(
 }
 
 /**
- * Anthropic 호출 — 실패는 null 반환 (caller 는 502). RAG 는 Task 1-6-c 에서 추가.
+ * Anthropic 호출 — 실패는 null 반환 (caller 는 502).
+ *
+ * RAG (Task 1-6-c): chunks 가 비어있지 않으면 systemPrompt 에 XML 태그로 구조화 주입.
+ * `augmentSystemPromptWithKnowledge` 내부에서 content escape + 경계 지시문으로
+ * Prompt Injection 1차 방어. 빈 배열이면 원본 systemPrompt 그대로 사용.
  *
  * ContentBlock 은 text / tool_use / thinking 등 union. 우리는 text 만 필요하므로
  * 첫 text 블록을 찾아 반환 (도구/사고 블록은 스킵).
@@ -309,15 +326,20 @@ async function resolveConversationId(
 async function callAnthropic(
   bot: BotContext,
   message: string,
+  chunks: readonly KnowledgeChunkMatch[],
 ): Promise<string | null> {
   // Chat API 레이어에서 max_tokens clamp — 소유자 설정값과 무관하게 상한 강제 (security M-3)
   const maxTokens = Math.min(bot.config.ai.maxTokens, CHAT_MAX_OUTPUT_TOKENS);
+  const system = augmentSystemPromptWithKnowledge(
+    bot.config.ai.systemPrompt,
+    chunks,
+  );
   try {
     const completion = await getAnthropicClient().messages.create({
       model: bot.config.ai.model,
       max_tokens: maxTokens,
       temperature: bot.config.ai.temperature,
-      system: bot.config.ai.systemPrompt,
+      system,
       messages: [{ role: "user", content: message }],
     });
     for (const block of completion.content) {

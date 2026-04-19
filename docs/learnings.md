@@ -32,6 +32,56 @@
 
 ## 기록
 
+### 2026-04-19 supabase-js `.rpc()` 안전 계약 — `{data,error}` + throw 두 경로 모두 감싸야 함 (기술 이슈)
+
+**증상**: Task 1-6-c `retrieveRelevantChunks` 초안. `embedBatch` 는 try-catch 로 감쌌는데 `admin.rpc("match_knowledge_chunks", ...)` 는 `{ data, error }` 분기만 처리. 독립 code-reviewer 리뷰 MEDIUM-1: `admin.rpc()` 자체가 네트워크 단절/fetch 레이어 예외 시 throw 로 나올 수 있고, 이 경로는 catch 되지 않아 상위 `callAnthropic` 까지 예외가 전파됨 → `null` 반환 → 502 응답. "RAG 는 보조 기능이므로 chat 전체 실패로 전파 금지" 안전 계약 위반.
+
+**원인**: supabase-js (postgrest-js) 의 응답 모델은 **두 경로**. ① DB 단에서 쿼리가 실행되어 에러가 돌아오면 `{ data: null, error: {...} }` 일반 경로. ② 네트워크/fetch 레이어에서 실패하면 `throw`. 함수 내부에서 `embedBatch` 처럼 명시적 throw 만 가정하고 `.rpc()` 는 구조화된 응답만 올 것이라고 가정하면, 네트워크 장애 시점에 안전 계약이 깨진다. embedBatch catch 와 admin.rpc catch 의 **대칭성**이 안전 계약의 형식적 조건.
+
+**해결**: `admin.rpc(...)` 호출을 try-catch 로 감싸 throw 경로도 빈 배열 fallback 으로 귀결시키고, 회귀 방지 테스트 (`mockRpc.mockRejectedValueOnce(new Error("fetch failed"))`) 로 catch 누락을 즉시 노출하도록 추가.
+
+**규칙** ⭐:
+- supabase-js `.rpc()` / `.from().select()` 등 네트워크 호출이 **안전 계약(throw 금지)** 을 가지는 함수 안에 있으면 **반드시 try-catch + `{error}` 분기 둘 다** 처리.
+- 동일 함수 내에서 외부 호출이 여러 개면 모든 외부 호출에 대해 **대칭적으로** catch 적용 (일부만 감싸면 경로 불일치가 독립 리뷰에서 반드시 잡힌다).
+- 안전 계약 구현을 증명하는 것은 **해피 패스 아닌 실패 경로 테스트**. throw 케이스를 mock 하는 테스트는 필수.
+
+---
+
+### 2026-04-19 소유자 신뢰 모델 escape 정책 — 외부 입력 vs 내부 설정 분기 (설계 결정)
+
+**증상**: Task 1-6-c `augmentSystemPromptWithKnowledge` 독립 security-reviewer 리뷰 MEDIUM-2: 청크 content 는 escape 하면서 `basePrompt` (봇 소유자 systemPrompt) 는 escape 안 함. 소유자가 실수로 systemPrompt 에 `</knowledge>` 를 삽입하면 LLM 이 지식 블록 닫힘으로 오해 가능. "같은 함수의 두 입력을 다르게 처리하면 일관성 훼손 아닌가?"
+
+**원인**: Prompt 조립 함수에 들어오는 두 입력의 **신뢰 경계(trust boundary)** 가 다르다. 청크 content 는 봇 소유자가 업로드한 자료지만 사용자(지식을 이용할 end-user) 입장에서는 외부 입력 — 악성 청크로 LLM 을 조종할 수 있는 Prompt Injection 벡터 (OWASP LLM01). basePrompt 는 봇 소유자 본인이 직접 작성한 systemPrompt 로, Claude 공식 권장 패턴에서 `<role>`, `<instructions>`, `<format>` 같은 XML 태그를 소유자가 **의도적으로** 사용하는 것이 정당. escape 를 걸면 이 정당한 사용을 훼손.
+
+**해결**: escape 적용 범위를 "외부 입력 청크 content" 로 한정하고, basePrompt 는 그대로 전달. 주석에 "basePrompt 는 봇 소유자가 작성한 systemPrompt 로 신뢰된 입력이며... `<role>` 등 XML 태그를 사용하는 것이 정당 ... 소유자가 실수로 `</knowledge>` 를 넣는 시나리오는 소유자 자기 책임 영역으로 수용" 명시 (security MEDIUM-2 의식적 미반영 근거).
+
+**규칙** ⭐:
+- Prompt / Template 조립 함수에서 여러 입력이 들어올 때, 각 입력의 **신뢰 경계**를 먼저 식별: 외부 입력(사용자·크롤러·API) / 소유자 입력(설정값·systemPrompt) / 시스템 상수.
+- escape/sanitize 는 **외부 입력**에만 적용. 소유자 입력에 escape 를 걸면 Claude 공식 XML 패턴 같은 정당한 사용을 차단.
+- 신뢰 경계 분기의 **근거를 주석에 명시** — 미래 리뷰어가 "왜 한쪽만 escape 하지?" 로 되묻지 않게.
+- 의식적 미반영 결정은 독립 리뷰 ID(sec MEDIUM-2 등) 와 함께 주석에 코딩 → 추적 가능성.
+
+---
+
+### 2026-04-19 Vercel Sentry Native Integration 이 기존 수동 조직 무시 + env 숨김 주입 (AI 이탈 / 설계 결정)
+
+**증상**: Jayden 이 Sentry 설정을 위해 ① Sentry 웹에서 수동으로 `dari-vb` 조직 + `javascript-nextjs` 프로젝트 생성 + DSN 복사 → `.env.local` 에 등록 ② Vercel Marketplace 에서 Sentry Integration 설치 (Create New 선택). Vercel 배포 로그 확인 시 source map 은 전혀 다른 조직(`jayden-f0`) + 프로젝트(`sentry-copper-mountain`) 로 업로드. Vercel Project Settings → Environment Variables UI 에는 `SENTRY_*` env 가 하나도 안 보임에도 빌드 시점에는 정상 주입되어 warning 2건 제거됨.
+
+**원인**:
+- Vercel Marketplace 의 "Create New Sentry Account" (Vercel Native) 경로는 **기존 Sentry 계정과 완전 독립적으로 신규 조직을 자동 생성**. Jayden 이 이미 만든 `dari-vb` 를 탐색/연결하지 않는다. 결과적으로 조직 2개 공존.
+- Integration-주입 env (`SENTRY_AUTH_TOKEN` 등) 는 Project Settings → Environment Variables UI 에 표시되지 않는 숨김 경로로 주입. 사용자 관리 env 와 구분되어 "숨김 주입" 방식. UI 에서 존재 확인 불가, 배포 로그에서만 동작 증명.
+- AI 가 `@sentry/nextjs` 코드 통합을 먼저 완료한 후 Jayden 이 외부 설정을 해야 하는 의존 관계에서, 설정 절차의 권장 순서(`Vercel Marketplace 먼저 → 자동 프로젝트 생성` vs `수동 프로젝트 먼저 → Integration 나중에`) 를 선행 안내하지 않음 → Jayden 이 수동 조직 + Integration 자동 조직 양쪽 만드는 시행착오.
+
+**해결**: 사건 시점에는 `jayden-f0` 유지 + `dari-vb` 폐기 경로 A 채택 (Integration 이 이미 정상 연결). `.env.local` DSN 도 `jayden-f0` 의 것으로 재교체. 근본 재발 방지는 메모리 + 이 교훈:
+
+**규칙** ⭐:
+- 외부 SDK 도입 Task 의 Plan 단계에서 **외부 선결 조건 체크리스트**를 먼저 제시 (계정/조직/프로젝트/권한/env/결제/**공식 권장 설치 순서**/수동 구간). 코드 완성 후 Jayden 이 외부 설정 착수하면 늦다 — 배포 warning 이 첫 증상.
+- Vercel Marketplace 류 "Create New" 는 기존 외부 계정을 **탐색하지 않음**. "Link Existing" 선택지가 있으면 이게 기본이어야 한다. 안내 시 반드시 Link Existing 을 기본 추천.
+- Integration-주입 env 는 UI 표시 안 될 수 있다. 존재 확인은 Project Settings 가 아니라 **배포 로그** (`Organization: ...`, `Projects: ...` 라인) 가 진실의 근원.
+- 메모리 `feedback_external_service_precheck.md` 규칙을 Plan 단계마다 트리거해서 체크리스트 선제시.
+
+---
+
 ### 2026-04-19 공개 에러 메시지 정적화 — 외부 호출 실패 시 throw 에는 static identifier (설계 결정)
 
 **증상**: Task 1-7-a 독립 보안 리뷰 H-1. `src/core/knowledge/ingest.ts` 의 `supabase.rpc("replace_text_knowledge_chunks", …)` 실패 시 `throw new Error(\`replace_text_knowledge_chunks failed: ${error.message}\`)` 로 Postgres 에러 메시지를 throw 에 포함. 현재 경로(Server Action catch)는 일반화 메시지로 가공하지만, 향후 API Route/Edge Function 이 catch 없이 에러를 전파하면 Postgres errcode(`23503 foreign_key_violation`), 정책명("new row violates row-level security policy"), 테이블·컬럼명 등 내부 스키마 정보가 HTTP 응답에 노출될 수 있다. OWASP A05 Security Misconfiguration.
