@@ -32,6 +32,24 @@
 
 ## 기록
 
+### 2026-04-19 공개 에러 메시지 정적화 — 외부 호출 실패 시 throw 에는 static identifier (설계 결정)
+
+**증상**: Task 1-7-a 독립 보안 리뷰 H-1. `src/core/knowledge/ingest.ts` 의 `supabase.rpc("replace_text_knowledge_chunks", …)` 실패 시 `throw new Error(\`replace_text_knowledge_chunks failed: ${error.message}\`)` 로 Postgres 에러 메시지를 throw 에 포함. 현재 경로(Server Action catch)는 일반화 메시지로 가공하지만, 향후 API Route/Edge Function 이 catch 없이 에러를 전파하면 Postgres errcode(`23503 foreign_key_violation`), 정책명("new row violates row-level security policy"), 테이블·컬럼명 등 내부 스키마 정보가 HTTP 응답에 노출될 수 있다. OWASP A05 Security Misconfiguration.
+
+**원인**: 에러 메시지에 외부 API/DB 응답의 `error.message` 를 그대로 interpolation 하는 관례. 편의상 자주 쓰이지만, "어느 호출자가 어떻게 catch 할지" 는 함수 시그니처로 보장 불가. 함수를 public API 로 내놓는 순간, 에러 흐름 중 하나라도 catch 를 빼먹으면 내부 정보가 샌다 (fail-open 경로).
+
+**해결**: throw 메시지는 static identifier(`"knowledge RPC failed"`) 만. 내부 상세는 `logger.error({ err, botId, chunkCount }, "…")` 메타 필드에 담아 **단일 출처**로 기록. 상위 catch 가 일반화 응답(`"지식 저장에 실패했어요"`) 으로 바꿀 여지를 주면서, catch 가 누락돼도 사용자 응답에 내부 정보가 섞이지 않는다. 테스트도 `rejects.toThrow(/^knowledge RPC failed$/)` 정적 매칭 + `rejects.not.toThrow(/row-level security/)` 내부 메시지 비포함 검증 쌍으로 회귀 방지.
+
+**규칙** ⭐:
+
+- **외부 API/DB/RPC 실패의 throw 메시지는 static identifier 만** — `"knowledge RPC failed"`, `"anthropic API failed"`, `"upstash rate check failed"` 수준. 동적 interpolation(`${error.message}`) 금지.
+- **내부 상세는 logger.error 메타 단일 출처** — 디버깅 정보(Postgres errcode, 정책명, 스택, 요청 컨텍스트 botId/userId) 는 logger 에만. 여러 호출자가 catch 없이 전파해도 내부 정보가 사용자에게 가지 않는다.
+- **테스트에서 양방향 검증** — `rejects.toThrow(/^static-id$/)` + `rejects.not.toThrow(/internal-keyword/)` 쌍. 미래 회귀 + 개발 중 `error.message` 포함하려는 유혹을 코드 리뷰 단계에서 차단.
+- **호출자 관례 의존 금지** — "지금 호출자가 catch 하니까 괜찮다" 는 시점 편의. 함수 public 화 = 에러 노출 경로 무한 확장. 시그니처만으로 안전해야 한다.
+- **예외: 호출자가 확정된 internal 헬퍼**는 static + 필요 시 덧붙이기 허용. 단 public export 순간 static 고정 재검토.
+
+---
+
 ### 2026-04-19 side-effect import 모듈 테스트 — vi.hoisted + process.env 사전 주입 (설계 결정)
 
 **증상**: Task γ-3 에서 `src/shared/config/env.test.ts` 를 작성. `env.ts` 는 import 시점에 `parseEnv()` 를 즉시 호출하고 필수 환경변수 누락 시 throw 한다 (fail-fast 설계). `import { clientSchema } from "./env"` 하는 순간 test 환경이 production 수준 env 를 갖추지 않아 즉시 실패 (`GOOGLE_GENERATIVE_AI_API_KEY`, `UPSTASH_REDIS_REST_URL` 등 "Invalid input: expected string, received undefined"). Vitest 는 기본적으로 `NODE_ENV=test` 만 주입.

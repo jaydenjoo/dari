@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 — 1-6-a Chat API ✅ + 1-6-b 번들 ✅ + 1-6-d DariConfig ✅** + **γ-3 브라우저 Sentry 환경 분리 ✅**
-- 상태: **Task γ-3 완료** (vitest 202 → 212, +10 / clientSchema enum + schema export / 독립 리뷰 2 Ship as-is + 선제 보강 3건) / **🟡 0007 마이그레이션 Supabase 실 apply 필요 (Jayden 수동)** + **🟡 Vercel 환경변수 등록 필요** (`NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production) → 다음 **Jayden 브라우저 스모크** / **Task 1-7 지식 업로드 (→ 1-6-c RAG 선행)**
+- Epic: **Epic 1-6 위젯 런타임 1-6-a/b/d ✅ + γ-3 ✅** + **Epic 1-7 지식 업로드 — Task 1-7-a text 타입 ✅**
+- 상태: **Task 1-7-a 완료** (vitest 212 → 243, +31 / chunking + embedding + ingest + sanitize 파이프라인 + 0008 RPC + 단일 textarea UI / 독립 리뷰 2 Fix-then-ship + 5건 반영) / **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** + **🟡 Vercel 환경변수 등록** (`NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production) → 다음 **Task 1-6-c RAG 연결** (1-7-a 로 실 지식 데이터 확보 → RAG 엔드투엔드 검증 가능)
 
 ## 완료된 Epic
 
@@ -58,8 +58,78 @@
   - `__InternalSupabase: { PostgrestVersion: "12" }` 슬롯 + 4 테이블 `Relationships: []`
   - 회피 코드 6곳 제거 (`.returns<T[]>()` 4곳 + `as never` 2곳)
   - postgrest-js GenericTable 요구조건 충족 → Insert/Update payload 정상 추론
+- ✅ **Task 1-7-a (Epic 1-7 진입)**: text 지식 업로드 + 임베딩 파이프라인 MVP
+  - 파이프라인: `chunking.ts` (500자+100 오버랩 + 무한루프 방어) / `embedding.ts` (Gemini text-embedding-004 768dim + 100개 배치 자동 분할) / `sanitize.ts` (NULL byte + 방향제어/BOM/Tag chars) / `ingest.ts` (chunk+embed+RPC 오케스트레이션)
+  - DB: `0008_replace_text_knowledge_chunks.sql` — plpgsql RPC `security invoker` + `search_path=''` (RLS 4정책 자동 적용). source_type='manual' + source_identifier='manual:inline' 고정. jsonb 입력 → `::extensions.vector(768)` 캐스팅
+  - UI: `knowledge-section.tsx` 단일 textarea + 글자수 힌트 + `actions.ts` 변경 감지 저장 + `type!=='text'` sources 보존 + `existingParsed` 실패 fail-fast
+  - 독립 리뷰 2 에이전트 (code + security) → 둘 다 Fix-then-ship / 5건 반영:
+    - sec H-1 RPC throw 메시지 정적화(`"knowledge RPC failed"`) → Postgres 내부 메시지 차단
+    - sec H-2 `sanitizeKnowledgeText` → Trojan Source + NULL byte 방어
+    - code M-4 existingParsed fail-fast → url/file sources 묵시적 삭제 차단 (Task 1-7-b/c 이전 필수)
+    - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
+    - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
+  - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
 
-## 이번 세션(2026-04-19) 완료 내역 — Task γ-3 브라우저 Sentry 환경 분리
+## 이번 세션(2026-04-19 Ⅱ) 완료 내역 — Task 1-7-a text 지식 업로드 파이프라인 (Epic 1-7 진입)
+
+Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 지식 업로드 경로를 text 타입부터 end-to-end 구축. url/file 은 외부 의존 크므로 Task 1-7-b/c 로 분리.
+
+### 흐름 (~3시간)
+
+1. **Plan → Approve → Build** (~75분)
+   - 3결정 포인트 비교표: 임베딩 모델(A Gemini 768dim 기존 스키마+무료 채택) / 청킹 전략(A 500자+100 오버랩 PRD 명시 채택) / 청크 업데이트(A 재임베딩 = 무료 티어 + 멱등 채택)
+   - 파일 15 신규/수정
+2. **핵심 파이프라인 + 테스트** (~60분)
+   - chunking / embedding / ingest / 0008 RPC + 각 테스트 (+23)
+   - vi.hoisted class mock 패턴 (embedding GoogleGenerativeAI) / vi.hoisted mock fn (ingest embedBatch)
+3. **UI 연결** (~30분)
+   - knowledge-section 단일 textarea / actions.ts ingestTextKnowledge 호출 + 변경 감지 skip / sources 재계산
+4. **독립 리뷰 2 병렬** (code + security) — 둘 다 Fix-then-ship / CRITICAL·BLOCK 0
+5. **5건 반영** (~25분) — sanitize util 분리 + 테스트 (+8 / 243 total)
+
+### 신규 / 수정 파일
+
+- **신규 11**: `src/core/knowledge/{chunking,embedding,ingest,sanitize,index}.ts` + 각 `.test.ts` + `src/app/bots/[slug]/edit/knowledge-section.tsx` + `supabase/migrations/0008_replace_text_knowledge_chunks.sql`
+- **수정 4**:
+  - `src/app/bots/[slug]/edit/actions.ts` — knowledge 변경 감지 → ingestTextKnowledge → 성공 시만 bots UPDATE / type!=='text' sources 보존 / existingParsed fail-fast / sanitize 적용
+  - `src/app/bots/[slug]/edit/edit-bot-form.tsx` — placeholder → section 교체
+  - `src/core/config/schema.ts` — `export type Knowledge`
+  - `src/core/db/types.ts` — `replace_text_knowledge_chunks` RPC 타입 + `TextKnowledgeChunkPayload` + `KnowledgeSourceType` 매핑 주석 (DB 'manual'/'pdf'/'markdown' vs 앱 'text'/'file' 분리 이유)
+
+### 검증
+
+- **pnpm typecheck**: clean
+- **pnpm lint**: 기존 3 warning (내 변경 무관)
+- **pnpm prettier** (수정 15 파일): clean
+- **pnpm test**: **243 passed** (212 → 243, +31)
+- **pnpm build**: clean (Next 16.2 Turbopack, 11 routes)
+
+### 주요 결정 / 교훈
+
+- **source_type 매핑 분리** — DB CHECK(`manual|url|pdf|markdown`) vs DariConfig(`text|url|file`). 변환 지점은 ingest* 함수 단일 진입점. 주석 단일화로 Task 1-7-b/c 진입 시 혼란 예방 (code H-1+M-1).
+- **공개 에러 메시지 정적화** — RPC/외부 호출 실패 시 throw 에는 static identifier(`"knowledge RPC failed"`)만, 내부 상세(Postgres errcode/정책명/테이블명)는 logger 메타에만. 상위 catch 가 일반화 응답으로 바꿀 여지 + catch 없이 전파되는 경로에서도 내부 누출 방지. **learnings.md 에 1건 기록** (+44건째).
+- **sanitize 시점 = 저장 단계** — 지식 content 는 LLM 입력 + UI 렌더 양쪽 경로를 통과 → 저장 시점 단일 sanitize 로 downstream 방어 중복 회피 (sec H-2).
+- **existingParsed fail-fast** — `success=false` 로 두면 url/file sources 가 조용히 삭제. Task 1-7-b/c 이후 실데이터 손실 경로 → 사전 방어 (code M-4).
+- **MVP 단일 textarea UI** — PRD 의 다중 text/url/file sources 지원은 Task 1-7-b/c/d 로 의도적 분리. source_identifier='manual:inline' 고정 + type='text' 항목만 교체/삭제 + 나머지 type 보존.
+
+### Backlog (다음 세션)
+
+- **🎯 Task 1-6-c RAG 연결** (~60분) — `match_knowledge_chunks` RPC 호출 + 상위 K 청크 → system prompt XML 태그 구조화 주입 (Prompt Injection 방어 sec FYI PI-1). Task 1-7-a 로 실 지식 데이터 확보 → RAG 엔드투엔드 실증.
+- **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` + `replace_text_knowledge_chunks` 한 번에 처리.
+- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production scope (γ-3 이월).
+- **Jayden 브라우저 스모크** — 위젯 플로팅 버튼 / 메시지 송수신 / 봇별 브랜드 / 지식 기반 RAG 응답 (1-6-c 이후).
+- **Phase 2 이월**:
+  - Task 1-7-b (url 크롤링, Firecrawl) / 1-7-c (file 업로드, PDF 파서) / 1-7-d (다중 text source UI + title 식별자 승격)
+  - sec M-1 Rate limit (봇당 ingest) — 위젯 공개 전 필수
+  - sec M-3 Vercel `maxDuration=30` or API Route 분리 (100K자 실측 후)
+  - code H-2 `embeddings[index]!` non-null 단언 / L-2 이모지 surrogate 테스트 / L-3 values null/undefined 에러 메시지 / L-4 SVG 공유 컴포넌트
+  - chat API `origin_not_allowed` → 404 통일 / OPTIONS preflight DB 이중 호출 리팩터 / env.ts `as ServerEnv` 단언 개선 / CDN purge
+  - `knowledge-placeholder.tsx` dead code 제거 (PR 정리 시점)
+  - welcomeMessage 콘텐츠 정책 (피싱 링크 검사, 설계 수준)
+
+---
+
+## 직전 세션(2026-04-19 Ⅰ) 완료 내역 — Task γ-3 브라우저 Sentry 환경 분리
 
 봇 운영자가 Vercel Preview 와 Production 의 브라우저 에러를 Sentry UI 에서 구분할 수 있도록, 클라이언트 번들에 `environment` 태그를 development / preview / production 3종으로 분리.
 
@@ -868,41 +938,41 @@
 
 ### 🎯 경로 선택
 
-**경로 α (권장): Task 1-6-b — `/widget.js` 번들 스캐پ딩**
+**경로 A (권장): Task 1-6-c RAG 연결**
 
-- 설치 스니펫 `<script src="https://dari.example.com/widget.js" data-bot-id="slug"></script>`
-- float button + chat panel 최소 UI + conversationId localStorage
-- Task 1-6-a Chat API 첫 호출 실증 → CORS 종단간 검증
-- 번들러 결정 포인트: Next.js Route `/widget.js` vs 별도 esbuild 빌드
-- 소요: Plan 20m + 구현 90m
+- `match_knowledge_chunks(bot_id, query_embedding, top_k, min_score)` RPC 는 이미 0005 에 존재
+- chat API 에서 사용자 질문 → Gemini embedding(기존 `embedBatch` 재사용) → RPC → 상위 K 청크 → system prompt 주입
+- Task 1-7-a 텍스트 지식이 실 데이터 소스 — 1-6-c + 1-7-a 쌍으로 RAG 엔드투엔드 실증
+- 보안 고려: system prompt 와 retrieved context 를 XML 태그(`<knowledge>...</knowledge>`)로 구조화 (Prompt Injection 방어, sec FYI PI-1) + bot_id 격리 (RLS + RPC security invoker 자동)
+- 소요: Plan 20m + 구현 60m
 
-**경로 β: Task 1-6-c — RAG 연결**
+**경로 B: Task 1-7-a 후속 — Supabase 실 apply + Jayden 수동 스모크**
 
-- knowledge_chunks 벡터 검색 + top-K 임베딩 유사도 (pgvector)
-- Chat API `messages.create({ system: systemPrompt + context, ... })`
-- 선제 요건: **Task 1-7 지식 업로드 경로가 있어야 실데이터 검증 가능** → 지식 업로드 먼저 고려 가능
-- 소요: 60m (단독) / 150m (지식 업로드 포함)
+- 0007 + 0008 마이그레이션 apply
+- /bots/[slug]/edit 에서 textarea 입력 → 저장 → Supabase Studio 에서 chunks row 확인 (source_type='manual', chunk_index 0..N, embedding 768dim vector)
+- 소요: 15m (Jayden 단독)
 
-**경로 γ: Task 1-6-a 보안 재리뷰 + 미커밋 커밋**
+**경로 C: Task 1-7-b — url 크롤링 타입 (Firecrawl)**
 
-- 신규 보안 함수 재리뷰 교훈 적용 (SSRF IPv6 / CORS TLD 선례)
-- 일괄 수정 5건 후 잔여 bypass 포착
-- 커밋 1건 분할 (Task 1-6-a)
-- 소요: 30~45m
+- 외부 의존 + 크롤링 인프라 설계 필요 → Task 1-6-c RAG 완결 후 권장
+- 소요: 120m+
 
 ### 그 외 대기
 
-- **docs/environments.md** — "NODE_ENV 플랫폼 주입 필수" 체크리스트 (이번 세션 설계 결정 반영)
-- **Task 1-0 재평가**: systemPrompt prompt injection 완화 (Epic 1-6 위젯 구현 시점)
-- **slug 변경 UI 시점**: `config.botId` 동기화 + 위젯 설치 ID 마이그레이션
-- **conversations/messages 로그인 방문자 정책 확장**: Phase 1 위젯 로그인 지원 시
+- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월)
+- **docs/environments.md** — "NODE_ENV 플랫폼 주입 필수" 체크리스트
+- **Task 1-7-d**: 다중 text source UI (title 기반 식별자 승격)
+- **chat API `origin_not_allowed` → 404 통일** (widget-config enumeration 일관성)
+- **OPTIONS preflight DB 이중 호출 리팩터** (chat + widget-config 동시)
+- **env.ts code M-1** `as ServerEnv` 타입 단언 개선 (ε-backlog)
+- **knowledge-placeholder.tsx dead code 제거** (PR 정리 시점)
 - **`proxy-client.ts` ESLint no-restricted-imports**: proxy 외 import 강제 차단 (~15m)
-- **Task 1-0-b 후속** (Epic 1-6 시점): Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
+- **Task 1-0-b 후속**: Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
 - **Task 1-0-a 후속**: rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
 
 ## 차단 요소
 
-**없음** — Task 1-0-a/b + γ(1-2) 완결, 이번 세션 변경 미커밋. 경로 α/β/γ 자유 선택.
+**없음** — Task 1-7-a 완결, Task 1-6-c RAG 진입 가능. 0007+0008 마이그레이션은 Jayden 수동 영역 (Backlog 이월).
 
 ## 완료한 Task (누적)
 
@@ -944,6 +1014,10 @@
 - [x] **Task 1-0-b: CORS allowedDomains 검증 유틸 — normalize/match/cors 3함수 + 재리뷰 HIGH+MH+LOW 9건 일괄 반영 + 30 테스트 (TLD/IP/userinfo/trailing dot/IDN)**
 - [x] **γ 정비(1·2): Pretendard variable + DM Sans + JetBrains Mono + CI Node 24 승격**
 - [x] **Task 1-6-a: 위젯 Chat API 최소 구현 (Epic 1-6 진입) — anon `/api/chat/[botId]` POST + OPTIONS + Anthropic SDK 싱글턴 + bot-chat-limiter 봇당 IP 100/h + 6중 보안 레이어 + 독립 리뷰 2 + 일괄 5건 반영 (sanitize / 메시지 상한 200 / max_tokens clamp 2048 / warn 로깅 / null origin 문서화)**
+- [x] **Task 1-6-b: `/widget.js` 번들 스캐폴딩 — esbuild + Shadow DOM(closed) + Vanilla JS + localStorage / 번들 5.3→5.4KB gzip / 독립 리뷰 2 + 옵션 C 일괄 9건 반영 + security 재리뷰 MEDIUM 3건 반영 (C0+C1 제어문자 / Unicode 방향제어 / Tag chars)**
+- [x] **Task 1-6-d: DariConfig 로더 — anon `/api/widget-config/[botId]` + `pickPublicConfig` 화이트리스트 9필드 명시 복제 (spread 금지) + 복합키 rate limit (`botId:ip` 1000/h) + 독립 리뷰 2 + 일괄 6건 반영 (enumeration 통일 404 / avatar referrerpolicy / fontFamily 정규화)**
+- [x] **Task γ-3: 브라우저 Sentry 환경 분리 — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum(dev/preview/production) + clientSchema export + summarizeFieldErrors / 독립 리뷰 2 Ship as-is + 선제 보강 3건 (필드별 에러 요약 / env-template 주석 / fake-* prefix)**
+- [x] **Task 1-7-a (Epic 1-7 진입): text 지식 업로드 + 임베딩 파이프라인 — chunking/embedding/ingest/sanitize util + 0008 RPC (security invoker + search_path) + 단일 textarea UI + 독립 리뷰 2 Fix-then-ship + 5건 반영 (공개 에러 메시지 정적화 / sanitize / existingParsed fail-fast / 매핑 주석 / dead code) / vitest 212 → 243 (+31)**
 
 ## 세션 이력
 
@@ -964,5 +1038,5 @@
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-18 심야 Ⅲ (Task 1-6-a 완료, Epic 1-6 위젯 런타임 1/4)
+- 날짜: 2026-04-19 Ⅱ (Task 1-7-a 완료, Epic 1-7 지식 업로드 1/4 — text 타입 MVP, 다음 Task 1-6-c RAG 연결 가능)
 - 작성자: Jayden + Claude (Opus 4.7, effort=max)
