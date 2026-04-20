@@ -5,8 +5,10 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / **Task 1-7-b URL ✅ (Build · 리뷰 2라운드 · Ship-as-is 완료)** / Task 1-7-c file 대기
-- 상태: **Task 1-7-b 완결** — vitest **295 통과** (261 → 295 / +34), typecheck/lint/prettier/build clean. Firecrawl Cloud scrape → sanitize → chunk → Gemini embed → 신규 일반화 RPC `replace_knowledge_chunks_for_source`(0009). Rate limit(user.id 20req/10m) + URL 쿼리스트링 redact + throw 정적화 3단("URL 처리 실패" / "knowledge embedding failed" / "knowledge RPC failed"). **🟡 0007 + 0008 + 0009 마이그레이션 Supabase 실 apply Jayden 수동 대기 (다음 Task 1-7-c 진입 전 일괄 처리 권장).**
+- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / Task 1-7-b URL ✅ / **Task 1-7-c file ✅ (Build · 독립 리뷰 2라운드 · Fix 반영 8건 완료)** / Task 1-7-d 다중 source UI 대기
+- 상태: **Task 1-7-c 완결** — vitest **361 통과** (295 → 361 / +66), typecheck/lint/prettier/build clean. unpdf(PDF) + buffer.toString(TXT/MD) → magic bytes 이중검증 → sanitize → chunk → Gemini embed → Supabase Storage `{bot_id}/{uuid}.{ext}` (private + RLS 4정책) → 0009 일반화 RPC. source_type 분리 (pdf/markdown) · source_identifier = `file:{sanitized_filename}` · rate limit 20req/10m.
+  - **0007+0008+0009+0010 마이그레이션 Supabase 실 apply 완료** (MCP 자동 3건 + Jayden 수동 SQL Editor 1건으로 Storage RLS 4정책).
+  - Build 검증 clean 후 code-reviewer (Ship as-is) + security-reviewer (Fix-then-ship) 병렬 → F1~F6 즉시 반영 (PDF magic bytes 32바이트 축소 / cacheControl no-store / 제어문자 비율 0.05 / Windows drive letter 제거 / raw 체크 분리 / 불변조건 주석).
 
 ## 완료된 Epic
 
@@ -79,30 +81,68 @@
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
 
-## 이번 세션(2026-04-20 Ⅲ) — Task 1-7-b URL 크롤링 Build 완결 + 독립 리뷰 2라운드 · Ship-as-is
+## 이번 세션(2026-04-20 Ⅳ) — Task 1-7-c file 업로드 Build 완결 + 독립 리뷰 2라운드 · Fix 반영 6건
 
-직전 세션(Ⅱ) 에서 보존한 Plan 그대로 Build 진입. 코드 + 리뷰 반영 + 2차 재리뷰까지 한 세션에 마무리. "수정 직전 추가 라운드" 교훈(1-6-b) 형식 절차화 — 반영 6건 후 security 단독 재리뷰로 회귀·bypass 0 확인.
+A안 (선결 정리 + Task 1-7-c Plan) → 바로 Build → 독립 리뷰 2 에이전트 병렬 → Fix 반영 6건 → 검증 clean. "추천대로" 경로 6건 결정 (형식 PDF+TXT+MD / 10MB / 20파일 / unpdf / Server Action / private 버킷) 그대로 실행. 리뷰 2 에이전트 모두 차단 0, 수정 권장 6건 일괄 반영.
 
-### 흐름 (~2h)
+### 흐름 (~2.5h)
 
-1. **Jayden 키 확인** — `.env.local` + Vercel env + 재배포 완료 응답. 사전 체크 3항목 완전 충족.
-2. **Plan 최종 승인** — 결정 10 / 신규 8 + 수정 5 파일 / 0009 일반화 RPC 그대로.
-3. **Build** — `pnpm add @mendable/firecrawl-js@4.18.3` → 9 파일 신규 + 9 파일 수정 (Plan +4: ratelimit limiter + test / docs/environments.md / vitest.config env / types.ts RPC — 구조 필요에 따른 확장).
-4. **검증 1차** — typecheck(+0009 RPC 타입 수동 추가) / lint / prettier(format 실행) / vitest 289 / build clean.
-5. **독립 리뷰 1차 병렬** — code-reviewer (Ship-as-is / HIGH 1 + MEDIUM 2 + LOW 3 + INFO 2) + security-reviewer (Ship-as-is 조건부 / MEDIUM 1 + LOW 2 + INFO 4).
-6. **반영 6건**
-   - sec MEDIUM: Rate limit (`bot-url-ingest-limiter` 신규 20req/10m, user.id 키) — Firecrawl 공용 API 키 남용 방어 (Phase 2 → MVP 승격)
-   - sec LOW-1: `sanitizeUrlForLog` helper (`origin+pathname`) + 6 로깅 지점 적용 — Pino 필드명 redact 한계 보완
-   - sec LOW-2: `embedding count mismatch` throw 정적화 (`"knowledge embedding failed"` + 내부 수치는 logger 메타)
-   - code H-1: `ingest-url.ts` catch dead-code 주석 정정 (fetchUrlAsMarkdown 은 try 밖이라 catch 미도달)
-   - code M-1: URL form `key={state.success?.url}` — 성공 후 input 초기화 (useActionState state 는 유지)
-   - code M-2: `actions.ts` filter 로직에 "MVP 전제 — 단일-URL-per-소스" 주석 (Phase 2 다중 URL UI 도입 시 회귀 경고)
-7. **검증 2차** — 회귀 fix(`RatelimitCheck.ok`, mock `sanitizeUrlForLog`) → vitest **295** / 전 파이프라인 clean.
+1. **선결 마이그레이션 apply (A-1)** — MCP `apply_migration` × 3 (0007 message limit trigger / 0008 text 전용 RPC / 0009 일반화 RPC). Supabase advisor 신규 이슈 0건 확인. 직전 세션의 "🟡 수동 대기" 해소.
+2. **Plan Stage 1 (결정 6개)** — Jayden "추천대로" 승인. 선결 외부 서비스 체크리스트 5항목 검증.
+3. **Plan Stage 2 (파일 목록 + 검증 전략)** — 신규 11 + 수정 6 파일, 독립 리뷰 전략 + Build 순서 3 Step.
+4. **Step 1 선결 세팅** — `pnpm add unpdf@1.6.0` / `next.config.ts serverActions.bodySizeLimit '10mb'` / 0010 Storage 버킷 apply. `storage.objects` RLS 4정책은 MCP 권한 부족 (`42501 must be owner`) → Jayden Studio SQL Editor 수동 (옵션 A 승인 → 병렬 진행).
+5. **Step 2 파이프라인** — file-extract(PDF unpdf + TXT/MD + magic bytes + sanitizeFilename 5단) / ingest-file(오케스트레이션 + Storage 롤백) / storage(Supabase Storage helper) / bot-file-ingest-limiter(20req/10m user.id). 테스트 +59.
+6. **Step 3 UI** — addFileSourceAction Server Action (5중 방어) / KnowledgeFileSection (보라 톤 + SectionCard) / edit-bot-form 섹션 배치 (HTML form 중첩 회피) / E2E spec 4 케이스.
+7. **검증 1차** — typecheck / lint(기존 3 warning) / prettier / vitest **354 통과** (295→354, +59) / build ✅ (11 routes).
+8. **독립 리뷰 1차 병렬** — code-reviewer (**Ship as-is** / MEDIUM 4 + LOW 2 + INFO 1) + security-reviewer (**Fix-then-ship** / MEDIUM 3 + LOW 2 + INFO 2, 통과 14건).
+9. **Fix 반영 6건 (일괄)** — 리뷰 권장 직접 반영, ROI 낮은 "수정 직전 추가 라운드" 생략 (Jayden A 옵션 승인).
+   - sec MEDIUM-1: PDF magic bytes 허용 offset **1024 → 32바이트** (폴리글롯 방어 강화)
+   - sec MEDIUM-2 (변형 반영): TXT/MD 바이너리 판별 "고바이트 비율" → **"제어문자 비율 < 5%"** 로 대체 (한글 UTF-8 false positive 회피 — learnings 별도 기록)
+   - sec LOW-2: `sanitizeFilename` Windows drive letter `^[A-Za-z]:` 제거
+   - sec INFO-2: Storage `cacheControl: "3600"` → **`"no-store"`** (private 버킷 public 전환 리스크 방어)
+   - code MEDIUM-1: `ingest-file.ts` try 블록 위 불변조건 주석 (Storage upload 성공 지점 명시)
+   - code MEDIUM-2: `actions.ts` raw 체크 분리 (`instanceof File` + `size === 0` 개별 분기) → TS narrowing 명확화
+10. **검증 2차** — vitest **361 통과** (354→361, +7) / 전 파이프라인 clean.
+
+### 신규 파일 10 + 수정 9
+
+_신규_
+
+- `src/core/knowledge/file-extract.ts` — magic bytes(PDF 32바이트 / TXT·MD 제어문자 <5%) + sanitizeFilename 5단 + extractTextFromFile
+- `src/core/knowledge/file-extract.test.ts` — 35 케이스 (sanitize 15 / getExtension 4 / detectFileType 11 / extract 5)
+- `src/core/knowledge/storage.ts` — buildKnowledgeFilePath / uploadKnowledgeFile (no-store) / removeKnowledgeFile (best-effort) / contentTypeForExtension
+- `src/core/knowledge/storage.test.ts` — 7 케이스
+- `src/core/knowledge/ingest-file.ts` — 오케스트레이션 (extract → sanitize → chunk → embed → Storage → RPC) + 롤백 불변조건 주석
+- `src/core/knowledge/ingest-file.test.ts` — 10 케이스
+- `src/core/ratelimit/bot-file-ingest-limiter.ts` — user.id 기준 20req/10m sliding window (1-7-b 와 동일 패턴)
+- `src/core/ratelimit/bot-file-ingest-limiter.test.ts` — 3 케이스
+- `supabase/migrations/0010_create_knowledge_files_storage.sql` — private 버킷 (10MB + 4 MIME) + RLS 4정책 (INSERT/SELECT/UPDATE/DELETE owner)
+- `tests/e2e/bot-knowledge-file.spec.ts` — 4 케이스 (smoke / TXT 업로드 성공 / ZIP MIME 거부 / 비로그인 리디렉트)
+
+_수정_
+
+- `src/app/bots/[slug]/edit/actions.ts` — `addFileSourceAction` 추가 (instanceof/size/MIME 3단 fail-fast + rate limit + RLS + ingest + config sources 갱신)
+- `src/app/bots/[slug]/edit/knowledge-section.tsx` — `KnowledgeFileSection` 추가 (input file accept + 성공/에러 배너 + form key remount + 기존 파일 목록)
+- `src/app/bots/[slug]/edit/edit-bot-form.tsx` — knowledge-file SectionCard 배치 (메인 form 밖)
+- `src/core/knowledge/index.ts` — 신규 모듈 re-export
+- `next.config.ts` — `experimental.serverActions.bodySizeLimit: '10mb'`
+- `package.json` / `pnpm-lock.yaml` — unpdf 1.6.0
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **295 → 361 (+66)** / build ✅ (11 routes, widget 16.4KB)
+- 독립 리뷰 2 라운드 (1차 병렬 + Fix 6건) → 최종 Ship ready
+- Supabase 원격: 마이그레이션 10/10 + Storage 버킷 (RLS 4정책은 Jayden 수동 SQL Editor)
+
+### 주요 결정 / 교훈 (learnings +2)
+
+1. **보안 리뷰 "고바이트 비율" 권장안 한글 UTF-8 false positive** — 다국어 UTF-8 특성 고려 부족한 바이너리 탐지 휴리스틱. "분포 기반" 대신 "구조 기반(제어문자 / UTF-8 validity)" 판별 선호. 국제화 테스트 고정 세트 필수. 리뷰 판정 2분법 지양.
+2. **Supabase MCP 권한 경계** — `storage.objects` RLS 정책은 DB owner 전용. MCP 는 public schema DDL 은 가능하나 storage.* DDL 은 제한. 2단 apply 패턴 (MCP 가능 부분 + Jayden Studio 수동) + 마이그레이션 파일에 주석 명시 + 병렬 작업 설계 (차단 영역과 독립 영역 분리).
 8. **독립 리뷰 2차 (security 단독)** — bypass/회귀 0. 동일 URL 연쇄 추가 시 form 미remount 는 UX 버그(보안 무관)로 수용. **Ship-as-is 확정**.
 
 ### 신규 파일 10 + 수정 9
 
-*신규*
+_신규_
 
 - `src/lib/clients/firecrawl.ts` — Firecrawl v2 싱글턴 래퍼
 - `src/core/knowledge/url-fetch.ts` — scrape + markdown + 크기 가드 + `knowledgeUrlSchema` + `sanitizeUrlForLog`
@@ -113,7 +153,7 @@
 - `src/core/ratelimit/bot-url-ingest-limiter.test.ts` — 3 케이스 (skip · 허용 · 차단)
 - `supabase/migrations/0009_replace_knowledge_chunks_for_source.sql` — plpgsql `security invoker` + `search_path=''` + 3-key DELETE(bot_id+source_type+source_identifier)
 
-*수정*
+_수정_
 
 - `src/app/bots/[slug]/edit/actions.ts` — `addUrlSourceAction` 추가 (rate limit / Zod URL / owner RLS 3중 / 정적 에러 매핑)
 - `src/app/bots/[slug]/edit/knowledge-section.tsx` — `KnowledgeUrlSection` 내부 컴포넌트 + form `key` + 성공/에러 뱃지
@@ -1270,7 +1310,7 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 - **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월)
 - **docs/environments.md** — "NODE_ENV 플랫폼 주입 필수" 체크리스트
-- **Task 1-7-d**: 다중 text source UI (title 기반 식별자 승격)
+- **Task 1-7-d**: 다중 source UI (text title / url 개별 / file 삭제 - 통합 편집)
 - **chat API `origin_not_allowed` → 404 통일** (widget-config enumeration 일관성)
 - **OPTIONS preflight DB 이중 호출 리팩터** (chat + widget-config 동시)
 - **env.ts code M-1** `as ServerEnv` 타입 단언 개선 (ε-backlog)
@@ -1278,12 +1318,17 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - **`proxy-client.ts` ESLint no-restricted-imports**: proxy 외 import 강제 차단 (~15m)
 - **Task 1-0-b 후속**: Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
 - **Task 1-0-a 후속**: rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
+- **🟡 Task 1-7-c 후속 (sec 이월)**: Storage orphan cleanup 주기 태스크 (MEDIUM-3) / rate limit fail-closed 전환 (LOW-1, 과금 모델 도입 시) / unpdf CVE 모니터링 (INFO-1)
 
 ## 차단 요소
 
 **없음** — Task 1-7-a 완결, Task 1-6-c RAG 진입 가능. 0007+0008 마이그레이션은 Jayden 수동 영역 (Backlog 이월).
 
-## 완료한 Task (누적)
+## 완료한 Task (누적, 최근 순)
+
+- [x] **Task 1-7-c (Epic 1-7 진입 3/4): file 업로드 파이프라인** — PDF(unpdf) / TXT / MD · magic bytes 32바이트 + 제어문자 비율 이중검증 · 파일명 sanitize 5단 (경로·NULL·Unicode·drive letter·길이) · Supabase Storage private 버킷 `{bot_id}/{uuid}.{ext}` + RLS 4정책(0010) · rate limit 20req/10m · bodySizeLimit 10MB · 독립 리뷰 2 Fix 반영 6건 (sec MEDIUM-1/2 / sec INFO-2 / sec LOW-2 / code MEDIUM-1/2) · Phase 2 이월 3건 (Storage orphan / rate fail-closed / unpdf CVE) · vitest 295→361 (+66)
+
+
 
 - [x] PRD v2.0 학습
 - [x] 마스터 플랜 v3.0 수립 (3대 우선순위 + Soft Launch 통합)
@@ -1344,8 +1389,9 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - **2026-04-18 (저녁): Task 1-5-b — /bots/new 봇 생성 폼 + RLS INSERT 정책 첫 실증 + 독립 리뷰 2 (code Fix then ship + security Ship as-is) + 교훈 2건 (supabase-js insert as never / React 19 useEffect 금지) — Phase 1 진입**
 - **2026-04-18 (심야 Ⅱ): Task 1-0-a Rate Limit + Task 1-0-b CORS 유틸 + γ 정비(폰트/CI24) — vitest +38 (93 → 124) / 독립 리뷰 3회 + 재리뷰 1회 / 교훈 3건 (server-only vitest alias / CORS TLD bypass / NODE_ENV Zod default) — 3 커밋 완료**
 - **2026-04-18 (심야 Ⅲ): Task 1-6-a 위젯 Chat API 최소 (Epic 1-6 진입) — anon `/api/chat/[botId]` + 6중 보안 레이어 + Anthropic SDK + bot-chat-limiter / vitest 124 → 127 (+3) / 독립 리뷰 2 + 일괄 5건 반영 / 교훈 2건 (anon 6중 레이어 / 외부 SDK sanitize 원칙) — 코드 미커밋**
+- **2026-04-20 (오전 Ⅳ): Task 1-7-c file 업로드 완결 — 선결 마이그레이션 0007/0008/0009/0010 apply + PDF(unpdf) + TXT/MD + Storage private 버킷 + RLS 4정책 / vitest 295 → 361 (+66) / 독립 리뷰 2 + Fix 반영 6건 / 교훈 2건 (한글 UTF-8 false positive / Supabase MCP 권한 경계)**
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-19 Ⅱ (Task 1-7-a 완료, Epic 1-7 지식 업로드 1/4 — text 타입 MVP, 다음 Task 1-6-c RAG 연결 가능)
-- 작성자: Jayden + Claude (Opus 4.7, effort=max)
+- 날짜: 2026-04-20 Ⅳ (Task 1-7-c 완료, Epic 1-7 지식 업로드 3/4 — file 타입 MVP, 다음 Task 1-7-d 다중 source UI 또는 B안 backlog 정리)
+- 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)

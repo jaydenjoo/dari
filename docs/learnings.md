@@ -32,6 +32,50 @@
 
 ## 기록
 
+### 2026-04-20 보안 리뷰 "고바이트 비율" 권장안의 한글 UTF-8 false positive — 제어문자 비율로 대체 (설계 결정)
+
+**증상**: Task 1-7-c security-reviewer MEDIUM-2 가 TXT/MD 바이너리 판별 강화 권장 — NULL byte 외에 "고바이트(>0x7F) 비율 >90%" 추가 검사. 그러나 한글 UTF-8 은 글자당 3바이트 모두 고바이트(0xE0~0xEF / 0x80~0xBF) 이므로 **고바이트 비율 ~100%**. 순수 한글 TXT 파일 = 항상 바이너리 판정 = 업로드 전원 차단. 한국 시장 타겟 제품 치명적 버그.
+
+**원인**: 보안 권장 코드는 흔히 "바이너리 탐지" 휴리스틱을 영어/ASCII 기준으로 제시. 다국어 UTF-8 특성 고려 부족. 한글 3바이트 / 일본어 3바이트 / 중국어 3바이트 = 고바이트가 정상 텍스트의 지표. 리뷰 권장 그대로 반영하면 역효과.
+
+**해결**: "고바이트 비율" 대신 "비-텍스트 제어문자 비율" 로 대체.
+- 제어문자 = `0x01-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F` (허용: tab 0x09 / LF 0x0A / CR 0x0D / printable 0x20+).
+- 임계값 5% 초과 → 바이너리 판정.
+- 한글/일본/중국 UTF-8 은 제어문자 비율 0% → 통과.
+- 순수 0xFF 로 채워진 exotic binary 는 여전히 통과하지만, 실공격 빈도 낮고 임베딩 품질 자체가 무의미 → UX 문제이지 보안 문제 아님.
+
+테스트: 한국어/일본어/중국어 UTF-8 pass + 제어문자 12.5% 샘플 reject 추가.
+
+**규칙** ⭐:
+
+- **보안 리뷰 권장 코드를 "그대로 반영 전에 정상 트래픽 영향 검증"** — 이전 learnings 2026-04-18 "보안 리뷰 권장 코드도 비판적 재검토" 의 다국어 Unicode 버전. 보안 리뷰가 "차단해야 할 공격 시나리오" 에 집중하는 경향이라, "정상 유스케이스가 여전히 통과하나" 를 별도 축으로 검증 필요.
+- **다국어 UTF-8 안전 휴리스틱 원칙**: 고바이트 비율 / 비-ASCII 비율 같은 "분포 기반" 판별은 한중일·아랍어·러시아어 등 non-Latin 스크립트에 false positive. **대신 "제어문자 비율" / "UTF-8 validity" (TextDecoder fatal:true) / "NULL byte"** 같은 **구조 기반** 판별 선호.
+- **국제화 테스트 고정 세트**: 파일/텍스트 sanitize·판별 함수 테스트에 한/일/중 3언어 UTF-8 샘플 필수 추가 (test 에 pin) → 향후 리뷰가 유사 권장을 하면 실패 테스트로 자동 반려.
+- **리뷰 판정 2분법 지양**: "Ship as-is / Fix-then-ship" 중 Fix-then-ship 판정이라도 개별 항목을 "반영 / 변형 반영 / 이월" 3단계로 나눠 검토. 원안 그대로 반영이 항상 정답 아님.
+
+---
+
+### 2026-04-20 Supabase MCP 권한 경계 — `storage.objects` RLS 정책은 일반 권한 불가 (운영 지식)
+
+**증상**: Task 1-7-c Storage RLS 정책 4개를 `apply_migration` 으로 적용 시 `42501: must be owner of relation objects` 실패. `execute_sql` 도 동일 실패. 마이그레이션 0010 의 버킷 생성 SQL(`insert into storage.buckets`) 은 성공, RLS 정책 부분만 권한 부족.
+
+**원인**: Supabase MCP 는 `postgres` superuser 가 아닌 제한된 권한으로 실행. `storage.objects` 테이블은 Supabase 내부 관리 테이블이라 DB owner 만 policy 생성 가능. Supabase Studio 의 SQL Editor 는 내부적으로 더 높은 권한 세션 사용 → UI 로는 가능. `list_projects` / `list_migrations` / `apply_migration` 의 schema=public 테이블은 정상 작동하나 `storage` schema 의 DDL 은 제한.
+
+**해결**: 2단 apply 패턴 정형화.
+1. MCP 로 가능한 부분 (`storage.buckets` INSERT + public.* DDL) 은 `apply_migration`.
+2. `storage.objects` RLS 정책은 마이그레이션 파일에 포함은 하되, 실제 apply 는 **Jayden 수동 (Studio SQL Editor)**.
+3. 파일 상단에 "MCP 제한 — 정책 부분은 Studio 수동 실행 필요" 주석 필수.
+4. Build/파이프라인은 RLS 와 독립 설계 → 병렬 진행 가능 (Claude Step 2/3 vs Jayden SQL).
+
+**규칙** ⭐:
+
+- **Supabase MCP 권한 경계 지도 유지**: 가능(public schema DDL / migration version 관리 / RPC) vs 불가(storage.objects policy / auth.* DDL / publication 관리). 새 MCP 호출 전 "이 작업이 일반 권한 범위인가" 되묻기. 실패 후 역추적 금지.
+- **외부 서비스 선결 체크리스트에 "MCP 불가 영역" 명시**: 메모리 규칙 `feedback_external_service_precheck` 의 체크리스트에 "이 작업에 Jayden 수동 개입이 필요한 부분은?" 항목 명시 — Build 시작 전에 드러내 병렬 진행.
+- **마이그레이션 파일 vs 실 apply 분리**: 파일에 전체 SQL 보존 (docs + 재배포 단일 진실) + 실 apply 경로(MCP / Studio / CLI) 를 주석으로 안내. 향후 개발자가 같은 파일을 full run 하려 할 때 "일부는 UI 에서" 안내 받음.
+- **병렬 작업 설계**: 차단 영역(수동 개입 대기) 이 있어도 독립 영역(파이프라인 구현, UI, 테스트) 은 그대로 진행 가능하도록 의존성 분리. 차단 종료 시점에 통합 검증만 수행.
+
+---
+
 ### 2026-04-20 HTML `<form>` 중첩 금지 해결 — main form 밖 SectionCard + React `key` remount (설계 결정)
 
 **증상**: Task 1-7-b 에서 봇 편집 폼(메인 form = `updateBot` Server Action) 안에 "URL 크롤링 · 추가" 섹션을 두려 했다. URL 추가는 Firecrawl 5~30초 호출이라 즉시 적용 별도 Server Action(`addUrlSourceAction`). 메인 form 내부에 `<form action={addUrlSourceAction}>` 를 중첩하면 HTML 스펙 위반 + 브라우저가 자식 form submit 시 부모 form 도 trigger 가능 + 스펙상 innerform 은 parsing 중 closing 될 수 있어 예측 불가.
@@ -72,7 +116,7 @@
 
 - **로깅 시 URL 은 항상 `origin + pathname` 으로 축소** — 쿼리스트링에 토큰이 포함되는 경우가 드물지 않다(OAuth redirect / Google Drive share / 관리자 도구). Pino `redact` 로는 불가능한 영역.
 - **`new URL().origin` 은 RFC 6454 기준 scheme+host+port 만 포함, userInfo(`user:pass@`) 제외** — credential 유출 자동 방어 보너스. 명시적 검증 테스트 필수.
-- **파싱 실패 fallback 은 `"(invalid-url)"` 같은 **리터럴 상수**** — 원본 문자열을 `logger.warn("parse failed: ${raw}")` 같이 부분 노출하면 sanitize 무효화. fallback 도 정적.
+- **파싱 실패 fallback 은 `"(invalid-url)"` 같은 **리터럴 상수\*\*\*\* — 원본 문자열을 `logger.warn("parse failed: ${raw}")` 같이 부분 노출하면 sanitize 무효화. fallback 도 정적.
 - **"값 내부 시크릿" 은 보통 필드 타입별 전용 헬퍼** — URL 은 `sanitizeUrlForLog`, 전화번호는 `maskPhone`, 이메일은 `maskEmail` 등. Pino 전역 redact 를 정규식으로 오버엔지니어링하지 말고 로깅 시점에 명시 sanitize.
 - **Grep 으로 기존 `logger.*({ ..., url, ..., }, ...)` 패턴 전부 조사** — 한 곳만 교체하면 구멍 남음. 이번엔 6 지점 모두 교체 + 회귀 방지는 단위 테스트 (그러나 기존 로깅 지점이 sanitize 경유하는지 검증하는 테스트는 별도 작업, 비용 대비 이익 낮음 — 리뷰 단계 체크리스트로 대체).
 
@@ -100,7 +144,7 @@ MVP 에서 rate limit 을 보류해도 되는 경우: 사용자당 독립된 자
 **규칙** ⭐:
 
 - **외부 SaaS API 키가 공용(앱 단일 키) 인 경로는 rate limit MVP 필수**. "owner-authed" 논거가 성립하려면 **자원도 owner-분리** 여야 한다. Firecrawl, OpenAI, Anthropic 등은 owner 별로 key 분리 안 하는 구조(멀티테넌트) 라 공용 한도 소진 경로 존재.
-- **rate limit 호출 위치는 세션 검증 **직후**, DB/외부 호출 **전**** — 비인증 요청은 redirect 분기에서 먼저 차단되어야 rate limit slot 을 소비하지 않는다.
+- **rate limit 호출 위치는 세션 검증 **직후**, DB/외부 호출 **전\*\*\*\* — 비인증 요청은 redirect 분기에서 먼저 차단되어야 rate limit slot 을 소비하지 않는다.
 - **Upstash fail-open 전략 유지** — rate limit infra 장애 시 서비스 전체 차단보다 통과시키는 쪽이 DoS 회피. factory 가 이미 구현.
 - **Plan 결정 #X 이 "Phase 2 보류" 로 적혀있어도 security 리뷰 MEDIUM 은 재검토 대상** — 경로별 risk matrix 를 Plan 에 포함하면 1차 security 리뷰가 MEDIUM 이 아니라 Plan 수락 단계에서 바로 MVP 범위로 올 것. 이번 교훈은 Plan template 에 "외부 SaaS 공용 자원 사용 여부 → 있으면 rate limit MVP" 체크박스 추가 근거.
 
