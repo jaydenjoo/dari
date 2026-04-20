@@ -54,8 +54,9 @@ SENTRY_ENVIRONMENT=development
 # 로컬 dev 서버(`pnpm dev`)는 아래 `development` 사용, Vercel 빌드는 Dashboard 등록값 우선
 NEXT_PUBLIC_SENTRY_ENVIRONMENT=development
 
-# ─── 웹 크롤링 (선택 — 미설정 시 cheerio 폴백) ───
+# ─── 웹 크롤링 (Firecrawl Cloud — 필수) ───
 # Firecrawl: https://www.firecrawl.dev/
+# Task 1-7-b: URL 지식 업로드 파이프라인이 사용. 부팅 시 `fc-` prefix 검증.
 FIRECRAWL_API_KEY=fc-xxxxx
 ```
 
@@ -63,21 +64,21 @@ FIRECRAWL_API_KEY=fc-xxxxx
 
 ## 🔑 각 키 발급처 요약
 
-| 변수                             | 어디서?                                                   | 필수?       | 참고                             |
-| -------------------------------- | --------------------------------------------------------- | ----------- | -------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`       | Supabase Dashboard → Settings → API → Project URL         | ✅          | Phase 0-B에서 발급               |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | 같은 페이지 → `anon` `public` 키                          | ✅          | 브라우저 노출 OK                 |
-| `SUPABASE_SERVICE_ROLE_KEY`      | 같은 페이지 → `service_role` `secret` 키                  | ✅          | ⚠️ 절대 클라이언트 노출 금지     |
-| `DATABASE_URL`                   | Dashboard → Settings → Database → Connection string → URI | 🟡 CLI only | 로컬 migration 시만, 런타임 불요 |
-| `ANTHROPIC_API_KEY`              | https://console.anthropic.com/                            | ✅          | `sk-ant-`로 시작                 |
-| `GOOGLE_GENERATIVE_AI_API_KEY`   | https://aistudio.google.com/apikey                        | ✅          | Gemini 임베딩용                  |
-| `UPSTASH_REDIS_REST_URL`         | https://console.upstash.com/ → DB 생성 → REST 탭          | ✅          | Rate limit용                     |
-| `UPSTASH_REDIS_REST_TOKEN`       | 같은 페이지                                               | ✅          |                                  |
-| `SENTRY_DSN`                     | https://sentry.io → 프로젝트 생성 → Client Keys           | 🟡 dev 선택 | 프로덕션 권장                    |
-| `NEXT_PUBLIC_SENTRY_DSN`         | 동일 (클라이언트용)                                       | 🟡 dev 선택 |                                  |
-| `SENTRY_ENVIRONMENT`             | 직접 설정 (`development`/`preview`/`production`)          | 🟡 dev 선택 | 서버·엣지 Sentry 환경 구분       |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | 동일 값 (브라우저용)                                      | 🟡 dev 선택 | 빌드 타임 인라인, 환경별 등록    |
-| `FIRECRAWL_API_KEY`              | https://www.firecrawl.dev/                                | 🟡 선택     | 미설정 시 cheerio 폴백           |
+| 변수                             | 어디서?                                                   | 필수?       | 참고                                 |
+| -------------------------------- | --------------------------------------------------------- | ----------- | ------------------------------------ |
+| `NEXT_PUBLIC_SUPABASE_URL`       | Supabase Dashboard → Settings → API → Project URL         | ✅          | Phase 0-B에서 발급                   |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | 같은 페이지 → `anon` `public` 키                          | ✅          | 브라우저 노출 OK                     |
+| `SUPABASE_SERVICE_ROLE_KEY`      | 같은 페이지 → `service_role` `secret` 키                  | ✅          | ⚠️ 절대 클라이언트 노출 금지         |
+| `DATABASE_URL`                   | Dashboard → Settings → Database → Connection string → URI | 🟡 CLI only | 로컬 migration 시만, 런타임 불요     |
+| `ANTHROPIC_API_KEY`              | https://console.anthropic.com/                            | ✅          | `sk-ant-`로 시작                     |
+| `GOOGLE_GENERATIVE_AI_API_KEY`   | https://aistudio.google.com/apikey                        | ✅          | Gemini 임베딩용                      |
+| `UPSTASH_REDIS_REST_URL`         | https://console.upstash.com/ → DB 생성 → REST 탭          | ✅          | Rate limit용                         |
+| `UPSTASH_REDIS_REST_TOKEN`       | 같은 페이지                                               | ✅          |                                      |
+| `SENTRY_DSN`                     | https://sentry.io → 프로젝트 생성 → Client Keys           | 🟡 dev 선택 | 프로덕션 권장                        |
+| `NEXT_PUBLIC_SENTRY_DSN`         | 동일 (클라이언트용)                                       | 🟡 dev 선택 |                                      |
+| `SENTRY_ENVIRONMENT`             | 직접 설정 (`development`/`preview`/`production`)          | 🟡 dev 선택 | 서버·엣지 Sentry 환경 구분           |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | 동일 값 (브라우저용)                                      | 🟡 dev 선택 | 빌드 타임 인라인, 환경별 등록        |
+| `FIRECRAWL_API_KEY`              | https://www.firecrawl.dev/                                | ✅          | `fc-` 로 시작. Task 1-7-b URL 크롤링 |
 
 ---
 
@@ -99,7 +100,7 @@ FIRECRAWL_API_KEY=fc-xxxxx
 | `UPSTASH_REDIS_REST_URL/TOKEN`   | dari-dev Redis          | dari-dev Redis             | **dari-prod Redis**       |
 | `SENTRY_ENVIRONMENT`             | `development`           | `preview`                  | `production`              |
 | `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`           | `preview`                  | `production`              |
-| `FIRECRAWL_API_KEY`              | (선택)                  | 개인 개발 키               | **프로덕션 키**           |
+| `FIRECRAWL_API_KEY`              | 개인 개발 키            | 개인 개발 키               | **프로덕션 키**           |
 
 > 🚨 **절대 공유 금지**: AI 키·Redis·Supabase 는 **환경별로 반드시 분리**. prod 키를 local 에서 쓰면 비용 폭발, 반대면 개발 실수가 prod 데이터를 오염.
 
@@ -160,6 +161,9 @@ GOOGLE_GENERATIVE_AI_API_KEY=placeholder_gemini_key_20_chars
 # Upstash는 Phase 1 Task 1-0 전에 실제 발급
 UPSTASH_REDIS_REST_URL=https://placeholder.upstash.io
 UPSTASH_REDIS_REST_TOKEN=placeholder_token_at_least_20_chars
+
+# Firecrawl은 Task 1-7-b 전에 실제 발급 (fc- 접두어 필수)
+FIRECRAWL_API_KEY=fc-placeholder-for-boot-only
 ```
 
 > **주의**: 위 placeholder 값으로는 실제 기능(DB 접근, AI 호출) 동작 안 함. 부팅 통과 + 코드 작성만 가능.

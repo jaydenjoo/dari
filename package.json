@@ -24,6 +24,7 @@
     "@anthropic-ai/sdk": "^0.90.0",
     "@base-ui/react": "^1.4.0",
     "@google/generative-ai": "^0.24.1",
+    "@mendable/firecrawl-js": "^4.18.3",
     "@sentry/nextjs": "^10.49.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.3",

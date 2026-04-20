@@ -59,8 +59,11 @@ export const serverSchema = clientSchema.extend({
     .enum(["development", "preview", "production"])
     .optional(),
 
-  // ─── Crawling (Firecrawl, 실패 시 cheerio 폴백) ───
-  FIRECRAWL_API_KEY: z.string().optional(),
+  // ─── Crawling (Firecrawl Cloud) ───
+  // Task 1-7-b: URL 지식 업로드 파이프라인이 부팅 시점에 API 키 존재를 보증.
+  // 키 누락 시 앱 실행 자체를 차단하여 크롤링 Server Action 이 런타임에 중간 실패하는
+  // 경로(부분 저장)를 원천 차단. Vercel Preview/Production 환경변수 등록 필수.
+  FIRECRAWL_API_KEY: z.string().startsWith("fc-"),
 });
 
 type ServerEnv = z.infer<typeof serverSchema>;

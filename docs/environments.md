@@ -46,23 +46,23 @@ Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환�
 
 ## 3. 환경변수 차이 매트릭스
 
-| 변수                             | `local`                        | `preview`                   | `prod`                            |
-| -------------------------------- | ------------------------------ | --------------------------- | --------------------------------- |
-| `NODE_ENV`                       | `development`                  | `production` (Vercel 자동)  | `production`                      |
-| `NEXT_PUBLIC_APP_URL`            | `http://localhost:4000`        | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`              |
-| `NEXT_PUBLIC_SUPABASE_URL`       | dari-dev URL                   | dari-dev URL                | **dari-prod URL** (교체)          |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | dari-dev anon                  | dari-dev anon               | **dari-prod anon** (교체)         |
-| `SUPABASE_SERVICE_ROLE_KEY`      | dari-dev service_role          | dari-dev service_role       | **dari-prod service_role** (교체) |
-| `DATABASE_URL`                   | (선택, migration CLI 전용)     | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI) |
-| `ANTHROPIC_API_KEY`              | 개인 개발 키 (저비용)          | 개인 개발 키                | **프로덕션 키** (사용량 분리)     |
-| `GOOGLE_GENERATIVE_AI_API_KEY`   | 개인 개발 키                   | 개인 개발 키                | **프로덕션 키**                   |
-| `UPSTASH_REDIS_REST_URL`         | dari-dev Redis                 | dari-dev Redis              | **dari-prod Redis** (교체)        |
-| `UPSTASH_REDIS_REST_TOKEN`       | dari-dev token                 | dari-dev token              | **dari-prod token**               |
-| `SENTRY_DSN`                     | (선택, 로컬 디버그용)          | prod 와 동일 DSN            | prod DSN                          |
-| `NEXT_PUBLIC_SENTRY_DSN`         | (선택)                         | prod 와 동일 DSN            | prod DSN                          |
-| `SENTRY_ENVIRONMENT`             | `development`                  | `preview`                   | `production`                      |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`                  | `preview`                   | `production`                      |
-| `FIRECRAWL_API_KEY`              | (선택, 미설정 시 cheerio 폴백) | 개인 개발 키                | **프로덕션 키**                   |
+| 변수                             | `local`                     | `preview`                   | `prod`                            |
+| -------------------------------- | --------------------------- | --------------------------- | --------------------------------- |
+| `NODE_ENV`                       | `development`               | `production` (Vercel 자동)  | `production`                      |
+| `NEXT_PUBLIC_APP_URL`            | `http://localhost:4000`     | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`              |
+| `NEXT_PUBLIC_SUPABASE_URL`       | dari-dev URL                | dari-dev URL                | **dari-prod URL** (교체)          |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | dari-dev anon               | dari-dev anon               | **dari-prod anon** (교체)         |
+| `SUPABASE_SERVICE_ROLE_KEY`      | dari-dev service_role       | dari-dev service_role       | **dari-prod service_role** (교체) |
+| `DATABASE_URL`                   | (선택, migration CLI 전용)  | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI) |
+| `ANTHROPIC_API_KEY`              | 개인 개발 키 (저비용)       | 개인 개발 키                | **프로덕션 키** (사용량 분리)     |
+| `GOOGLE_GENERATIVE_AI_API_KEY`   | 개인 개발 키                | 개인 개발 키                | **프로덕션 키**                   |
+| `UPSTASH_REDIS_REST_URL`         | dari-dev Redis              | dari-dev Redis              | **dari-prod Redis** (교체)        |
+| `UPSTASH_REDIS_REST_TOKEN`       | dari-dev token              | dari-dev token              | **dari-prod token**               |
+| `SENTRY_DSN`                     | (선택, 로컬 디버그용)       | prod 와 동일 DSN            | prod DSN                          |
+| `NEXT_PUBLIC_SENTRY_DSN`         | (선택)                      | prod 와 동일 DSN            | prod DSN                          |
+| `SENTRY_ENVIRONMENT`             | `development`               | `preview`                   | `production`                      |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`               | `preview`                   | `production`                      |
+| `FIRECRAWL_API_KEY`              | 개인 개발 키 (`fc-` 접두어) | 개인 개발 키                | **프로덕션 키**                   |
 
 > **원칙**: **dev 비용 ≠ prod 비용**. AI 키·Redis·Supabase 는 환경별로 **반드시 분리**. 한 key 공유 시 prod 트래픽이 dev 크레딧을 소진하거나 반대로 개발 실수가 prod 데이터를 오염시킨다.
 

@@ -69,6 +69,7 @@ describe("serverSchema — NEXT_PUBLIC_SENTRY_ENVIRONMENT 상속", () => {
     GOOGLE_GENERATIVE_AI_API_KEY: "c".repeat(40),
     UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
     UPSTASH_REDIS_REST_TOKEN: "d".repeat(40),
+    FIRECRAWL_API_KEY: "fc-fake-firecrawl-test-placeholder",
   };
 
   it("clientSchema enum 이 serverSchema 에도 동일 적용", () => {

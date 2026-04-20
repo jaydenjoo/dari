@@ -1,16 +1,24 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import {
   dariConfigSchema,
+  urlSourceSchema,
   type DariConfig,
   type KnowledgeSource,
 } from "@/core/config";
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
-import { ingestTextKnowledge, sanitizeKnowledgeText } from "@/core/knowledge";
+import {
+  ingestTextKnowledge,
+  ingestUrlKnowledge,
+  knowledgeUrlSchema,
+  sanitizeKnowledgeText,
+} from "@/core/knowledge";
 import { logger } from "@/core/logging";
+import { checkBotUrlIngestRatelimit } from "@/core/ratelimit/bot-url-ingest-limiter";
 
 import { isValidSlug } from "../../new/slug-util";
 
@@ -282,4 +290,187 @@ export async function updateBot(
   }
 
   redirect(`/bots/${slug}`);
+}
+
+// ─── Task 1-7-b: URL 지식 소스 추가 ──────────────────────────────────────────
+
+export type AddUrlFormState = {
+  // 폼 전체 에러 (URL 처리 실패, 권한, 세션 등).
+  error?: string;
+  // 필드 에러 ("knowledge.url" 키).
+  fieldErrors?: Record<string, string>;
+  // 성공 응답 — 동일 페이지에 머물며 성공 UI 표시 (updateBot 의 redirect 와 달리).
+  success?: {
+    url: string;
+    chunkCount: number;
+    truncated: boolean;
+    resolvedUrl: string;
+  };
+};
+
+/**
+ * URL 지식 소스 추가 Server Action (Task 1-7-b).
+ *
+ * 흐름:
+ *   1. slug/URL 입력 검증 (DB 왕복 전).
+ *   2. 세션 검증 + 봇 소유권 확인 (RLS 2중 방어).
+ *   3. 기존 config 파싱 (실패 시 fail-fast — 다른 소스 보존 보장).
+ *   4. `ingestUrlKnowledge`: Firecrawl scrape → sanitize → chunk → embed → RPC.
+ *   5. config.knowledge.sources 갱신 (동일 URL 있으면 교체, 없으면 append).
+ *   6. bots UPDATE.
+ *
+ * 보안 (owner-authed 4중):
+ *   - slug 정적 검증 → `createClient` 세션 → RLS 자동 필터 (select/update) → mass assignment 차단
+ *     (URL 외 모든 필드 폼 미수신 → 조작 경로 없음).
+ *   - 에러 throw 메시지는 정적 식별자로 고정 (url-fetch / ingest-url 에서 sanitize 완료).
+ *     여기서는 사용자에게 보여줄 한국어 문구로만 매핑.
+ */
+export async function addUrlSourceAction(
+  slug: string,
+  _prev: AddUrlFormState,
+  formData: FormData,
+): Promise<AddUrlFormState> {
+  // 1. slug 형식 검증.
+  if (!isValidSlug(slug)) {
+    return { error: "잘못된 봇 주소예요." };
+  }
+
+  // 2. URL 입력 검증 (DB 왕복 전 fail-fast).
+  const rawUrl = String(formData.get("knowledge.url") ?? "");
+  const parsedUrl = knowledgeUrlSchema.safeParse(rawUrl);
+  if (!parsedUrl.success) {
+    return {
+      fieldErrors: {
+        "knowledge.url":
+          parsedUrl.error.issues[0]?.message ?? "URL 형식이 잘못됐어요.",
+      },
+    };
+  }
+  const url = parsedUrl.data;
+
+  // 3. 세션.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
+  }
+
+  // 3-1. Rate limit (security review MEDIUM, 2026-04-20).
+  //   `FIRECRAWL_API_KEY` 는 앱 공용 키 → 한 owner 의 남용이 전체 사용자 영향.
+  //   owner(user.id) 기준 20req/10m sliding window. fail-open 시에는 checkRatelimit
+  //   내부가 로깅 후 통과시킴 (Upstash 장애 중 서비스 차단 회피) — factory.ts 패턴.
+  const rl = await checkBotUrlIngestRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error:
+        "URL 추가 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (10분 안에 20회 제한)",
+    };
+  }
+
+  // 4. 봇 조회 (id + 기존 config).
+  const { data: existing, error: selectErr } = await supabase
+    .from("bots")
+    .select("id, config")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (selectErr) {
+    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    return {
+      error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  if (!existing) {
+    // 타인 봇 또는 존재하지 않음 — enumeration 방어 위해 동일 메시지.
+    return { error: "봇을 찾을 수 없어요." };
+  }
+
+  // 5. 기존 config 파싱 (fail-fast — url/file 등 비편집 소스 보존 필수).
+  const existingParsed = dariConfigSchema.safeParse(existing.config);
+  if (!existingParsed.success) {
+    logger.error(
+      { err: existingParsed.error, slug, userId: user.id },
+      "기존 봇 config 파싱 실패 (URL 추가 중단)",
+    );
+    return {
+      error:
+        "봇 설정을 불러오는 중 오류가 발생했어요. 관리자에게 문의해 주세요.",
+    };
+  }
+
+  // 6. 크롤링 + 임베딩 + RPC.
+  let result;
+  try {
+    result = await ingestUrlKnowledge(supabase, existing.id, url);
+  } catch (err) {
+    logger.error(
+      { err, botId: existing.id, url, userId: user.id },
+      "URL 지식 수집 실패",
+    );
+    // throw 메시지는 static identifier ("URL 처리 실패" / "knowledge RPC failed") —
+    // 사용자 친화 메시지로 매핑. 내부 상세는 위 logger.error 가 단일 출처.
+    const message =
+      err instanceof Error && err.message === "URL 처리 실패"
+        ? "URL 에서 내용을 읽어오지 못했어요. (페이지 차단 · 비어있음 · 타임아웃 등) 다른 주소로 시도하거나 잠시 후 다시 시도해 주세요."
+        : "지식 저장에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    return { error: message };
+  }
+
+  // 7. config.knowledge.sources 갱신.
+  //    - 기존 동일 URL (url 타입 + urls 배열에 이 URL 포함) 을 가진 소스 제거 → 새 소스 추가.
+  //    - text/file/다른 url 소스는 그대로 보존.
+  //    - **MVP 전제 (code review M-2, 2026-04-20)**: 이 액션은 URL 을 1개씩
+  //      `{ type:"url", urls:[url] }` 소스 1개로 append. 한 소스에 여러 URL 이 담긴 경우(=
+  //      Phase 2 다중 URL UI) `includes(url)` 매칭 소스 전체가 교체된다. 다중 URL 입력이
+  //      도입되면 "해당 URL 만 제거 + 나머지 보존" 으로 로직 갱신 필요.
+  const existingSources = existingParsed.data.knowledge.sources;
+  const filtered = existingSources.filter(
+    (s) => !(s.type === "url" && s.urls.includes(url)),
+  );
+  const newUrlSource = urlSourceSchema.parse({
+    type: "url",
+    urls: [url],
+    recrawlInterval: "never",
+  });
+  const newSources: KnowledgeSource[] = [...filtered, newUrlSource];
+
+  const newConfig: DariConfig = {
+    ...existingParsed.data,
+    knowledge: { sources: newSources },
+  };
+
+  // 8. bots UPDATE (RLS bots_update_owner 자동).
+  const { data: updated, error: updateErr } = await supabase
+    .from("bots")
+    .update({
+      config: newConfig,
+    } satisfies Database["public"]["Tables"]["bots"]["Update"])
+    .eq("slug", slug)
+    .select("id");
+
+  if (updateErr) {
+    logger.error(
+      { err: updateErr, slug, userId: user.id, url },
+      "봇 UPDATE 실패 (URL 소스 추가 단계)",
+    );
+    return { error: "봇 수정에 실패했어요. 잠시 후 다시 시도해 주세요." };
+  }
+  if (!updated || updated.length === 0) {
+    return { error: "봇을 수정할 권한이 없어요." };
+  }
+
+  // 9. 캐시 갱신 — 편집 페이지 재진입 시 새 소스 반영.
+  revalidatePath(`/bots/${slug}/edit`);
+
+  return {
+    success: {
+      url,
+      chunkCount: result.chunkCount,
+      truncated: result.truncated,
+      resolvedUrl: result.resolvedUrl,
+    },
+  };
 }

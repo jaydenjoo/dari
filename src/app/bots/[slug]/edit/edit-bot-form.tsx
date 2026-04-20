@@ -11,7 +11,7 @@ import { AnalyticsSection } from "./analytics-section";
 import { AppearanceSection } from "./appearance-section";
 import { BehaviorSection } from "./behavior-section";
 import { IdentitySection } from "./identity-section";
-import { KnowledgeSection } from "./knowledge-section";
+import { KnowledgeSection, KnowledgeUrlSection } from "./knowledge-section";
 
 const initialState: UpdateBotFormState = {};
 
@@ -21,7 +21,8 @@ const SECTIONS = [
   { id: "behavior", label: "행동" },
   { id: "appearance", label: "외관" },
   { id: "analytics", label: "분석" },
-  { id: "knowledge", label: "지식" },
+  { id: "knowledge", label: "지식 · 텍스트" },
+  { id: "knowledge-url", label: "지식 · URL" },
 ] as const;
 
 export default function EditBotForm({
@@ -37,7 +38,7 @@ export default function EditBotForm({
   const errors = state.fieldErrors ?? {};
 
   return (
-    <form action={formAction} className="space-y-6">
+    <div className="space-y-6">
       <SectionNav />
 
       {state.error && (
@@ -50,56 +51,72 @@ export default function EditBotForm({
         </div>
       )}
 
-      <SectionCard
-        id="identity"
-        title="정체성"
-        description="봇 이름·인사말·언어"
-      >
-        <IdentitySection initial={config.identity} errors={errors} />
-      </SectionCard>
+      <form action={formAction} className="space-y-6">
+        <SectionCard
+          id="identity"
+          title="정체성"
+          description="봇 이름·인사말·언어"
+        >
+          <IdentitySection initial={config.identity} errors={errors} />
+        </SectionCard>
 
-      <SectionCard
-        id="ai"
-        title="AI 설정"
-        description="모델·지시사항·생성 옵션"
-      >
-        <AiSection initial={config.ai} errors={errors} />
-      </SectionCard>
+        <SectionCard
+          id="ai"
+          title="AI 설정"
+          description="모델·지시사항·생성 옵션"
+        >
+          <AiSection initial={config.ai} errors={errors} />
+        </SectionCard>
 
-      <SectionCard
-        id="behavior"
-        title="행동 모드"
-        description="응대 모드·이메일 수집·업무 시간·상담원 연결"
-      >
-        <BehaviorSection initial={config.behavior} errors={errors} />
-      </SectionCard>
+        <SectionCard
+          id="behavior"
+          title="행동 모드"
+          description="응대 모드·이메일 수집·업무 시간·상담원 연결"
+        >
+          <BehaviorSection initial={config.behavior} errors={errors} />
+        </SectionCard>
 
-      <SectionCard
-        id="appearance"
-        title="외관"
-        description="테마·색상·위젯 위치"
-      >
-        <AppearanceSection initial={config.appearance} errors={errors} />
-      </SectionCard>
+        <SectionCard
+          id="appearance"
+          title="외관"
+          description="테마·색상·위젯 위치"
+        >
+          <AppearanceSection initial={config.appearance} errors={errors} />
+        </SectionCard>
 
-      <SectionCard
-        id="analytics"
-        title="분석"
-        description="대화 통계 수집·웹훅"
-      >
-        <AnalyticsSection initial={config.analytics} errors={errors} />
-      </SectionCard>
+        <SectionCard
+          id="analytics"
+          title="분석"
+          description="대화 통계 수집·웹훅"
+        >
+          <AnalyticsSection initial={config.analytics} errors={errors} />
+        </SectionCard>
 
-      <SectionCard
-        id="knowledge"
-        title="지식 베이스"
-        description="봇이 답변 근거로 사용할 텍스트 (URL·파일 업로드는 Phase 2)"
-      >
-        <KnowledgeSection initial={config.knowledge} errors={errors} />
-      </SectionCard>
+        <SectionCard
+          id="knowledge"
+          title="지식 · 텍스트"
+          description="봇이 답변 근거로 사용할 텍스트 (변경 시 저장 버튼 필요)"
+        >
+          <KnowledgeSection initial={config.knowledge} errors={errors} />
+        </SectionCard>
 
-      <SubmitBar />
-    </form>
+        <SubmitBar />
+      </form>
+
+      {/*
+        URL 지식 추가는 메인 편집 폼과 **독립된 form**.
+        - 이유 1: HTML `<form>` 중첩 금지 → 메인 폼 밖 DOM 위치 필요.
+        - 이유 2: URL 크롤링은 수 초~수십 초 걸리는 비동기 작업이라, "저장" 버튼 없이
+          추가 즉시 적용되는 UX 가 자연스러움 (메인 폼은 일괄 제출 모델).
+      */}
+      <SectionCard
+        id="knowledge-url"
+        title="지식 · URL 크롤링"
+        description="웹페이지 본문을 크롤링·임베딩 (Firecrawl) — 추가 즉시 적용"
+      >
+        <KnowledgeUrlSection slug={slug} initial={config.knowledge} />
+      </SectionCard>
+    </div>
   );
 }
 

@@ -244,6 +244,18 @@ export type Database = {
         };
         Returns: number;
       };
+      // Task 1-7-b: 일반화된 (source_type, source_identifier) 단위 원자적 재임베딩.
+      // 1-7-b (url) / 1-7-c (file/pdf) / 1-7-d (multi-text) 에서 재사용.
+      // 0008 (text 전체 갈이) 과 상호 배타: url/pdf 는 이 함수 사용.
+      replace_knowledge_chunks_for_source: {
+        Args: {
+          p_bot_id: string;
+          p_source_type: KnowledgeSourceType;
+          p_source_identifier: string;
+          p_chunks: TextKnowledgeChunkPayload[];
+        };
+        Returns: number;
+      };
     };
     Enums: Record<string, never>;
   };
