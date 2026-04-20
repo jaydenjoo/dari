@@ -32,9 +32,49 @@
 
 ## 기록
 
+### 2026-04-20 Playwright HTML 리포트가 ESLint 에 잡혀 "errors 190" 오탐 — artifact 폴더 ignore 누락 (운영 지식)
+
+**증상**: Task 1-8-a 검증 시 `pnpm lint` 가 `3021 problems (190 errors)` 출력. 에러 위치가 `column 17817 / 37960` 같은 비정상 숫자 — minified JS 특성. 직전 세션에는 "기존 3 warnings" 로 clean 이었음. 내 신규 파일(`conversations/*`)에는 한 건도 없음.
+
+**원인**: 직전 세션 Task 1-7-d 에서 Playwright E2E 실행 후 `playwright-report/` 폴더 (내부에 minified trace JS 수천 줄) 가 리포지토리에 잔존. `eslint.config.mjs` 의 `globalIgnores` 에 `.next/` / `coverage/` / `public/widget.js` 는 있으나 `playwright-report/` / `test-results/` 누락. 이 폴더들은 E2E 실행마다 재생성되므로 한번 생긴 뒤로는 lint 가 상시 오염될 운명. CI 는 매번 깨끗한 체크아웃이라 문제 미발현 → 로컬 반복 개발자에서만 드러남.
+
+**해결**: `eslint.config.mjs` globalIgnores 에 `playwright-report/**` + `test-results/**` 추가. 재실행 → `3 warnings (0 errors)` 기존 baseline 복귀.
+
+**규칙** ⭐:
+
+- **테스트/빌드 artifact 폴더는 반드시 linter ignore 에 명시** — 초기 세팅 시 `.next/` / `coverage/` / `dist/` 같이 당연한 것 외에 `playwright-report/` / `test-results/` / `storybook-static/` 등 **테스트 프레임워크 전용 artifact** 까지 일괄 등록. 생성 시점(로컬 dev / CI / E2E)이 다양해 "안 생기는 환경" 에선 안 보임.
+- **"baseline clean 이었는데 갑자기 오염" 패턴은 코드 아닌 artifact 의심** — 내 diff 에 해당 파일 없고 에러가 `column 17000+` 같은 minified 표식이면 인프라 문제. `pnpm lint 2>&1 | grep "^/Volumes" | sort -u` 로 파일 경로 목록 먼저 확인.
+- **CI 녹색 ≠ 로컬 green 보장** — CI 는 artifact 미보존이라 이 종류 이슈에 취약. 로컬 E2E 첫 실행 시점에 발견되는 경향 → 발견 즉시 ignore 추가.
+- **globalIgnores 패턴은 `폴더/**` 재귀 형태로** — 테스트 프레임워크가 하위에 난잡 구조를 만들 수 있어 top-level 만으론 부족.
+
+---
+
+### 2026-04-20 대량 join 쿼리의 `.limit()` 가드는 "정확성 vs DoS 방어" 트레이드오프 — MVP 는 DoS 방어 우선 + warn 로그로 보조 (설계 결정)
+
+**증상**: Task 1-8-a security review MEDIUM-1. conversations 50 건 × 대화당 수천 메시지 상정 시 `messages.in(conversation_ids)` 쿼리가 수만 row 반환 가능 → 서버 메모리·응답 지연. 프리뷰 목록용 조회 비용으로 과도.
+
+**원인**: 프리뷰 목록은 "대화당 첫 user 메시지 1건 + 전체 메시지 수" 만 필요하나, Supabase/PostgREST 만으로 `LATERAL JOIN` 이나 윈도우 함수를 간결히 표현 어려움. 단순 `in()` 은 대화당 메시지 건수에 정비례. 자연 성장만으로도 운영 초기 이후 상한 도달 가능.
+
+**해결 (MVP)**:
+
+1. `.limit(MESSAGES_FETCH_LIMIT = 1000)` 가드 — 50 대화 × 평균 20 메시지 ≈ 1000 기준 보수 추정.
+2. 상한 도달 시 `logger.warn({ botId, fetched, limit }, "messages fetch 상한 도달 — 프리뷰/카운트 정확도 하락 가능")` — 운영 신호 수집.
+3. 카운트 표시는 정확도 소폭 하락 감수. 정확 fetch 가 필요한 상세 페이지(Task 1-8-b) 에서 별도 처리.
+4. RPC / `LATERAL JOIN` / DB view 같은 최적화는 Phase 2 이월. warn 빈도가 높아지면 우선 승격.
+
+**규칙** ⭐:
+
+- **대량 N-to-M 조회는 반드시 `.limit()` 또는 페이지네이션** — `in()` / `any()` 같이 관계 테이블 일괄 조회 시 상위 테이블이 제한되어도 하위 row 수는 무제한 확장 가능. MVP 쿼리라도 상한 가드는 기본.
+- **상한 도달은 warn 로그로 모니터링** — `logger.warn` 에 `fetched` / `limit` 기록. 가드만 넣고 모니터링 없으면 조용히 정확도 하락.
+- **트레이드오프는 "전체 vs 국소 영향" 기준** — DoS 방어(서버 전체 지연 = 전 사용자 영향) vs 정확도 하락(한 페이지 카운트 소폭 오차). MVP 는 항상 전체 사용자 영향 우선 차단.
+- **보안 리뷰 MEDIUM 을 "ROI 낮음" 으로 이월하지 말 것** — `.limit()` 1줄 + warn 로그 1회 = 5분 작업 vs 기대 이익 "프로덕션 장애 1건 회피" = 수시간. 작은 Fix 는 항상 이득.
+- **LATERAL JOIN 같은 DB 최적화는 "신호 수집 후" 승격** — 조기 최적화 금지. warn 로그 빈도가 임계 넘으면 승격, 아니면 MVP 상태 유지.
+
+---
+
 ### 2026-04-20 표시용 조합키와 삭제용 조합키 — 두 곳에 독립 구현하면 silent 동기화 실패 (설계 결정)
 
-**증상**: Task 1-7-d sources-list.tsx 에서 청크 개수 lookup 시 `counts["manual:manual:inline"]` / `counts[\`url:${u}\`]` / `counts[\`${dbType}:file:${f}\`]` 하드코딩 키를 사용. 한편 remove-source.ts 는 `mapToDbSource` 로 `(source_type, source_identifier)` 를 생성해서 RPC 호출 — 두 파일이 동일 매핑 규칙을 **각자 독립 구현**. 독립 code review 에서 M-1 지적: "어느 한 쪽이 바뀌면 다른 쪽이 silent 하게 0을 표시한다".
+**증상**: Task 1-7-d sources-list.tsx 에서 청크 개수 lookup 시 `counts["manual:manual:inline"]` / `counts[\`url:${u}\`]` / `counts[\`${dbType}:file:${f}\`]`하드코딩 키를 사용. 한편 remove-source.ts 는`mapToDbSource`로`(source_type, source_identifier)` 를 생성해서 RPC 호출 — 두 파일이 동일 매핑 규칙을 **각자 독립 구현**. 독립 code review 에서 M-1 지적: "어느 한 쪽이 바뀌면 다른 쪽이 silent 하게 0을 표시한다".
 
 **원인**: 기능이 "chunks 집계 표시" 와 "chunks 삭제 RPC" 로 분리되면서 같은 조합키 규칙이 두 책임에 독립적으로 구현됨. 표시는 page.tsx→sources-list, 삭제는 actions.ts→remove-source. 두 코드가 다른 폴더에 있어 규칙 변경 시 한 곳만 바꿔도 typecheck/lint/test 가 통과. 표시만 0 으로 나오는 UX 버그는 E2E 없이는 감지 어려움 — "silent 실패 = 회귀 테스트로도 잡히기 어려운 유형".
 
@@ -56,6 +96,7 @@
 **원인**: config jsonb 는 본인 봇 owner 가 쓸 수 있는 영역(RLS bots_update_owner). 일반 UI 경로(`addFileSourceAction`)는 파이프라인이 올바른 경로만 생성하지만, **미래에 관리자 도구/다른 Server Action/수동 Supabase Studio 편집** 으로 비정상 경로가 주입될 가능성 존재. Defense-in-depth 원칙상 "RLS 가 막는다" 논거만으로는 부족 — RLS 정책 자체가 실수로 완화되거나 버킷 설정 변경으로 우회 가능성 항상 존재.
 
 **해결**:
+
 1. `fileSourceSchema.storagePaths` 에 regex `^[0-9a-f-]{32,40}\/[0-9a-f-]{32,40}\.(pdf|txt|md)$` 추가 → 스키마 레벨에서 임의 문자열 삽입 차단 (sec LOW-1).
 2. `removeSourceAction` 에서 `storagePaths.filter(p => p.startsWith("${existing.id}/"))` 로 bot.id prefix 일치만 safeStoragePaths 에 통과 → chunks 삭제는 계속, 불일치 경로는 Storage 삭제 건너뜀(degrade) + `logger.error` (sec MEDIUM-1).
 
@@ -95,6 +136,7 @@
 **원인**: 보안 권장 코드는 흔히 "바이너리 탐지" 휴리스틱을 영어/ASCII 기준으로 제시. 다국어 UTF-8 특성 고려 부족. 한글 3바이트 / 일본어 3바이트 / 중국어 3바이트 = 고바이트가 정상 텍스트의 지표. 리뷰 권장 그대로 반영하면 역효과.
 
 **해결**: "고바이트 비율" 대신 "비-텍스트 제어문자 비율" 로 대체.
+
 - 제어문자 = `0x01-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F` (허용: tab 0x09 / LF 0x0A / CR 0x0D / printable 0x20+).
 - 임계값 5% 초과 → 바이너리 판정.
 - 한글/일본/중국 UTF-8 은 제어문자 비율 0% → 통과.
@@ -118,14 +160,15 @@
 **원인**: Supabase MCP 는 `postgres` superuser 가 아닌 제한된 권한으로 실행. `storage.objects` 테이블은 Supabase 내부 관리 테이블이라 DB owner 만 policy 생성 가능. Supabase Studio 의 SQL Editor 는 내부적으로 더 높은 권한 세션 사용 → UI 로는 가능. `list_projects` / `list_migrations` / `apply_migration` 의 schema=public 테이블은 정상 작동하나 `storage` schema 의 DDL 은 제한.
 
 **해결**: 2단 apply 패턴 정형화.
-1. MCP 로 가능한 부분 (`storage.buckets` INSERT + public.* DDL) 은 `apply_migration`.
+
+1. MCP 로 가능한 부분 (`storage.buckets` INSERT + public.\* DDL) 은 `apply_migration`.
 2. `storage.objects` RLS 정책은 마이그레이션 파일에 포함은 하되, 실제 apply 는 **Jayden 수동 (Studio SQL Editor)**.
 3. 파일 상단에 "MCP 제한 — 정책 부분은 Studio 수동 실행 필요" 주석 필수.
 4. Build/파이프라인은 RLS 와 독립 설계 → 병렬 진행 가능 (Claude Step 2/3 vs Jayden SQL).
 
 **규칙** ⭐:
 
-- **Supabase MCP 권한 경계 지도 유지**: 가능(public schema DDL / migration version 관리 / RPC) vs 불가(storage.objects policy / auth.* DDL / publication 관리). 새 MCP 호출 전 "이 작업이 일반 권한 범위인가" 되묻기. 실패 후 역추적 금지.
+- **Supabase MCP 권한 경계 지도 유지**: 가능(public schema DDL / migration version 관리 / RPC) vs 불가(storage.objects policy / auth.\* DDL / publication 관리). 새 MCP 호출 전 "이 작업이 일반 권한 범위인가" 되묻기. 실패 후 역추적 금지.
 - **외부 서비스 선결 체크리스트에 "MCP 불가 영역" 명시**: 메모리 규칙 `feedback_external_service_precheck` 의 체크리스트에 "이 작업에 Jayden 수동 개입이 필요한 부분은?" 항목 명시 — Build 시작 전에 드러내 병렬 진행.
 - **마이그레이션 파일 vs 실 apply 분리**: 파일에 전체 SQL 보존 (docs + 재배포 단일 진실) + 실 apply 경로(MCP / Studio / CLI) 를 주석으로 안내. 향후 개발자가 같은 파일을 full run 하려 할 때 "일부는 UI 에서" 안내 받음.
 - **병렬 작업 설계**: 차단 영역(수동 개입 대기) 이 있어도 독립 영역(파이프라인 구현, UI, 테스트) 은 그대로 진행 가능하도록 의존성 분리. 차단 종료 시점에 통합 검증만 수행.

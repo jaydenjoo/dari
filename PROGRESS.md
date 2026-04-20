@@ -5,10 +5,10 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-7 지식 업로드 종결** — Task 1-7-a text ✅ / Task 1-7-b URL ✅ / Task 1-7-c file ✅ / **Task 1-7-d 다중 source UI ✅ (Build · 독립 리뷰 2 병렬 · Fix 6건 · E2E 2/4 통과 — α 판정)**
-- 상태: **Task 1-7-d 완결** — vitest **380 통과** (361 → 380 / +19), typecheck/lint/prettier/build clean. 통합 sources 리스트 + row 별 개별 삭제 Server Action + Storage 파일 best-effort 제거 + 청크 집계 표시. 선결 작업 B (1-7-c storagePaths optional 추가) 포함. chunkKey/mapUiToDb 단일 출처 helper. storagePaths prefix 2중 검증(RLS + 앱).
-  - **0007+0008+0009+0010 마이그레이션 Supabase 실 apply 완료** (MCP 자동 3건 + Jayden 수동 SQL Editor 1건으로 Storage RLS 4정책).
-  - Build 검증 clean 후 code-reviewer (Ship as-is) + security-reviewer (Fix-then-ship) 병렬 → F1~F6 즉시 반영 (PDF magic bytes 32바이트 축소 / cacheControl no-store / 제어문자 비율 0.05 / Windows drive letter 제거 / raw 체크 분리 / 불변조건 주석).
+- Epic: **Epic 1-8 진입 (대시보드 로그·통계)** — Task 1-8-a 대화 로그 목록 ✅ / 1-8-b 대화 상세 / 1-8-c KPI / 1-8-d (선택)
+- 상태: **Task 1-8-a 완결** — vitest **389 통과** (380 → 389 / +9 preview-util), typecheck/lint/prettier/build clean (12 routes, 신규 `/bots/[slug]/conversations` 등록). Server Component + RLS 3중 방어 + slug 검증 + offset pagination + 4쿼리(bot/count/conversations/messages) + 메모리 join. 독립 리뷰 2 병렬 → Fix 4건 반영 (sec M-1 messages `.limit(1000)` DoS 가드 + warn / sec L-1 정적 에러 메시지 4지점 / sec L-2 maskEmail local=1 / code MED canonical URL 주석).
+  - 부가: `playwright-report/**` + `test-results/**` eslint ignore 추가 (직전 세션 E2E artifact 가 매번 lint 오염시키던 인프라 문제 해결).
+  - Epic 1-7 종결 후 Phase 1 잔여 실사 → Epic 1-8 (대화 로그 + KPI) 선정. PRD Task 1-5 관리 대시보드의 "대화 로그 열람" 부분 실현.
 
 ## 완료된 Epic
 
@@ -137,8 +137,8 @@ _수정_
 ### 주요 결정 / 교훈 (learnings +2)
 
 1. **보안 리뷰 "고바이트 비율" 권장안 한글 UTF-8 false positive** — 다국어 UTF-8 특성 고려 부족한 바이너리 탐지 휴리스틱. "분포 기반" 대신 "구조 기반(제어문자 / UTF-8 validity)" 판별 선호. 국제화 테스트 고정 세트 필수. 리뷰 판정 2분법 지양.
-2. **Supabase MCP 권한 경계** — `storage.objects` RLS 정책은 DB owner 전용. MCP 는 public schema DDL 은 가능하나 storage.* DDL 은 제한. 2단 apply 패턴 (MCP 가능 부분 + Jayden Studio 수동) + 마이그레이션 파일에 주석 명시 + 병렬 작업 설계 (차단 영역과 독립 영역 분리).
-8. **독립 리뷰 2차 (security 단독)** — bypass/회귀 0. 동일 URL 연쇄 추가 시 form 미remount 는 UX 버그(보안 무관)로 수용. **Ship-as-is 확정**.
+2. **Supabase MCP 권한 경계** — `storage.objects` RLS 정책은 DB owner 전용. MCP 는 public schema DDL 은 가능하나 storage.\* DDL 은 제한. 2단 apply 패턴 (MCP 가능 부분 + Jayden Studio 수동) + 마이그레이션 파일에 주석 명시 + 병렬 작업 설계 (차단 영역과 독립 영역 분리).
+3. **독립 리뷰 2차 (security 단독)** — bypass/회귀 0. 동일 URL 연쇄 추가 시 form 미remount 는 UX 버그(보안 무관)로 수용. **Ship-as-is 확정**.
 
 ### 신규 파일 10 + 수정 9
 
@@ -1287,30 +1287,28 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 ### 🎯 경로 선택
 
-**경로 A (권장): Task 1-6-c RAG 연결**
+**경로 A (권장): Task 1-8-b — 대화 상세 페이지**
 
-- `match_knowledge_chunks(bot_id, query_embedding, top_k, min_score)` RPC 는 이미 0005 에 존재
-- chat API 에서 사용자 질문 → Gemini embedding(기존 `embedBatch` 재사용) → RPC → 상위 K 청크 → system prompt 주입
-- Task 1-7-a 텍스트 지식이 실 데이터 소스 — 1-6-c + 1-7-a 쌍으로 RAG 엔드투엔드 실증
-- 보안 고려: system prompt 와 retrieved context 를 XML 태그(`<knowledge>...</knowledge>`)로 구조화 (Prompt Injection 방어, sec FYI PI-1) + bot_id 격리 (RLS + RPC security invoker 자동)
-- 소요: Plan 20m + 구현 60m
+- `/bots/[slug]/conversations/[id]` — 메시지 스레드 (role 별 말풍선) + `messages.sources` 출처 표시 (chunk_id + score)
+- RLS 재사용: `messages_select_owner` 2-hop EXISTS. owner 검증 패턴 Task 1-8-a 동일 복사.
+- 정확 fetch — 대화 1건만 조회이므로 `.limit()` 가드 불필요. pagination 없이 messages 전체 시계열.
+- 소요: Plan 15m + 구현 60~90m
 
-**경로 B: Task 1-7-a 후속 — Supabase 실 apply + Jayden 수동 스모크**
+**경로 B: Task 1-8-c — KPI 카드**
 
-- 0007 + 0008 마이그레이션 apply
-- /bots/[slug]/edit 에서 textarea 입력 → 저장 → Supabase Studio 에서 chunks row 확인 (source_type='manual', chunk_index 0..N, embedding 768dim vector)
-- 소요: 15m (Jayden 단독)
+- /bots/[slug] 상세 상단 또는 /bots 목록 카드에 "7일 대화 수 / 답변 불가율 / 지식 검색율" 집계
+- `count()` 쿼리 3종 + 사이드 위젯 UI
+- 소요: 60~90m
 
-**경로 C: Task 1-7-b — url 크롤링 타입 (Firecrawl)**
+**경로 C: Task 1-7 잔존 백로그 청소**
 
-- 외부 의존 + 크롤링 인프라 설계 필요 → Task 1-6-c RAG 완결 후 권장
-- 소요: 120m+
+- `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — sensitiveFields 확장 or log truncate
+- orphan Storage 수거 스크립트 (1-7-c sec MEDIUM-3)
+- 소요: 90~120m
 
 ### 그 외 대기
 
 - **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월)
-- **docs/environments.md** — "NODE_ENV 플랫폼 주입 필수" 체크리스트
-- **Task 1-7-d**: 다중 source UI (text title / url 개별 / file 삭제 - 통합 편집)
 - **chat API `origin_not_allowed` → 404 통일** (widget-config enumeration 일관성)
 - **OPTIONS preflight DB 이중 호출 리팩터** (chat + widget-config 동시)
 - **env.ts code M-1** `as ServerEnv` 타입 단언 개선 (ε-backlog)
@@ -1319,16 +1317,17 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - **Task 1-0-b 후속**: Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
 - **Task 1-0-a 후속**: rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
 - **🟡 Task 1-7-c 후속 (sec 이월)**: Storage orphan cleanup 주기 태스크 (MEDIUM-3) / rate limit fail-closed 전환 (LOW-1, 과금 모델 도입 시) / unpdf CVE 모니터링 (INFO-1)
+- **Task 1-8-a 후속 (사소)**: `formatRelative` shared util 승격 (bots/page.tsx 중복 제거) / `conversations-list.tsx` animate cap 상수화 / LATERAL JOIN 최적화 (warn 빈도 임계 도달 시)
 
 ## 차단 요소
 
-**없음** — Task 1-7-a 완결, Task 1-6-c RAG 진입 가능. 0007+0008 마이그레이션은 Jayden 수동 영역 (Backlog 이월).
+**없음** — Task 1-8-a 완결, Task 1-8-b 진입 가능.
 
 ## 완료한 Task (누적, 최근 순)
 
+- [x] **Task 1-8-a (Epic 1-8 진입 1/N): 대화 로그 목록 페이지** — `/bots/[slug]/conversations` Server Component · RLS 3중 방어 + `isValidSlug` 검증 · bot/count/conversations/messages 4쿼리 + 메모리 join · offset pagination (`?page=N`, Zod `coerce.number().int().min(1).catch(1)`, limit 50) · messages `.limit(1000)` DoS 가드 + 상한 도달 시 `logger.warn` · `maskEmail` 3단계 마스킹 · preview-util 9 단위 테스트 · E2E 3 케이스 (smoke / 비로그인 / page param) · 독립 리뷰 2 Fix 4건 반영 (sec M-1 DoS 가드 / sec L-1 정적 에러 4지점 / sec L-2 maskEmail local=1 / code MED canonical URL 주석) · 인프라 부산물 1건 (eslint `playwright-report/**` + `test-results/**` ignore) · vitest 380→389 (+9)
+
 - [x] **Task 1-7-c (Epic 1-7 진입 3/4): file 업로드 파이프라인** — PDF(unpdf) / TXT / MD · magic bytes 32바이트 + 제어문자 비율 이중검증 · 파일명 sanitize 5단 (경로·NULL·Unicode·drive letter·길이) · Supabase Storage private 버킷 `{bot_id}/{uuid}.{ext}` + RLS 4정책(0010) · rate limit 20req/10m · bodySizeLimit 10MB · 독립 리뷰 2 Fix 반영 6건 (sec MEDIUM-1/2 / sec INFO-2 / sec LOW-2 / code MEDIUM-1/2) · Phase 2 이월 3건 (Storage orphan / rate fail-closed / unpdf CVE) · vitest 295→361 (+66)
-
-
 
 - [x] PRD v2.0 학습
 - [x] 마스터 플랜 v3.0 수립 (3대 우선순위 + Soft Launch 통합)
@@ -1446,12 +1445,12 @@ _수정_
 
 ### Epic 1-7 종결
 
-| Task | 범위 | 상태 | 테스트 |
-|------|------|------|--------|
-| 1-7-a | text (textarea 단일 슬롯) | ✅ | unit 31 + E2E |
-| 1-7-b | URL (Firecrawl 크롤링) | ✅ | unit + E2E |
-| 1-7-c | file (PDF unpdf + TXT/MD + Storage) | ✅ | unit 59 + E2E |
-| 1-7-d | 통합 리스트 + 개별 삭제 | ✅ | unit 19 + E2E 2/4 (α) |
+| Task  | 범위                                | 상태 | 테스트                |
+| ----- | ----------------------------------- | ---- | --------------------- |
+| 1-7-a | text (textarea 단일 슬롯)           | ✅   | unit 31 + E2E         |
+| 1-7-b | URL (Firecrawl 크롤링)              | ✅   | unit + E2E            |
+| 1-7-c | file (PDF unpdf + TXT/MD + Storage) | ✅   | unit 59 + E2E         |
+| 1-7-d | 통합 리스트 + 개별 삭제             | ✅   | unit 19 + E2E 2/4 (α) |
 
 ### 주요 결정 / 교훈 (learnings +3)
 
@@ -1462,13 +1461,75 @@ _수정_
 ### 🟢 다음 Task 후보
 
 Epic 1-7 완결 — Phase 1 다음 영역으로 전환:
+
 - **Epic 1-8 (또는 이후)**: Phase 1 나머지 범위 (위젯 UI, 분석, 배포 등) 확인 + 우선순위 재정렬
 - **잔존 backlog** (Task 1-7-d 미반영 항목):
   - sec LOW-2: `storagePath` 로그 redact 정책 통합 (sensitiveFields 확장 or log truncate)
   - E2E fixture 재구성 (γ 경로): `admin()` DB 직접 주입으로 Gemini 우회
   - orphan Storage 파일 Phase 2 쓰레기 수거 스크립트
 
+---
+
+## 이번 세션(2026-04-20 Ⅵ) — Epic 1-8 진입 · Task 1-8-a 대화 로그 목록 페이지
+
+Epic 1-7 종결 후 `/start` → 경로 A (Phase 1 잔여 실사 + 우선순위 재정렬) → Epic 1-8 (대화 로그 + KPI) 선정 → Task 1-8-a Plan 승인 → Build → 독립 리뷰 2 병렬 → Fix 4건 일괄 반영 → 검증 clean. "승인" 경로 3회 (경로 A / Epic 권장 / Task Plan).
+
+### 흐름 (~2h)
+
+1. **`/start` (~5분)** — 3 후보(실사 A / 백로그 청소 B / 위젯 배포 C) 제시 → Jayden A 승인.
+2. **Phase 1 실사 (~30분)** — `src/app/**/page.tsx` (6개 페이지 605줄) + `src/widget/` (10파일 1618줄, public/widget.js 286줄 빌드 산출물) + api routes 4개 + core 모듈 매핑 확인. PRD Task 완성도 표 + 뚜렷한 공백 4건 (대화 로그 / 통계 / 스트리밍 / 재인덱싱) + 다음 Epic 3 후보 (1-8 / 1-9 / 1-10) 제안 → Jayden **Epic 1-8 권장안 승인**.
+3. **Task 1-8-a Plan (~10분)** — 4 결정 경로 비교 (URL 구조 / pagination / 프리뷰 소스 / N+1 방지) + 선결 체크 (외부 의존 無, 마이그레이션 無, RLS 0006 재사용) + 파일 목록 (신규 5 + 수정 2 + 테스트 1) + 보안·검증 전략 + 스코프 외 이월(1-8-b/c/d) → Jayden **기본 A안 그대로 승인**.
+4. **Build Step 1 (preview-util + 테스트)** — `pickFirstUserMessage` (ISO 사전식 정렬, role='user' 최이른) / `truncatePreview` (UTF-16 기반) + 9 케이스.
+5. **Build Step 2 (페이지 4파일)** — `page.tsx` (Server Component, Zod page param + `getUser` 세션 + bot/count/conversations/messages 4쿼리 + 메모리 join + offset pagination + `maskEmail` helper + items 빌드 + pagination 네비게이션) / `loading.tsx` (skeleton 5 rows) / `error.tsx` (Sentry.captureException) / `conversations-list.tsx` (프리젠테이셔널, 뱃지+프리뷰+visitor+시각).
+6. **Build Step 3** — `/bots/[slug]/page.tsx` 헤더 액션바에 "대화 로그" Link 추가 (편집 버튼 좌측).
+7. **Build Step 4 (E2E)** — `bot-conversations-list.spec.ts` 3 케이스 (smoke 로그인+봇생성+empty state / 비로그인 리디렉트 / page param 비정상값 500 없음). Gemini 쿼터 의존 無.
+8. **검증 1차** — typecheck ✅ / lint ❌ `3021 problems (190 errors)` / format:check ❌ 3 파일 / vitest ✅ 389 / build 대기.
+9. **원인 추적 + 인프라 fix** — lint 에러 위치가 `column 17817/37960` 같은 minified 표식. `grep "^/Volumes" | sort -u` 로 출처 확인 → `playwright-report/` 폴더의 trace JS 번들. 직전 세션 E2E (2/4 통과) 산출물이 잔존. `eslint.config.mjs` globalIgnores 에 `playwright-report/**` + `test-results/**` 추가. `pnpm format` 으로 PROGRESS.md / learnings.md / error.tsx 3 파일 자동 정리.
+10. **검증 2차** — typecheck ✅ / lint ✅ (기존 3 warnings 무관) / format:check ✅ / vitest ✅ 389 / build ✅ **12 routes** (신규 `/bots/[slug]/conversations` 등록).
+11. **독립 리뷰 2 병렬** — code-reviewer (Fix-then-ship / MED 1 주석 / LOW 2 관용 / INFO 1 취향) + security-reviewer (Fix-then-ship / CRIT 0 / HIGH 0 / MED 1 / LOW 3 / 통과 9건).
+12. **Fix 4건 일괄 반영** —
+    - sec **M-1**: `messages.in(...).limit(MESSAGES_FETCH_LIMIT=1000)` DoS 가드 + 상한 도달 시 `logger.warn({ fetched, limit }, ...)` — 50 대화 × 평균 20 메시지 ≈ 1000 기준 보수.
+    - sec **L-1**: `throw new Error("internal_error")` 4 지점 정적화 (bot/count/conv/msg). Postgres 내부 메시지 노출 차단.
+    - sec **L-2**: `maskEmail` local=1 케이스 `***@domain` (단자 노출 차단). atIdx<=0 / length=1 / length≥2 3단계.
+    - code **MED**: page=1 canonical URL 생략 의도 주석 1줄.
+13. **의식적 미반영 3건** — code LOW `formatRelative` server `Date.now()` (프로젝트 전반 동일 패턴 일관성) / code INFO `Math.min(idx, 10)` 매직 넘버 상수화 (취향) / sec LOW L-3 conversation UUID URL 노출 (Task 1-8-b owner 검증 재확인으로 자연 해소).
+14. **재검증** — vitest **389** 유지, 전 파이프라인 clean.
+
+### 신규 6 + 수정 3
+
+_신규_
+
+- `src/app/bots/[slug]/conversations/page.tsx` — Server Component (4쿼리 + 메모리 join + pagination)
+- `src/app/bots/[slug]/conversations/loading.tsx` — skeleton 5 rows
+- `src/app/bots/[slug]/conversations/error.tsx` — Sentry.captureException + reset
+- `src/app/bots/[slug]/conversations/conversations-list.tsx` — 프리젠테이셔널 list (Server)
+- `src/app/bots/[slug]/conversations/preview-util.ts` + `.test.ts` — 9 케이스
+- `tests/e2e/bot-conversations-list.spec.ts` — 3 케이스
+
+_수정_
+
+- `src/app/bots/[slug]/page.tsx` — 헤더 액션바 flex wrapper + "대화 로그" Link
+- `eslint.config.mjs` — `playwright-report/**` + `test-results/**` ignore
+- (prettier 포매팅 부수 효과) `PROGRESS.md` / `docs/learnings.md`
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **380 → 389 (+9)** / build ✅ (12 routes)
+- 독립 리뷰 2 병렬 → Fix 4건 직접 반영 (추가 라운드 ROI 낮음 생략)
+
+### 주요 결정 / 교훈 (learnings +2)
+
+1. **Playwright HTML 리포트가 ESLint 에 잡혀 "errors 190" 오탐** — artifact 폴더 ignore 누락. 테스트/빌드 artifact (`playwright-report/` / `test-results/` / `storybook-static/` 등) 는 초기 세팅 때 일괄 등록. CI 는 매번 깨끗한 체크아웃이라 문제 미발현 → 로컬 반복 개발자 전용 현상.
+2. **대량 join 쿼리 `.limit()` 가드 = 정확성 vs DoS 방어 트레이드오프** — MVP 는 "전체 사용자 영향(DoS)" > "국소 정확도 하락" 우선. `.limit(1000)` + warn 로그 = 5분 작업 vs 프로덕션 장애 1건 회피. LATERAL JOIN 같은 DB 최적화는 warn 빈도가 임계 넘을 때 승격 판단.
+
+### Backlog (다음 세션)
+
+1. **Task 1-8-b** 대화 상세 페이지 (messages 스레드 + `messages.sources` 출처) — Plan 15m + 구현 60~90m.
+2. **Task 1-8-c** KPI 카드 (7일 대화 수 / 답변 불가율 / 지식 검색율).
+3. 1-7 잔존 백로그 (storagePath redact / orphan Storage 수거 / E2E fixture γ).
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-20 Ⅴ (Task 1-7-d 완료, **Epic 1-7 지식 업로드 완결**, 다음: Phase 1 잔여 영역 확인 및 우선순위 재정렬)
+- 날짜: 2026-04-20 Ⅵ (Task 1-8-a 완료, **Epic 1-8 진입**, 다음: Task 1-8-b 대화 상세 페이지)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
+- 브랜치: `main`
