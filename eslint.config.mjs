@@ -19,6 +19,9 @@ const eslintConfig = defineConfig([
     "src/components/ui/**",
     // vitest 커버리지 리포트 (빌드 artifact)
     "coverage/**",
+    // Playwright HTML 리포트 + trace 번들 (테스트 artifact — minified JS 포함)
+    "playwright-report/**",
+    "test-results/**",
     // 위젯 번들 빌드 산출물 (scripts/build-widget.mjs 생성)
     "public/widget.js",
     "public/widget.js.map",

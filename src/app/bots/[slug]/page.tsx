@@ -172,14 +172,24 @@ export default async function BotDetailPage({
             </div>
           </div>
 
-          <Link
-            href={`/bots/${data.slug}/edit`}
-            data-testid="bot-detail-edit"
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-700 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]"
-          >
-            편집
-            <span aria-hidden>→</span>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/bots/${data.slug}/conversations`}
+              data-testid="bot-detail-conversations"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-700 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]"
+            >
+              대화 로그
+              <span aria-hidden>→</span>
+            </Link>
+            <Link
+              href={`/bots/${data.slug}/edit`}
+              data-testid="bot-detail-edit"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-700 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]"
+            >
+              편집
+              <span aria-hidden>→</span>
+            </Link>
+          </div>
         </header>
 
         <section
