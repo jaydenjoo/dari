@@ -8,6 +8,7 @@ import type { ConversationStatus, Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
 
 import { isValidSlug } from "../../../new/slug-util";
+import { DeleteConversationButton } from "./delete-button";
 import { MessageTimeline, type TimelineMessage } from "./message-timeline";
 import {
   formatDuration,
@@ -216,26 +217,44 @@ export default async function ConversationDetailPage({
         </nav>
 
         <header
-          className="animate-in fade-in slide-in-from-bottom-2 mb-8 duration-500"
+          className="animate-in fade-in slide-in-from-bottom-2 mb-8 flex flex-wrap items-start justify-between gap-4 duration-500"
           style={{ animationDelay: "80ms", animationFillMode: "both" }}
         >
-          <p className="mb-2 text-xs font-semibold tracking-[0.05em] text-blue-600 uppercase">
-            대화 상세
-          </p>
-          <h1
-            data-testid="conversation-detail-title"
-            className="mb-2 text-3xl leading-tight font-bold tracking-[-0.02em] text-gray-900"
-          >
-            {bot.name}
-          </h1>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-            <span
-              data-testid="conversation-status-badge"
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${statusClass}`}
+          <div>
+            <p className="mb-2 text-xs font-semibold tracking-[0.05em] text-blue-600 uppercase">
+              대화 상세
+            </p>
+            <h1
+              data-testid="conversation-detail-title"
+              className="mb-2 text-3xl leading-tight font-bold tracking-[-0.02em] text-gray-900"
             >
-              {statusLabel}
-            </span>
-            <span data-testid="conversation-visitor">{visitor}</span>
+              {bot.name}
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+              <span
+                data-testid="conversation-status-badge"
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${statusClass}`}
+              >
+                {statusLabel}
+              </span>
+              <span data-testid="conversation-visitor">{visitor}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`/api/conversations/${conversation.id}/export`}
+              data-testid="conversation-csv-export"
+              download
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-700 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]"
+            >
+              CSV 내보내기
+              <span aria-hidden>↓</span>
+            </a>
+            <DeleteConversationButton
+              slug={bot.slug}
+              conversationId={conversation.id}
+            />
           </div>
         </header>
 
