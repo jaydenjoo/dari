@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-6 위젯 런타임 1-6-a/b/c/d ✅ + γ-3 ✅** + **Epic 1-7 지식 업로드 — Task 1-7-a text 타입 ✅**
-- 상태: **Sentry Vercel Native Integration 완결 (2026-04-20)** — `dari-vb` + `jayden-f0` 두 조직 완전 삭제 후 `jayden-k4 / jayden-projects` 단일 재생성 / `sentry.{server,edge}.config.ts` 에 `SENTRY_DSN ?? NEXT_PUBLIC_SENTRY_DSN` fallback 추가 (Vercel Integration 이 `NEXT_PUBLIC_*` 만 주입) / 로컬 dev 서버 의도적 에러 5회 → Sentry Issues 수집 실증 / `docs/environments.md §7` 갱신. + **Task 1-6-c RAG 연결 완료** (vitest 261) + **Task 1-7-a text 업로드 파이프라인 완료** / **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** → 다음 **Jayden 수동 마이그레이션 apply 후 브라우저 스모크 또는 Task 1-7-b/c (URL/파일 지식)**
+- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / **Task 1-7-b URL Plan 작성 완료, 승인 대기 (Build 미시작)**
+- 상태: **Task 1-7-b Plan 단계 — Firecrawl 사전 체크 완료** (계정·유료 ✅, dari 라벨 신규 키 발급 + `.env.local` 입력 Jayden 진행 중). Plan 상세(결정 포인트 10개 / 신규 8 + 수정 5 파일 / 마이그레이션 0009 신규 RPC 일반화)는 본 PROGRESS 에 보존 → 다음 세션에서 키 입력 확인 → Plan 승인 → Build 진입 / 직전 세션(2026-04-20 Ⅰ Sentry Vercel Integration 단일 조직 재설정) ✅ + Task 1-6-c RAG ✅ + Task 1-7-a text ✅ 모두 유지 / **🟡 0007 + 0008 (+ 0009 추가 예정) 마이그레이션 Supabase 실 apply Jayden 수동 대기**
 
 ## 완료된 Epic
 
@@ -79,7 +79,97 @@
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
 
-## 이번 세션(2026-04-20) 완료 내역 — Sentry Vercel Native Integration 재설정 완결 (단일 조직 확정)
+## 이번 세션(2026-04-20 Ⅱ) — Task 1-7-b URL 크롤링 Plan 작성 (Build 미시작, 승인 대기)
+
+3 후보(1-7-b URL / 1-7-c file / 1-7-d 다중 text)를 순서대로 진행하기로 합의. Task 1-7-b 진입 — Firecrawl 외부 SDK 도입 사전 체크리스트 + 3 경로 비교 + 상세 Plan 까지 완료. 키 발급 보안성 고려해 `.env.local` 입력은 Jayden 직접. **코드 변경 0건**, PROGRESS 만 갱신 후 세션 정리.
+
+### 흐름 (~30분)
+
+1. **`/start` 세션 시작 보고** — 직전 세션(2026-04-20 Ⅰ Sentry) 정상 종료 확인. 3 후보 제시.
+2. **Jayden 결정** — "3 후보 모두 순서대로 진행" → Task 1-7-b 진입.
+3. **사전 체크 + 3 경로 비교 (Firecrawl)**
+   - A. Firecrawl Cloud (Free 500p/월~) — 🥇 권장 (JS 렌더링 + 안티봇 + LLM-friendly markdown + 운영 부담 0)
+   - B. Firecrawl Self-host (Docker)
+   - C. Cheerio + fetch DIY
+4. **Jayden 응답** — "Firecrawl Cloud 다른 프로젝트에서 유료 사용 중" → 사전 체크 3개 자동 충족(계정/키/유료).
+5. **API 키 분리 정책 결정** — A (dari 전용 신규 키, 권장) vs B (공용 키).
+6. **Jayden 응답** — "A 채택, dari 라벨로 신규 키 발급. 보안 키이므로 직접 입력하겠다."
+7. **`.env.local` 복붙 텍스트 제공** + **상세 Plan 제시** (결정 포인트 10 / 신규 8 + 수정 5 파일 / 보안 owner-authed 4중 / vitest 261 → ~278 / code+security 병렬 + 추가 라운드 / 1.5~2h).
+8. **Jayden** — 세션 정리 후 다시 시작 요청 → `/save` 호출.
+
+### Plan 상세 보존 (다음 세션에서 재작성 없이 Build 진입)
+
+#### 결정 포인트 10개
+
+| # | 결정 | 권장 | 이유 |
+|---|---|---|---|
+| 1 | Firecrawl 모드 | scrape 단일 페이지 | crawl(전체)은 페이지 수 폭발·비용 예측 불가 |
+| 2 | 출력 포맷 | markdown | Firecrawl 기본 / LLM-friendly / 기존 sanitize 호환 |
+| 3 | 호출 시점 | 동기 (Server Action) | 5~30초 + UI loading. 백그라운드는 Phase 2 |
+| 4 | 에러 메시지 | 정적화 (`"URL 처리 실패"`) | 1-7-a 교훈 — Firecrawl/Postgres 내부 메시지 차단 |
+| 5 | 동일 URL 재요청 | idempotent replace | 그 URL의 기존 청크 삭제 후 재삽입. 다른 URL 무영향 |
+| 6 | URL 검증 | `z.string().url()` + http/https + ≤2048자 | localhost/사설IP 별도 차단 불필요 (Firecrawl 외부 → 도달 불가) |
+| 7 | 응답 상한 | markdown 200KB 초과 시 절단 + warn | 비용/저장 폭발 방어 |
+| 8 | Rate limiting | MVP 보류 → Phase 2 | owner-authed 만 호출 → 남용 가능성 낮음 |
+| 9 | UI | knowledge-section.tsx 확장: text 영역 유지 + URL 카드 1개 추가 | 다중 list view 는 1-7-d |
+| 10 | RPC | 0009 신규 일반화 RPC `replace_knowledge_chunks_for_source(bot_id, source_type, source_identifier, jsonb)` | 1-7-c/d 도 재사용. 0008(text) 그대로 유지 |
+
+#### 신규 파일 8
+
+- `src/lib/clients/firecrawl.ts` — Firecrawl SDK 싱글톤 클라이언트
+- `src/core/knowledge/url-fetch.ts` — Firecrawl scrape 호출 + markdown 추출 + 응답 크기 가드
+- `src/core/knowledge/url-fetch.test.ts`
+- `src/core/knowledge/ingest-url.ts` — fetch → sanitize → chunk → embed → 신규 RPC 오케스트레이션
+- `src/core/knowledge/ingest-url.test.ts`
+- `supabase/migrations/0009_replace_knowledge_chunks_for_source.sql` — plpgsql + `security invoker` + `search_path=''`
+- (테스트 헬퍼 / 픽스처 필요 시 +1~2 파일 추가 가능)
+
+#### 수정 파일 5
+
+- `src/app/(authed)/bots/[slug]/edit/sections/knowledge-section.tsx` — URL 입력 카드 + 크롤링 버튼 + 상태 뱃지
+- `src/app/(authed)/bots/[slug]/edit/actions.ts` — `addUrlSourceAction(slug, url)` 추가 (Mass Assignment 차단 패턴 유지)
+- `src/core/env.ts` — `FIRECRAWL_API_KEY` zod 필수
+- `.env.example` — placeholder 추가
+- `src/core/knowledge/index.ts` — re-export
+
+#### 보안 레이어 (owner-authed 4중)
+
+1. **owner 인증** — `requireUser()` + bot 소유권 검증 (기존 actions.ts 패턴 재사용)
+2. **입력 검증** — Zod URL schema (http/https, 길이 ≤2048)
+3. **응답 검증** — markdown 크기 상한 (200KB) + sanitize (NULL/Trojan Source)
+4. **에러 일반화** — 정적 메시지 + `sanitizeLoggableError` 경유
+
+### 신규 / 수정 파일 (이번 세션 자체)
+
+- 코드 변경 **0건** (Plan 단계만)
+- 본 세션 저장 시 **PROGRESS.md** 만 갱신
+
+### 검증
+
+해당 없음 (코드 변경 없음). 다음 세션 Build 후 검증 (vitest 261 → ~278, typecheck/lint/prettier/build clean 목표).
+
+### 주요 결정 / 교훈
+
+신규 learnings 트리거 미해당 (정상 흐름의 Plan 작성). 외부 서비스 사전 체크는 글로벌 메모리 `feedback_external_service_precheck` 에 이미 보존됨.
+
+### Backlog (다음 세션 진입 순서)
+
+1. **🎯 Jayden 키 입력 확인** — `.env.local` 의 `FIRECRAWL_API_KEY=fc-...` 입력 완료 응답 받기
+2. **🎯 Plan 승인** → Build 진입
+3. **Build 순서** — `pnpm add @mendable/firecrawl-js` → `firecrawl.ts` 클라이언트 → `url-fetch.ts` + 테스트 → `ingest-url.ts` + 테스트 → 0009 마이그레이션 → `actions.ts` Server Action → `knowledge-section.tsx` UI → `env.ts` + `.env.example`
+4. **리뷰** — code-reviewer + security-reviewer 병렬 → 수정 직전 추가 라운드 1회 (1-6-a 교훈)
+5. **🟡 마이그레이션 0007 + 0008 + 0009 일괄 apply** (Jayden 수동) — 1-7-b 완료 후 1-7-c 진입 전
+6. **이후 Task 1-7-c (file 업로드, PDF 파서)** → **Task 1-7-d (다중 source UI)**
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 Ⅱ (KST)
+- 브랜치: `main`
+- 차단 요소: 없음 (Jayden 키 입력 + Plan 승인 대기 — 다음 세션 시작 시 해소)
+
+---
+
+## 직전 세션(2026-04-20 Ⅰ) 완료 내역 — Sentry Vercel Native Integration 재설정 완결 (단일 조직 확정)
 
 직전 세션(Task 1-6-c, 2026-04-19 Ⅲ) 에서 남겨둔 "Sentry 조직 2개 공존" 기술 부채 정리. 기존 수동 조직 `dari-vb` + Vercel 자동 조직 `jayden-f0` 을 전부 삭제하고 Vercel Marketplace 단일 경로로 `jayden-k4 / jayden-projects` 재생성. 이 과정에서 Vercel Native Integration 이 `NEXT_PUBLIC_SENTRY_DSN` 만 주입하는 설계를 실증으로 발견하고 `sentry.{server,edge}.config.ts` 에 fallback 추가. 로컬 dev 서버에서 의도적 에러 5회 → Sentry Issues 수집 실증 (스크린샷 2장 증거).
 
