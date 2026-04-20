@@ -11,7 +11,11 @@ import { AnalyticsSection } from "./analytics-section";
 import { AppearanceSection } from "./appearance-section";
 import { BehaviorSection } from "./behavior-section";
 import { IdentitySection } from "./identity-section";
-import { KnowledgeSection, KnowledgeUrlSection } from "./knowledge-section";
+import {
+  KnowledgeFileSection,
+  KnowledgeSection,
+  KnowledgeUrlSection,
+} from "./knowledge-section";
 
 const initialState: UpdateBotFormState = {};
 
@@ -23,6 +27,7 @@ const SECTIONS = [
   { id: "analytics", label: "분석" },
   { id: "knowledge", label: "지식 · 텍스트" },
   { id: "knowledge-url", label: "지식 · URL" },
+  { id: "knowledge-file", label: "지식 · 파일" },
 ] as const;
 
 export default function EditBotForm({
@@ -115,6 +120,18 @@ export default function EditBotForm({
         description="웹페이지 본문을 크롤링·임베딩 (Firecrawl) — 추가 즉시 적용"
       >
         <KnowledgeUrlSection slug={slug} initial={config.knowledge} />
+      </SectionCard>
+
+      {/*
+        Task 1-7-c: 파일 업로드 — URL 섹션과 동일한 이유로 메인 form 밖 별도 SectionCard.
+        (HTML <form> 중첩 금지 + 비동기 처리 UX 분리)
+      */}
+      <SectionCard
+        id="knowledge-file"
+        title="지식 · 파일 업로드"
+        description="PDF · TXT · MD 문서의 본문을 추출·임베딩 — 업로드 즉시 적용"
+      >
+        <KnowledgeFileSection slug={slug} initial={config.knowledge} />
       </SectionCard>
     </div>
   );

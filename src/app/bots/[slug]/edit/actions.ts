@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import {
   dariConfigSchema,
+  fileSourceSchema,
   urlSourceSchema,
   type DariConfig,
   type KnowledgeSource,
@@ -12,12 +13,17 @@ import {
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import {
+  ALLOWED_MIME_TYPES,
+  ingestFileKnowledge,
   ingestTextKnowledge,
   ingestUrlKnowledge,
   knowledgeUrlSchema,
+  MAX_FILE_BYTES,
+  sanitizeFilename,
   sanitizeKnowledgeText,
 } from "@/core/knowledge";
 import { logger } from "@/core/logging";
+import { checkBotFileIngestRatelimit } from "@/core/ratelimit/bot-file-ingest-limiter";
 import { checkBotUrlIngestRatelimit } from "@/core/ratelimit/bot-url-ingest-limiter";
 
 import { isValidSlug } from "../../new/slug-util";
@@ -471,6 +477,247 @@ export async function addUrlSourceAction(
       chunkCount: result.chunkCount,
       truncated: result.truncated,
       resolvedUrl: result.resolvedUrl,
+    },
+  };
+}
+
+// ─── Task 1-7-c: 파일 지식 소스 추가 ─────────────────────────────────────────
+
+export type AddFileFormState = {
+  // 폼 전체 에러 (파일 처리 실패, 권한, 세션 등).
+  error?: string;
+  // 필드 에러 ("knowledge.file" 키).
+  fieldErrors?: Record<string, string>;
+  // 성공 응답.
+  success?: {
+    filename: string;
+    chunkCount: number;
+    bytes: number;
+    ext: string;
+  };
+};
+
+/**
+ * 파일 지식 소스 추가 Server Action (Task 1-7-c).
+ *
+ * 흐름:
+ *   1. slug 검증.
+ *   2. FormData 에서 File 추출 + 기본 검증 (존재/크기/MIME).
+ *   3. 세션 검증 + rate limit (owner 기준 20req/10m).
+ *   4. 봇 조회 (RLS 2중 방어) + 기존 config 파싱 (fail-fast — 비편집 소스 보존).
+ *   5. ingestFileKnowledge — extract → sanitize → chunk → embed → Storage → RPC.
+ *   6. config.knowledge.sources 갱신 (같은 파일명 있으면 교체, 없으면 append).
+ *   7. bots UPDATE + revalidatePath.
+ *
+ * 보안 (owner-authed 5중):
+ *   - slug 정적 검증 → 세션 → rate limit → RLS (select/update) → Storage RLS (insert).
+ *   - mass assignment 차단: 파일 외 필드 폼 미수신. owner_id/slug/botId 조작 경로 없음.
+ *   - magic bytes 재검증 (ingestFileKnowledge 내부) — Content-Type 헤더 위조 방어.
+ *
+ * 에러 메시지는 ingest-file.ts throw 식별자 기반으로 사용자 친화 한글 매핑:
+ *   - "파일 처리 실패" → 파일 형식/손상/크기 초과 안내
+ *   - "파일 업로드 실패" → Storage 쪽 장애
+ *   - "knowledge embedding failed" / "knowledge RPC failed" → 내부 오류 안내
+ */
+export async function addFileSourceAction(
+  slug: string,
+  _prev: AddFileFormState,
+  formData: FormData,
+): Promise<AddFileFormState> {
+  // 1. slug 형식 검증.
+  if (!isValidSlug(slug)) {
+    return { error: "잘못된 봇 주소예요." };
+  }
+
+  // 2. File 추출 + 사전 검증 (DB 왕복 전 fail-fast).
+  //    code review MEDIUM-2 (2026-04-20): instanceof 체크와 size 체크 분리 —
+  //    TypeScript narrowing 명확화 + UX 메시지 구분.
+  const raw = formData.get("knowledge.file");
+  if (!(raw instanceof File)) {
+    return {
+      fieldErrors: { "knowledge.file": "파일을 선택해 주세요." },
+    };
+  }
+  if (raw.size === 0) {
+    return {
+      fieldErrors: { "knowledge.file": "빈 파일은 업로드할 수 없어요." },
+    };
+  }
+  if (raw.size > MAX_FILE_BYTES) {
+    return {
+      fieldErrors: {
+        "knowledge.file": `파일 크기는 ${(MAX_FILE_BYTES / (1024 * 1024)).toFixed(0)}MB 이하여야 해요.`,
+      },
+    };
+  }
+  // MIME 화이트리스트 (Storage 버킷과 정합). 실제 검증은 ingestFileKnowledge 가
+  // magic bytes 로 이중 수행 — 여기는 명백한 오류(.exe/.zip 등) fail-fast.
+  const mime = raw.type.toLowerCase();
+  if (mime && !(ALLOWED_MIME_TYPES as readonly string[]).includes(mime)) {
+    return {
+      fieldErrors: {
+        "knowledge.file": "PDF, TXT, MD 파일만 업로드할 수 있어요.",
+      },
+    };
+  }
+
+  // 3. 세션.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
+  }
+
+  // 3-1. Rate limit (owner 기준 20req/10m).
+  const rl = await checkBotFileIngestRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error:
+        "파일 업로드 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (10분 안에 20회 제한)",
+    };
+  }
+
+  // 4. 봇 조회 (id + 기존 config).
+  const { data: existing, error: selectErr } = await supabase
+    .from("bots")
+    .select("id, config")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (selectErr) {
+    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    return {
+      error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  if (!existing) {
+    return { error: "봇을 찾을 수 없어요." };
+  }
+
+  // 5. 기존 config 파싱 (fail-fast — 비편집 소스 보존 필수).
+  const existingParsed = dariConfigSchema.safeParse(existing.config);
+  if (!existingParsed.success) {
+    logger.error(
+      { err: existingParsed.error, slug, userId: user.id },
+      "기존 봇 config 파싱 실패 (파일 추가 중단)",
+    );
+    return {
+      error:
+        "봇 설정을 불러오는 중 오류가 발생했어요. 관리자에게 문의해 주세요.",
+    };
+  }
+
+  // 6. buffer 변환 + 원 파일명 확보.
+  //    sanitizeFilename 은 ingestFileKnowledge 내부에서도 수행 (중복 방어 OK).
+  const sanitizedFilename = sanitizeFilename(raw.name);
+  if (sanitizedFilename.length === 0) {
+    return {
+      fieldErrors: {
+        "knowledge.file":
+          "파일명이 올바르지 않아요. 다른 파일을 선택해 주세요.",
+      },
+    };
+  }
+
+  const buffer = Buffer.from(await raw.arrayBuffer());
+
+  // 7. 파이프라인 실행.
+  let result;
+  try {
+    result = await ingestFileKnowledge(supabase, existing.id, {
+      buffer,
+      filename: raw.name,
+    });
+  } catch (err) {
+    logger.error(
+      {
+        err,
+        botId: existing.id,
+        filename: sanitizedFilename,
+        bytes: raw.size,
+        mime: mime || "(empty)",
+        userId: user.id,
+      },
+      "파일 지식 수집 실패",
+    );
+
+    // throw 식별자 → 사용자 메시지 매핑.
+    if (err instanceof Error) {
+      if (err.message === "파일 처리 실패") {
+        return {
+          error:
+            "파일을 처리하지 못했어요. PDF · TXT · MD 형식인지, 암호 설정이 없는지, 스캔본이 아닌지 확인해 주세요.",
+        };
+      }
+      if (err.message === "파일 업로드 실패") {
+        return {
+          error: "파일 저장에 실패했어요. 잠시 후 다시 시도해 주세요.",
+        };
+      }
+    }
+    return {
+      error: "지식 저장에 실패했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+
+  // 8. config.knowledge.sources 갱신.
+  //    - 같은 파일명의 `{ type:"file", files:[name] }` 이 있으면 제거 후 새로 append.
+  //    - 다른 소스(text/url/다른 file)는 보존.
+  //    - **MVP 전제 (1-7-b learnings 동일 패턴)**: 이 액션은 파일 1개씩
+  //      `{ type:"file", files:[name] }` 소스 1개로 append. Phase 2 다중 파일 UI 도입 시
+  //      "해당 파일만 제거 + 나머지 보존" 으로 로직 갱신 필요.
+  const existingSources = existingParsed.data.knowledge.sources;
+  const filtered = existingSources.filter(
+    (s) => !(s.type === "file" && s.files.includes(result.sanitizedFilename)),
+  );
+  const newFileSource = fileSourceSchema.parse({
+    type: "file",
+    files: [result.sanitizedFilename],
+  });
+  const newSources: KnowledgeSource[] = [...filtered, newFileSource];
+
+  const newConfig: DariConfig = {
+    ...existingParsed.data,
+    knowledge: { sources: newSources },
+  };
+
+  // 9. bots UPDATE.
+  const { data: updated, error: updateErr } = await supabase
+    .from("bots")
+    .update({
+      config: newConfig,
+    } satisfies Database["public"]["Tables"]["bots"]["Update"])
+    .eq("slug", slug)
+    .select("id");
+
+  if (updateErr) {
+    logger.error(
+      {
+        err: updateErr,
+        slug,
+        userId: user.id,
+        filename: result.sanitizedFilename,
+      },
+      "봇 UPDATE 실패 (파일 소스 추가 단계)",
+    );
+    return { error: "봇 수정에 실패했어요. 잠시 후 다시 시도해 주세요." };
+  }
+  if (!updated || updated.length === 0) {
+    return { error: "봇을 수정할 권한이 없어요." };
+  }
+
+  // 10. 캐시 갱신.
+  revalidatePath(`/bots/${slug}/edit`);
+
+  return {
+    success: {
+      filename: result.sanitizedFilename,
+      chunkCount: result.chunkCount,
+      bytes: result.bytes,
+      ext: result.ext,
     },
   };
 }

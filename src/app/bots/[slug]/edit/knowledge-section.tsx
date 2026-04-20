@@ -5,8 +5,18 @@ import { useFormStatus } from "react-dom";
 
 import type { Knowledge } from "@/core/config";
 
-import { addUrlSourceAction, type AddUrlFormState } from "./actions";
+import {
+  addFileSourceAction,
+  addUrlSourceAction,
+  type AddFileFormState,
+  type AddUrlFormState,
+} from "./actions";
 import { Field, inputClass, textareaClass } from "./field";
+
+// Task 1-7-c: 파일 업로드 상한 (file-extract::MAX_FILE_BYTES 와 일치).
+const MAX_FILE_BYTES_UI = 10 * 1024 * 1024;
+// 업로드 허용 확장자 (input accept 속성). MIME 은 서버가 magic bytes 로 재검증.
+const FILE_ACCEPT = ".pdf,.txt,.md,application/pdf,text/plain,text/markdown";
 
 // textSourceSchema.content = z.string().min(10).max(100_000)
 // UI 는 빈 문자열(삭제 의도) 도 허용 → min 검증은 action 에서 조건부.
@@ -282,6 +292,175 @@ function UrlSubmitButton() {
       className="shrink-0 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_2px_8px_rgba(16,128,96,0.18)] transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06),0_8px_20px_rgba(16,128,96,0.22)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-emerald-600"
     >
       {pending ? "크롤링 중..." : "추가"}
+    </button>
+  );
+}
+
+/**
+ * Task 1-7-c: 파일 지식 소스 편집 (단일 파일 업로드).
+ *
+ * 왜 별도 컴포넌트 + 별도 form 인가:
+ *   - URL 섹션(1-7-b)과 동일한 이유 — HTML `<form>` 중첩 금지 + 비동기 UX 분리.
+ *   - 파일 처리는 수 초 이상 소요 (PDF 파싱 + 임베딩). 일괄 제출 모델과 맞지 않음.
+ *
+ * 설계:
+ *   - MVP: 한 번에 파일 1개. 같은 파일명 재업로드 = idempotent replace (actions.ts).
+ *   - 기존 파일 목록은 읽기 전용 (삭제 UI 는 Phase 2).
+ *   - 성공/실패 배너 + submit 중 스피너.
+ */
+export function KnowledgeFileSection({
+  slug,
+  initial,
+}: {
+  slug: string;
+  initial: Knowledge;
+}) {
+  const boundAction = addFileSourceAction.bind(null, slug);
+  const [state, formAction] = useActionState<AddFileFormState, FormData>(
+    boundAction,
+    {},
+  );
+
+  // 기존 file 소스 파일명 목록.
+  const existingFiles = initial.sources
+    .filter(
+      (s): s is Extract<Knowledge["sources"][number], { type: "file" }> =>
+        s.type === "file",
+    )
+    .flatMap((s) => s.files);
+
+  return (
+    <div className="space-y-5">
+      <div
+        data-testid="knowledge-file-meta"
+        className="flex items-start gap-3 rounded-xl border border-purple-100 bg-purple-50/60 px-4 py-3"
+      >
+        <span
+          aria-hidden
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-100 text-purple-600"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+            <polyline points="10 9 9 9 8 9" />
+          </svg>
+        </span>
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium text-purple-900">
+            PDF · TXT · MD 문서를 올리면 본문을 자동 추출해요
+          </p>
+          <p className="text-xs leading-relaxed text-purple-800/80">
+            10MB 이하, 한 번에 파일 1개. 암호 설정된 PDF · 스캔본(이미지 PDF) 은
+            처리할 수 없어요. 같은 파일명으로 다시 올리면 기존 내용이 교체돼요.
+            (다중 파일 · DOCX · 삭제는 Phase 2)
+          </p>
+        </div>
+      </div>
+
+      {state.success && (
+        <div
+          role="status"
+          data-testid="knowledge-file-success"
+          className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm leading-relaxed text-purple-800"
+        >
+          <p className="font-medium">파일 지식이 추가됐어요.</p>
+          <p className="mt-1 text-purple-700/80">
+            {state.success.filename} — 청크 {state.success.chunkCount}개 ·{" "}
+            {(state.success.bytes / 1024).toFixed(1)}KB
+          </p>
+        </div>
+      )}
+
+      {state.error && (
+        <div
+          role="alert"
+          data-testid="knowledge-file-error"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700"
+        >
+          {state.error}
+        </div>
+      )}
+
+      {/*
+        성공 직후 form remount (1-7-b 패턴 동일). file input 은 uncontrolled 라서
+        state.success.filename 키로 재생성되어 파일 선택 UI 가 비워진다.
+      */}
+      <form
+        key={state.success?.filename ?? "knowledge-file-form"}
+        action={formAction}
+        className="space-y-3"
+      >
+        <Field
+          label="파일 업로드"
+          htmlFor="knowledge-file-input"
+          hint={`PDF · TXT · MD · 최대 ${(MAX_FILE_BYTES_UI / (1024 * 1024)).toFixed(0)}MB`}
+          error={state.fieldErrors?.["knowledge.file"]}
+        >
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              id="knowledge-file-input"
+              data-testid="knowledge-file-input"
+              name="knowledge.file"
+              type="file"
+              required
+              accept={FILE_ACCEPT}
+              className={`${inputClass} file:mr-3 file:rounded-lg file:border-0 file:bg-purple-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-purple-700 hover:file:bg-purple-200`}
+            />
+            <FileSubmitButton />
+          </div>
+        </Field>
+      </form>
+
+      {existingFiles.length > 0 && (
+        <div
+          data-testid="knowledge-file-list"
+          className="rounded-xl border border-gray-200/80 bg-gray-50/60 px-4 py-3"
+        >
+          <p className="mb-2 text-xs font-medium text-gray-600">
+            이미 올린 파일 ({existingFiles.length}개)
+          </p>
+          <ul className="space-y-1 text-xs text-gray-700">
+            {existingFiles.map((filename) => (
+              <li
+                key={filename}
+                className="truncate rounded bg-white px-2 py-1 font-mono"
+                title={filename}
+              >
+                {filename}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-gray-400">
+            삭제·재처리 UI 는 Phase 2 에서 제공돼요. 같은 파일명으로 다시 올리면
+            기존 청크가 교체돼요.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileSubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      data-testid="knowledge-file-submit"
+      disabled={pending}
+      className="shrink-0 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_2px_8px_rgba(120,70,200,0.18)] transition-all hover:-translate-y-0.5 hover:bg-purple-700 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06),0_8px_20px_rgba(120,70,200,0.22)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-purple-600"
+    >
+      {pending ? "분석 중..." : "업로드"}
     </button>
   );
 }

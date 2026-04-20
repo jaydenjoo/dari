@@ -2,7 +2,12 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Task 1-7-c: 파일 업로드 Server Action 본문 상한 10MB.
+    // 기본 1MB 은 10KB TXT 조차 base64 오버헤드로 차단될 수 있음.
+    // Supabase Storage 버킷 file_size_limit 도 10MB 로 이중 방어 (0010).
+    serverActions: { bodySizeLimit: "10mb" },
+  },
 };
 
 /**
