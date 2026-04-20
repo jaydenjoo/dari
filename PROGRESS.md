@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / Task 1-7-b URL ✅ / **Task 1-7-c file ✅ (Build · 독립 리뷰 2라운드 · Fix 반영 8건 완료)** / Task 1-7-d 다중 source UI 대기
-- 상태: **Task 1-7-c 완결** — vitest **361 통과** (295 → 361 / +66), typecheck/lint/prettier/build clean. unpdf(PDF) + buffer.toString(TXT/MD) → magic bytes 이중검증 → sanitize → chunk → Gemini embed → Supabase Storage `{bot_id}/{uuid}.{ext}` (private + RLS 4정책) → 0009 일반화 RPC. source_type 분리 (pdf/markdown) · source_identifier = `file:{sanitized_filename}` · rate limit 20req/10m.
+- Epic: **Epic 1-7 지식 업로드 종결** — Task 1-7-a text ✅ / Task 1-7-b URL ✅ / Task 1-7-c file ✅ / **Task 1-7-d 다중 source UI ✅ (Build · 독립 리뷰 2 병렬 · Fix 6건 · E2E 2/4 통과 — α 판정)**
+- 상태: **Task 1-7-d 완결** — vitest **380 통과** (361 → 380 / +19), typecheck/lint/prettier/build clean. 통합 sources 리스트 + row 별 개별 삭제 Server Action + Storage 파일 best-effort 제거 + 청크 집계 표시. 선결 작업 B (1-7-c storagePaths optional 추가) 포함. chunkKey/mapUiToDb 단일 출처 helper. storagePaths prefix 2중 검증(RLS + 앱).
   - **0007+0008+0009+0010 마이그레이션 Supabase 실 apply 완료** (MCP 자동 3건 + Jayden 수동 SQL Editor 1건으로 Storage RLS 4정책).
   - Build 검증 clean 후 code-reviewer (Ship as-is) + security-reviewer (Fix-then-ship) 병렬 → F1~F6 즉시 반영 (PDF magic bytes 32바이트 축소 / cacheControl no-store / 제어문자 비율 0.05 / Windows drive letter 제거 / raw 체크 분리 / 불변조건 주석).
 
@@ -1390,8 +1390,85 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - **2026-04-18 (심야 Ⅱ): Task 1-0-a Rate Limit + Task 1-0-b CORS 유틸 + γ 정비(폰트/CI24) — vitest +38 (93 → 124) / 독립 리뷰 3회 + 재리뷰 1회 / 교훈 3건 (server-only vitest alias / CORS TLD bypass / NODE_ENV Zod default) — 3 커밋 완료**
 - **2026-04-18 (심야 Ⅲ): Task 1-6-a 위젯 Chat API 최소 (Epic 1-6 진입) — anon `/api/chat/[botId]` + 6중 보안 레이어 + Anthropic SDK + bot-chat-limiter / vitest 124 → 127 (+3) / 독립 리뷰 2 + 일괄 5건 반영 / 교훈 2건 (anon 6중 레이어 / 외부 SDK sanitize 원칙) — 코드 미커밋**
 - **2026-04-20 (오전 Ⅳ): Task 1-7-c file 업로드 완결 — 선결 마이그레이션 0007/0008/0009/0010 apply + PDF(unpdf) + TXT/MD + Storage private 버킷 + RLS 4정책 / vitest 295 → 361 (+66) / 독립 리뷰 2 + Fix 반영 6건 / 교훈 2건 (한글 UTF-8 false positive / Supabase MCP 권한 경계)**
+- **2026-04-20 (오후 Ⅴ): Task 1-7-d 다중 source UI 완결 — Epic 1-7 종결 + 선결 작업 B (1-7-c storagePaths optional) + chunkKey 단일 출처 helper + Storage prefix 2중검증 / vitest 361 → 380 (+19) / 독립 리뷰 2 (code Ship as-is + security Fix-then-ship) + Fix 반영 6건 / E2E 2/4 통과(smoke+비로그인), 2 실패는 Gemini 쿼터 한계(α 판정) / 교훈 3건 (chunkKey 단일 출처 / Storage prefix defense-in-depth / E2E 외부 API 쿼터 의존성)**
+
+## 이번 세션(2026-04-20 Ⅴ) — Task 1-7-d 완결 + Epic 1-7 종결
+
+A-0(Task 1-7-c 코드 17파일 미커밋 정리) → A-1(Task 1-7-d Plan → 승인 → Build → 독립 리뷰 2 병렬 → Fix 반영 6건 → 재검증 → E2E 실행 → α 판정). "승인" 경로 2회 (선결 α + Plan), 리뷰 권장 직접 반영 + 의식적 미반영 3건 명시.
+
+### 흐름 (~2h)
+
+1. **A-0 커밋 (~5분)** — `feat(knowledge): Task 1-7-c 파일 업로드 파이프라인 + 독립 리뷰 6건 반영` (17파일 +2325/-5). 직전 세션 `/save` 가 PROGRESS + learnings 만 커밋했던 누락 복구.
+2. **A-1 Plan (~15분)** — 경로 6개 비교표 + 권장안 + 선결 체크리스트 + Open Question Q1 (file identifier 중복 처리). Build 진입 전 Q1 재확인 → **설계 gap 발견**: 1-7-c 가 `storagePath = {bot_id}/{uuid}.{ext}` 를 생성만 하고 config.sources 에 기록 안 함 → 삭제 시 Storage orphan 불가피. α 경로 (`fileSourceSchema.storagePaths?: string[]` optional 추가) 선택 → 선결 작업 B 를 Step 0 으로 끼워넣음.
+3. **Step 0 선결 (~10분)** — schema.ts storagePaths optional / actions.ts addFileSourceAction 에 storagePaths 반영 / schema.test.ts +3. vitest 17/17.
+4. **Step 1 서버 (~20분)** — `bot-source-remove-limiter` (10req/5m user.id) + `remove-source.ts` (UI→DB 매핑 + RPC 빈 배열 chunks 제거 + Storage best-effort) + actions.ts `removeSourceAction` (5중 방어). 테스트 +15 (remove-source 12 + limiter 3).
+5. **Step 2 UI (~25분)** — `confirm-button.tsx` (client 'use client' + native confirm 인터셉트) + `sources-list.tsx` (row 별 form+useActionState + empty state + 배지 색상) + `edit-bot-form.tsx` SectionCard 배치 (메인 form 밖, knowledge-url 위) + `page.tsx` knowledge_chunks select + groupBy → `chunkCounts: Record<string, number>` prop.
+6. **Step 3 E2E (~10분)** — `tests/e2e/bot-knowledge-sources.spec.ts` 4 케이스 (smoke / text 삭제 / 취소 / 비로그인).
+7. **검증 1차** — typecheck ✓ / lint ✓ (기존 3 warning) / prettier ✓ / vitest **379 통과** (+18) / build ✓ (11 routes).
+8. **독립 리뷰 2 병렬** — code-reviewer (**Ship as-is** / MEDIUM 4 + LOW 3 + INFO 1) + security-reviewer (**Fix-then-ship** / MEDIUM 1 + LOW 3 + INFO 3, 통과 확인).
+9. **Fix 6건 일괄 반영** —
+   - sec **MEDIUM-1**: actions.ts `safeStoragePaths = storagePaths.filter(p => p.startsWith("${existing.id}/"))` 로 bot.id prefix 2중검증 + degrade 전략.
+   - sec **LOW-1**: schema.ts `storagePaths` regex `^[0-9a-f-]{32,40}\/[0-9a-f-]{32,40}\.(pdf|txt|md)$` 강화 + 회귀 테스트 6 케이스 reject (path traversal / 3+ segment / .exe / short / no slash / absolute).
+   - code **M-1**: `src/core/knowledge/source-key.ts` 신규 — `mapUiToDb` + `chunkKey` server+client 공유 helper. remove-source.ts 와 sources-list.tsx 가 import 해서 단일 출처.
+   - code **INFO-1**: E2E `waitForTimeout(500)` 제거 → 즉시 assertion (dismiss 는 동기 preventDefault).
+   - 주석 강화 4: M-2 (row key idx 안전), M-3 (Enter 키 confirm MVP), L-1 (chunks warn 근거), L-2 (VALID_UI_TYPES 런타임 방어).
+10. **의식적 미반영 3건** — sec LOW-2 (storagePath redact — ingest 패턴 일관성 Phase 2) / sec LOW-3 (JS off 무확인 — 인증 owner MVP 허용) / code L-3 (삭제 race — idempotent 수용).
+11. **검증 2차** — vitest **380 통과** (+1) / 전 파이프라인 clean.
+12. **Playwright E2E 실행** — smoke + 비로그인 2 통과 / text 저장 flow 2 실패. `page.waitForURL` 60s timeout + page snapshot 에서 `alert: "지식 저장에 실패했어요"` 확인 → Gemini API 429 원인 확정 (vitest 세션 로그에도 동일 에러 관찰). **α 경로 확정** (smoke + 비로그인 E2E + 단위테스트 15건으로 충분, text 삭제 flow 는 Jayden 수동 검증 위임).
+
+### 신규 파일 8 + 수정 6
+
+_신규_
+
+- `src/core/knowledge/remove-source.ts` — UI→DB 매핑 (text→manual:inline / url→URL / file→pdf\|markdown:file:name) + RPC 빈 배열 chunks 전체 제거 + Storage 병렬 best-effort 제거
+- `src/core/knowledge/remove-source.test.ts` — 12 케이스 (text/url/pdf/md/storagePaths 없음/RPC error/RPC throw/Storage error/Storage throw/병렬 일부 실패/invalid type/invalid identifier)
+- `src/core/knowledge/source-key.ts` — `mapUiToDb` + `chunkKey` 공유 helper (server-only 없음)
+- `src/core/ratelimit/bot-source-remove-limiter.ts` — 10req/5m user.id sliding window
+- `src/core/ratelimit/bot-source-remove-limiter.test.ts` — 3 케이스
+- `src/app/bots/[slug]/edit/sources-list.tsx` — 'use client' 통합 리스트 (배지 text=blue / url=emerald / file=violet) + row 별 form+useActionState + empty state + 확장자 subtitle
+- `src/app/bots/[slug]/edit/confirm-button.tsx` — 'use client' native confirm 인터셉트 래퍼
+- `tests/e2e/bot-knowledge-sources.spec.ts` — 4 케이스 (smoke / text 삭제 / dismiss / 비로그인)
+
+_수정_
+
+- `src/core/config/schema.ts` — `fileSourceSchema.storagePaths?: string[]` optional + regex 강화
+- `src/core/config/schema.test.ts` — +4 케이스 (없음/있음/빈배열/regex reject)
+- `src/core/knowledge/index.ts` — `removeKnowledgeSource` + source-key re-export
+- `src/app/bots/[slug]/edit/actions.ts` — `removeSourceAction` (5중 방어 + storagePaths prefix 검증 degrade) + `addFileSourceAction` 의 fileSourceSchema.parse 에 `storagePaths: [result.storagePath]` 반영
+- `src/app/bots/[slug]/edit/edit-bot-form.tsx` — SourcesList SectionCard 배치 (메인 form 밖, knowledge-url 위) + SECTIONS 에 `knowledge-sources` 추가 + `chunkCounts: Readonly<Record<string, number>>` prop
+- `src/app/bots/[slug]/edit/page.tsx` — `knowledge_chunks` 단일 select + 메모리 groupBy → chunkCounts Record 빌드 (RLS 자동 격리)
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **361 → 380 (+19)** / build ✅ (11 routes, widget 16.4KB)
+- 독립 리뷰 2 병렬 → Fix 6건 직접 반영 (리뷰 추가 라운드 ROI 낮음 생략)
+- Playwright E2E: smoke ✅ / 비로그인 ✅ / text 저장+삭제 ❌ (Gemini quota) / dismiss ❌ (동일) — α 판정
+
+### Epic 1-7 종결
+
+| Task | 범위 | 상태 | 테스트 |
+|------|------|------|--------|
+| 1-7-a | text (textarea 단일 슬롯) | ✅ | unit 31 + E2E |
+| 1-7-b | URL (Firecrawl 크롤링) | ✅ | unit + E2E |
+| 1-7-c | file (PDF unpdf + TXT/MD + Storage) | ✅ | unit 59 + E2E |
+| 1-7-d | 통합 리스트 + 개별 삭제 | ✅ | unit 19 + E2E 2/4 (α) |
+
+### 주요 결정 / 교훈 (learnings +3)
+
+1. **표시용 조합키와 삭제용 조합키 공유 helper** — `source-key.ts` 로 server+client 단일 출처. silent drift 예방.
+2. **RLS 1차 방어 + 앱 레이어 prefix 검증 2중화** — Storage 경로 같은 식별자가 config jsonb 에서 재사용될 때 필수.
+3. **E2E 외부 API 쿼터 의존성** — Gemini 429 로 text 저장 flow 검증 불가. Plan template 에 "외부 API mock/fixture/tag 선택" 체크리스트 추가 필요.
+
+### 🟢 다음 Task 후보
+
+Epic 1-7 완결 — Phase 1 다음 영역으로 전환:
+- **Epic 1-8 (또는 이후)**: Phase 1 나머지 범위 (위젯 UI, 분석, 배포 등) 확인 + 우선순위 재정렬
+- **잔존 backlog** (Task 1-7-d 미반영 항목):
+  - sec LOW-2: `storagePath` 로그 redact 정책 통합 (sensitiveFields 확장 or log truncate)
+  - E2E fixture 재구성 (γ 경로): `admin()` DB 직접 주입으로 Gemini 우회
+  - orphan Storage 파일 Phase 2 쓰레기 수거 스크립트
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-20 Ⅳ (Task 1-7-c 완료, Epic 1-7 지식 업로드 3/4 — file 타입 MVP, 다음 Task 1-7-d 다중 source UI 또는 B안 backlog 정리)
+- 날짜: 2026-04-20 Ⅴ (Task 1-7-d 완료, **Epic 1-7 지식 업로드 완결**, 다음: Phase 1 잔여 영역 확인 및 우선순위 재정렬)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)

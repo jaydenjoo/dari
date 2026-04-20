@@ -32,6 +32,62 @@
 
 ## 기록
 
+### 2026-04-20 표시용 조합키와 삭제용 조합키 — 두 곳에 독립 구현하면 silent 동기화 실패 (설계 결정)
+
+**증상**: Task 1-7-d sources-list.tsx 에서 청크 개수 lookup 시 `counts["manual:manual:inline"]` / `counts[\`url:${u}\`]` / `counts[\`${dbType}:file:${f}\`]` 하드코딩 키를 사용. 한편 remove-source.ts 는 `mapToDbSource` 로 `(source_type, source_identifier)` 를 생성해서 RPC 호출 — 두 파일이 동일 매핑 규칙을 **각자 독립 구현**. 독립 code review 에서 M-1 지적: "어느 한 쪽이 바뀌면 다른 쪽이 silent 하게 0을 표시한다".
+
+**원인**: 기능이 "chunks 집계 표시" 와 "chunks 삭제 RPC" 로 분리되면서 같은 조합키 규칙이 두 책임에 독립적으로 구현됨. 표시는 page.tsx→sources-list, 삭제는 actions.ts→remove-source. 두 코드가 다른 폴더에 있어 규칙 변경 시 한 곳만 바꿔도 typecheck/lint/test 가 통과. 표시만 0 으로 나오는 UX 버그는 E2E 없이는 감지 어려움 — "silent 실패 = 회귀 테스트로도 잡히기 어려운 유형".
+
+**해결**: `src/core/knowledge/source-key.ts` 신규 — server+client 공유 가능한 순수 helper 모듈 (`"server-only"` 없음). `mapUiToDb(uiType, identifier)` 과 `chunkKey(uiType, identifier)` 두 함수 export. remove-source.ts 와 sources-list.tsx 가 동일 함수를 import → 규칙 변경 시 한 곳만 수정하면 양쪽 자동 반영. 유닛 테스트 없어도 단일 출처 보장.
+
+**규칙** ⭐:
+
+- **동일 키/식별자 포맷이 표시/저장/삭제 등 2개 이상 책임에 등장하면 공유 helper 로 추출** — 규칙 변경 시 "silent drift" 위험 제거. 헬퍼 함수 하나 추가하는 비용 < 향후 감지 불가능한 버그 비용.
+- **server-only vs client 경계 주의** — `remove-source.ts` 가 `"server-only"` 로 선언돼 있어 client 컴포넌트에서 직접 import 불가. 공유 helper 는 **server-only 선언 없는 순수 함수 모듈** 로 분리해야 양쪽에서 사용 가능. `"server-only"` 는 "클라이언트 번들 유출 방지" 안전장치라 제거 대신 분리가 정답.
+- **code-reviewer 가 "M-1 silent sync 실패" 지적하면 주석 대신 코드 재배치로 해결** — 주석은 휴먼 의존, 헬퍼 추출은 컴파일러 강제. 사용자 규칙 "가장 단순한 접근법" 에 어긋나 보이지만, "silent failure 예방" 은 단순성 예외 케이스.
+- **chunk key 조합 포맷 `${source_type}:${source_identifier}`** — 이 조합이 변경되면 sources-list + page.tsx groupBy + remove-source 세 지점 모두 영향. 향후 포맷 수정 시 반드시 source-key.ts 의 `chunkKey` 만 수정 → 나머지는 전파.
+
+---
+
+### 2026-04-20 Storage 파일 경로는 RLS 단일 방어선에 맡기지 말고 앱 레이어 prefix 검증 2중화 (설계 결정)
+
+**증상**: Task 1-7-d security review MEDIUM-1. `removeKnowledgeSource` 가 받는 `storagePaths` 는 config jsonb(`existingParsed.data`) 에서 추출. 즉 서버가 DB 에서 직접 읽은 신뢰된 값. 그러나 "악의적 owner A 가 자기 봇 config 의 `storagePaths` 에 `{bot_B_id}/secret.pdf` 를 삽입한 뒤 `removeSourceAction` 호출" 시나리오. Storage RLS 0010 이 `storage.foldername(name)[1] = bot_id AND bot.owner = auth.uid()` 로 1차 차단하지만 — **앱 레이어에 prefix 검증 없음** = 방어선이 RLS 단일.
+
+**원인**: config jsonb 는 본인 봇 owner 가 쓸 수 있는 영역(RLS bots_update_owner). 일반 UI 경로(`addFileSourceAction`)는 파이프라인이 올바른 경로만 생성하지만, **미래에 관리자 도구/다른 Server Action/수동 Supabase Studio 편집** 으로 비정상 경로가 주입될 가능성 존재. Defense-in-depth 원칙상 "RLS 가 막는다" 논거만으로는 부족 — RLS 정책 자체가 실수로 완화되거나 버킷 설정 변경으로 우회 가능성 항상 존재.
+
+**해결**:
+1. `fileSourceSchema.storagePaths` 에 regex `^[0-9a-f-]{32,40}\/[0-9a-f-]{32,40}\.(pdf|txt|md)$` 추가 → 스키마 레벨에서 임의 문자열 삽입 차단 (sec LOW-1).
+2. `removeSourceAction` 에서 `storagePaths.filter(p => p.startsWith("${existing.id}/"))` 로 bot.id prefix 일치만 safeStoragePaths 에 통과 → chunks 삭제는 계속, 불일치 경로는 Storage 삭제 건너뜀(degrade) + `logger.error` (sec MEDIUM-1).
+
+**규칙** ⭐:
+
+- **RLS 는 "최종 방어선" 이지 "유일 방어선" 이 아니다** — 앱 레이어에서도 "내가 믿고 있는 값이 정말 내 owner 범위 안인가?" 를 명시 검증. 특히 Storage 경로·URL·ID 같은 식별자가 config jsonb/메타데이터에서 재사용되는 경우 필수. Defense-in-depth 는 "한 층이 깨져도 나머지 층으로 버틴다" 가 핵심.
+- **Storage 경로 스키마는 regex 로 강제** — Zod 같은 스키마에서 "임의 문자열" 을 허용하면 공격 시 경로 조작 벡터 확대. 스키마 자체가 `{uuid}/{uuid}.{ext}` 같은 포맷만 받으면 DB 쓰기 시점에서 1차 필터 + 읽기 시점 regex 재검증 불필요.
+- **degrade 전략 선호 — 전체 차단 vs 부분 실패** — 불일치 경로 발견 시 action 전체를 차단하면 chunks 삭제조차 안 됨(UX 퇴행). 안전한 부분만 실행 + 위험한 부분은 skip + logger.error 로 모니터링 → 사용자 경험 유지 + 공격 가시화. 단 `logger.error` 는 알람 대상으로 등록 (warn 이 아니라 error).
+- **"Server Action 에서 config jsonb 를 조작값으로 취급" 체크리스트 항목** — 향후 Plan template 의 security checklist 에 추가: "이 action 이 읽는 jsonb 필드가 다른 시스템(Storage/외부 API)의 리소스 식별자로 쓰이는가? YES → prefix/pattern 재검증 필요".
+
+---
+
+### 2026-04-20 E2E 테스트의 외부 API 쿼터 의존성 — Gemini 429 로 text 저장 flow 검증 불가 (운영 지식)
+
+**증상**: Task 1-7-d E2E 실행 시 4 케이스 중 2 케이스 실패 (`text 저장 후 리스트 표시 → 삭제`, `삭제 취소 dialog dismiss`). `page.waitForURL` 60초 timeout. Playwright error-context.md 의 page snapshot 확인 결과 페이지에 `alert: "지식 저장에 실패했어요. 잠시 후 다시 시도해 주세요. (다른 섹션은 저장되지 않았습니다)"` 표시. 이는 `actions.ts:updateBot` 의 `ingestTextKnowledge` try/catch 실패 경로 응답 — 즉 redirect 안 됨. 원인은 **Gemini API 429** (같은 세션 vitest 로그에도 이미 관찰). 로컬 dev server 가 실 Gemini API key 로 호출하는데 직전 세션 이어서 쿼터 소진.
+
+**원인**: Dari 의 지식 파이프라인(1-7-a/b/c/d)이 모두 Gemini 임베딩 의존. E2E 는 Playwright 웹서버로 실 dev 서버를 띄우고 실 API 호출 경로 그대로 → 로컬 Gemini 쿼터와 E2E flakiness 직접 연결. 동일 문제는 1-7-a(text) / 1-7-c(file) spec 에도 잠재. **단위 테스트는 mock 으로 보호되지만 E2E 는 실 네트워크** — 이 비대칭성을 명시 인지 못 한 상태.
+
+**해결**: 이번 Task 는 α 경로 — "smoke + 비로그인 E2E 통과 + 단위테스트 15건 커버 충분" 판정 + text 저장 flow 는 Jayden 수동 검증으로 위임. Gemini 의존 테스트는 추후 `admin()` DB 직접 주입 fixture (γ 경로) 로 재구성 예정.
+
+**규칙** ⭐:
+
+- **외부 API 쿼터 의존 E2E 는 반드시 대안 경로 설계** — 옵션 3가지:
+  1. **Mock 계층 주입** — 테스트 전용 env (`E2E_MOCK_EMBEDDING=1`)로 `embedBatch` 가 zero vector 반환하도록 분기. 가장 단순하나 프로덕션 코드에 조건문 추가 필요.
+  2. **DB 직접 주입 fixture** — `admin()` 헬퍼로 bot + knowledge_chunks 를 직접 INSERT. embedding 컬럼은 더미 zero vector. Gemini 호출 우회. 가장 정확.
+  3. **테스트 격리 — Gemini quota 의존 테스트를 별도 tag (`@slow` / `@external`) 로 분리 + CI 에선 skip + 주간 수동 실행**. 가장 간단.
+- **E2E 실패 시 반드시 `error-context.md` 먼저 확인** — Playwright 는 실패 시 page snapshot 을 저장해 "사용자가 본 화면" 을 정확히 재현. 단순히 "timeout" 메시지만 보면 원인 오진. 이번 케이스도 `alert: "지식 저장 실패"` 메시지로 즉시 Gemini 문제 확정.
+- **실 E2E 는 Gemini 호출 전제 테스트 당 최소 10~30s 소요** — timeout 기본 30s 로는 Gemini + Supabase + navigation 체인 완주 어려움. `test.setTimeout(90_000)` + `Promise.all([waitForURL, click])` 동시 대기 패턴으로 race 축소. 그러나 이는 쿼터 문제 은폐용일 뿐 — 근본 해결은 위 3 옵션.
+- **Task Plan 단계에서 "E2E 외부 API 의존성" 체크리스트 추가** — Plan template 에 "이 Task 가 E2E 로 검증 필요한 flow 에 외부 API 호출이 포함되는가? YES → mock/fixture/tag 중 선택을 Plan 에 명시". 사후 검증 실패로 "검증 불가 판정" 하는 대신 Plan 승인 시점에 결정.
+
+---
+
 ### 2026-04-20 보안 리뷰 "고바이트 비율" 권장안의 한글 UTF-8 false positive — 제어문자 비율로 대체 (설계 결정)
 
 **증상**: Task 1-7-c security-reviewer MEDIUM-2 가 TXT/MD 바이너리 판별 강화 권장 — NULL byte 외에 "고바이트(>0x7F) 비율 >90%" 추가 검사. 그러나 한글 UTF-8 은 글자당 3바이트 모두 고바이트(0xE0~0xEF / 0x80~0xBF) 이므로 **고바이트 비율 ~100%**. 순수 한글 TXT 파일 = 항상 바이너리 판정 = 업로드 전원 차단. 한국 시장 타겟 제품 치명적 버그.
