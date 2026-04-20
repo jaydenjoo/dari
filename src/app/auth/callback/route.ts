@@ -28,7 +28,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   if (error) {
     logger.error(
-      { err: error, path: "/auth/callback" },
+      {
+        errCode: error?.code,
+        errMsg: error?.message,
+        path: "/auth/callback",
+      },
       "OAuth code exchange 실패",
     );
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);

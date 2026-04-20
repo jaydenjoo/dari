@@ -162,7 +162,15 @@ export async function updateBot(
     .maybeSingle();
 
   if (selectErr) {
-    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    logger.error(
+      {
+        errCode: selectErr.code,
+        errMsg: selectErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 조회 실패",
+    );
     return {
       error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
     };
@@ -287,7 +295,15 @@ export async function updateBot(
     .select("id");
 
   if (updateErr) {
-    logger.error({ err: updateErr, slug, userId: user.id }, "봇 UPDATE 실패");
+    logger.error(
+      {
+        errCode: updateErr.code,
+        errMsg: updateErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 UPDATE 실패",
+    );
     return {
       error: "봇 수정에 실패했어요. 잠시 후 다시 시도해 주세요.",
     };
@@ -386,7 +402,15 @@ export async function addUrlSourceAction(
     .maybeSingle();
 
   if (selectErr) {
-    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    logger.error(
+      {
+        errCode: selectErr.code,
+        errMsg: selectErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 조회 실패",
+    );
     return {
       error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
     };
@@ -461,7 +485,13 @@ export async function addUrlSourceAction(
 
   if (updateErr) {
     logger.error(
-      { err: updateErr, slug, userId: user.id, url },
+      {
+        errCode: updateErr.code,
+        errMsg: updateErr.message,
+        slug,
+        userId: user.id,
+        url,
+      },
       "봇 UPDATE 실패 (URL 소스 추가 단계)",
     );
     return { error: "봇 수정에 실패했어요. 잠시 후 다시 시도해 주세요." };
@@ -590,7 +620,15 @@ export async function addFileSourceAction(
     .maybeSingle();
 
   if (selectErr) {
-    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    logger.error(
+      {
+        errCode: selectErr.code,
+        errMsg: selectErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 조회 실패",
+    );
     return {
       error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
     };
@@ -827,7 +865,15 @@ export async function removeSourceAction(
     .maybeSingle();
 
   if (selectErr) {
-    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    logger.error(
+      {
+        errCode: selectErr.code,
+        errMsg: selectErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 조회 실패",
+    );
     return {
       error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
     };

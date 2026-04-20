@@ -78,7 +78,12 @@ export default async function ConversationsPage({
 
   if (botErr) {
     logger.error(
-      { err: botErr, slug, userId: user.id },
+      {
+        errCode: botErr.code,
+        errMsg: botErr.message,
+        slug,
+        userId: user.id,
+      },
       "bot 조회 실패 — conversations 목록",
     );
     // 정적 메시지로 throw — Postgres 내부 메시지가 error boundary 경로로 노출되지 않도록.
@@ -96,7 +101,12 @@ export default async function ConversationsPage({
 
   if (countErr) {
     logger.error(
-      { err: countErr, botId: bot.id, userId: user.id },
+      {
+        errCode: countErr.code,
+        errMsg: countErr.message,
+        botId: bot.id,
+        userId: user.id,
+      },
       "conversations count 실패",
     );
     throw new Error("internal_error");
@@ -115,7 +125,13 @@ export default async function ConversationsPage({
 
   if (convErr) {
     logger.error(
-      { err: convErr, botId: bot.id, userId: user.id, page },
+      {
+        errCode: convErr.code,
+        errMsg: convErr.message,
+        botId: bot.id,
+        userId: user.id,
+        page,
+      },
       "conversations 조회 실패",
     );
     throw new Error("internal_error");
@@ -139,7 +155,12 @@ export default async function ConversationsPage({
 
     if (msgErr) {
       logger.error(
-        { err: msgErr, botId: bot.id, userId: user.id },
+        {
+          errCode: msgErr.code,
+          errMsg: msgErr.message,
+          botId: bot.id,
+          userId: user.id,
+        },
         "messages 조회 실패 — conversations 목록",
       );
       throw new Error("internal_error");

@@ -50,7 +50,15 @@ export default async function EditBotPage({
     .maybeSingle();
 
   if (error) {
-    logger.error({ err: error, slug, userId: user.id }, "봇 편집 조회 실패");
+    logger.error(
+      {
+        errCode: error.code,
+        errMsg: error.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 편집 조회 실패",
+    );
     // 일반화된 메시지만 throw — Supabase 내부 에러 원문이 error boundary 를 거쳐
     // Sentry 에 그대로 전송되면 DB 스키마/쿼리 힌트가 외부에 노출됨 (security M-3).
     // 원본 상세는 위 structured log 로만 남기고 사용자·Sentry 에는 일반 메시지 전달.
@@ -96,7 +104,12 @@ export default async function EditBotPage({
     //   - 표시 지표만 0 으로 fallback → UX 미세 이슈, 페이지 자체는 정상.
     //   - error 로 올리면 알람 잡음 증가 → 실제 서비스 영향 없는 실패는 warn 유지.
     logger.warn(
-      { err: chunksErr, slug, userId: user.id },
+      {
+        errCode: chunksErr.code,
+        errMsg: chunksErr.message,
+        slug,
+        userId: user.id,
+      },
       "knowledge_chunks 집계 실패 — SourcesList 는 청크 수 0 으로 표시",
     );
   } else {

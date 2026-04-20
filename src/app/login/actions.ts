@@ -56,7 +56,10 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
   });
 
   if (error || !data.url) {
-    logger.error({ err: error, origin }, "Google OAuth 초기화 실패");
+    logger.error(
+      { errCode: error?.code, errMsg: error?.message, origin },
+      "Google OAuth 초기화 실패",
+    );
     redirect("/login?error=oauth_init_failed");
   }
 
@@ -110,7 +113,12 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
   if (error) {
     // 원문 노출 금지. 로그만 남기고 사용자에게는 일반화 메시지.
     logger.warn(
-      { err: error, email: parsed.data.email, ip },
+      {
+        errCode: error.code,
+        errMsg: error.message,
+        email: parsed.data.email,
+        ip,
+      },
       "이메일/비밀번호 로그인 실패",
     );
     redirect(`/login?error=invalid_credentials${nextQuery}`);

@@ -138,7 +138,15 @@ export async function createBot(
       };
     }
 
-    logger.error({ err: insertError, slug, userId: user.id }, "봇 INSERT 실패");
+    logger.error(
+      {
+        errCode: insertError.code,
+        errMsg: insertError.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 INSERT 실패",
+    );
     return {
       error: "봇 생성에 실패했어요. 잠시 후 다시 시도해 주세요.",
     };

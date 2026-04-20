@@ -57,7 +57,12 @@ export async function ingestTextKnowledge(
     // 포함될 수 있음. 상세는 logger 에만 기록하고, throw 메시지는 호출자 경유로
     // 클라이언트에 노출될 위험을 최소화하기 위해 정적 식별자만 사용.
     logger.error(
-      { err: error, botId, chunkCount: payload.length },
+      {
+        errCode: error.code,
+        errMsg: error.message,
+        botId,
+        chunkCount: payload.length,
+      },
       "replace_text_knowledge_chunks RPC 실패",
     );
     throw new Error("knowledge RPC failed");
