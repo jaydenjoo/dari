@@ -1562,3 +1562,43 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **이 패턴은 "가드가 있는 모든 경로" 에 복제 필요** — 1-8-a 목록 상한 1000, 1-8-b 상세 상한 500, 1-8-d CSV 상한 5000 모두 동일 철학. Task 별로 잊지 않고 적용 (코드 리뷰 체크리스트).
 
 ---
+
+### 2026-04-20 리팩 Task 의 독립 리뷰는 기존 파일의 "누락된 최근 규약" 을 발견하는 기회 (운영 지식)
+
+**증상**: Task 1-8-e (공통화 리팩) 에서 기능 변경 0 을 의도. 독립 리뷰가 sec HIGH-1 로 `bots/page.tsx:42` / `bots/[slug]/page.tsx:103` 의 `throw new Error(error.message)` 패턴 지적. Epic 1-8 (Task 1-8-b/c/d) 에서 확립된 "Postgres 내부 메시지 차단 → `throw new Error("internal_error")` + 구조화 로깅" 규약이 이 두 기존 파일에는 미적용 상태. sec M-2 로 logger.error 의 `err: error` raw 객체 전달도 동일 맥락.
+
+**원인**: Epic 1-8 의 규약은 "신규 파일" 에 강제 적용됐으나, 이미 존재하던 page.tsx 2개는 범위 밖으로 남아있었음. 리팩 Task 는 "중복 제거" 에 집중해 기존 파일의 **미적용 규약** 을 구조적으로 발견하기 어려움. 반면 독립 리뷰(code + security) 는 "지금 이 파일에 있는 모든 위험" 을 flat 하게 본다.
+
+**해결**: 리뷰 Fix 와 같은 commit 에 H-1 + M-2 함께 반영. 리팩 범위 파일이었으므로 "범위 밖" 으로 미루는 것보다 비용 효율적. 미처 못 잡은 유사 지점(bots/[slug]/edit/page.tsx, bots/new/actions.ts 등)은 후속 sweep Task 로 PROGRESS Backlog 에 등록.
+
+**규칙** ⭐:
+
+- **리팩 Task 의 독립 리뷰 프롬프트에 "최근 확립 규약 준수 여부" 체크 명시** — "이번 Task 에서 수정된 파일이 Epic X 에서 확립한 보안/로깅 규약을 따르는지" 항목 추가. 신규 파일뿐 아니라 이번에 건드린 모든 파일 대상.
+- **리팩 범위 = "내가 직접 고친 파일" 의 전체 파일 상태** — "import 한 줄만 바꿨어도 그 파일 전체가 리뷰 대상". 리뷰어는 진단을 file 단위로 내므로 우리도 file 단위 책임.
+- **규약 미적용 발견 시 "범위 밖" 이월 금지** — 같은 라운드에 일괄 반영. 코드 변경 비용 ≪ 향후 sweep Task 분리 오버헤드 + 보안 창 window 시간.
+- **유사 지점 sweep 은 Backlog 등록** — 리뷰가 식별한 "이 패턴이 다른 곳에도 있을 것" 단서를 다음 Task 후보로 명시. 예: "bots/[slug]/edit/page.tsx:53 에서 동일 패턴" → 후속 Task 로.
+- **Epic 종결 "후속 리팩" Task 의 제안 범위에 리뷰 여유 확보** — 40~60분 예상 Task 라도 리뷰 반영까지 포함해 1h+ 계획. 리뷰가 추가 Fix 를 요청할 확률 높음.
+
+---
+
+### 2026-04-20 enum Record 완전 매핑 시 fallback 제거는 "types.ts ↔ DB 배포 race" 방어 감소 (설계 결정)
+
+**증상**: Task 1-8-e 에서 `BOT_STATUS_CLASS[bot.status]` 의 fallback `?? "bg-gray-100 text-gray-600 ring-gray-200"` 를 제거 + `CONVERSATION_STATUS_LABEL[conv.status] ?? String(conv.status)` 의 fallback 도 제거. 컴파일 타임 기준 `Record<BotStatus, string>` 은 3종 완전 매핑이라 fallback 이 dead code. 그러나 independent security review 에서 MEDIUM-1 지적: "DB 스키마에서 새 status 값이 마이그레이션 없이 추가되거나, types.ts 가 DB와 일시적으로 불일치하는 배포 직후 순간에 undefined 가 값에 들어가 CSV 에 `\"undefined\"` 문자열로 기록됨."
+
+**원인**: TypeScript 의 `Record<T, U>` 는 컴파일 타임에 T의 모든 키 매핑을 보장하나, 런타임 값이 T 밖의 문자열이어도 TS 는 알 수 없음. 실운영에서 이 상황은 2가지로 발생: (1) DB 마이그레이션 배포가 Next.js 빌드(= types.ts 재생성) 보다 앞서 프로덕션 반영되는 수 분의 race window, (2) 개발자가 types.ts 를 수동 편집 없이 새 enum 값 SQL 만 추가한 경우. 이 window 에서 `undefined` 가 UI/CSV/API 응답으로 흘러가면 사용자 신뢰 훼손 + 디버깅 추적 난이도 증가.
+
+**해결**: 대상별 정책 분리.
+
+1. **UI 즉시 반영 대상 (Tailwind 클래스)** — fallback 제거 유지. race window 에 잠시 스타일 빠져도 자연 복구. `BOT_STATUS_CLASS[bot.status]` 는 스타일만 담당이라 UI 영향이 짧고 재배포 시 자동 정상화.
+2. **오프라인 아카이브 대상 (CSV, 로그, 영구 저장 문서)** — fallback 보존. `CONVERSATION_STATUS_LABEL[conv.status] ?? String(conv.status)` 복원. 사용자가 다운로드받은 파일은 재배포해도 원복 불가 → 한 번 "undefined" 기록되면 영구 손상.
+3. 주석 명시 — `// fallback 은 TypeScript 유니온 기준으론 unreachable 이나, 마이그레이션으로 새 status 값이 먼저 DB 에 반영되고 types.ts 가 뒤따라 갱신되는 일시적 불일치 구간에서 "undefined" 문자열이 CSV 에 흘러가는 것을 차단한다.`
+
+**규칙** ⭐:
+
+- **fallback 제거의 적절성은 "영구성" 기준** — TS 타입 신뢰로 dead code 제거해도 되는 건 **UI 표면**(자동 복구 가능). 파일·로그·API 응답·DB insert 같이 **영구 기록**되는 값은 fallback 보존.
+- **DB enum 에 새 값 추가 시 types.ts 재생성을 항상 동반 커밋** — 마이그레이션 SQL 과 `supabase gen types` 실행을 한 묶음 Task 로. 배포 파이프라인에서도 types 재생성 실패 시 마이그레이션 차단하는 게이트 고려.
+- **race window 방어는 비용 낮음 → 기본값** — `?? String(value)` 1줄 추가 vs "undefined 누수 1건" 의 디버깅 시간. fallback 유지가 거의 항상 이득.
+- **fallback 복원은 주석으로 의도 남기기** — code-reviewer 가 "dead code" 로 제거 제안할 유혹 차단. "배포 race 방어" 한 줄로 충분.
+- **리뷰어가 "어차피 TS 에서 unreachable" 이라 주장해도 "실 운영에서 types.ts vs DB 배포 순서"** 로 반박 가능한 논리 확보 — 이 규칙은 향후 유사 리뷰에서도 재사용.
+
+---

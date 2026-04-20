@@ -5,10 +5,10 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-8 완전 종결 (4/4 Task)** — 1-8-a 목록 ✅ / 1-8-b 상세 ✅ / 1-8-c KPI ✅ / 1-8-d 삭제+CSV ✅
-- 상태: **Task 1-8-d 완결** — vitest **442 통과** (389 → 442 / +53 in-session: meta-util 25 + stats-util 15 + csv-util 13), typecheck/lint/prettier/build clean (14 routes, 신규 1 동적 route + 1 API route + 2 마이그레이션). 독립 리뷰 **세션 내 3회 병렬 (code+security × 3 Task)** → 최종 19건 Fix 반영. 3 Task 모두 Ship 판정 (CRITICAL/HIGH 0).
-  - Epic 1-8 → PRD Task 1-4 (대화 로그) + Task 1-5 (관리 대시보드) 대시보드 기능 MVP 수준 완결.
-  - 마이그레이션 +2: 0011 `bot_stats` RPC (security invoker + search_path='' + authenticated 만 EXECUTE) / 0012 `conversations_delete_owner` DELETE RLS.
+- Epic: **Epic 1-8 완전 종결 (4/4 Task) + 후속 리팩 1-8-e ✅** — 1-8-a 목록 ✅ / 1-8-b 상세 ✅ / 1-8-c KPI ✅ / 1-8-d 삭제+CSV ✅ / **1-8-e 공통화 리팩 ✅**
+- 상태: **Task 1-8-e 완결** — vitest **468 통과** (442 → 468 / +26: bots/status 7 + conv/status 6 + mask-email 5 + visitor 5 + relative 8 − 이동 중복 ~5), typecheck/lint/prettier/build clean (14 routes 유지, 기능 변경 0). 독립 리뷰 2 병렬 (code + security) → **Fix 7건 반영** (sec H×2 / sec M×2 / code M×2 / code L×1) + 미반영 4건 근거 기록. Epic 1-8 이월 5건 전부 해소 + silent divergence 재발 차단.
+  - 이월 해소: maskEmail 3곳 / visitorLabelOf 3곳 / ConvStatus LABEL·CLASS 3곳 / BotStatus LABEL·CLASS 2곳 / api→bots import 경계 2건 / formatRelative 2곳(신규 발견).
+  - shared/ 확장: `shared/bots/status.ts` / `shared/conversations/{mask-email,visitor,status,csv,meta}.ts` / `shared/time/relative.ts`.
 
 ## 완료된 Epic
 
@@ -80,6 +80,55 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-20 Ⅷ) — Task 1-8-e 공통화 리팩 (Epic 1-8 후처리) + 독립 리뷰 7건 반영
+
+Epic 1-8 종결 직후 "후속 이월" 판정된 5건을 한 Task 로 일괄 해소. **기능 변경 0** — 중복 제거 + import 경계 정리만. 독립 리뷰 2 병렬에서 기존 파일의 누락된 Epic 1-8 보안 규약 2건 추가 발견 → 같은 라운드에 반영. 리팩 Task 의 모범 사례 정립.
+
+### 흐름 (~1h)
+
+1. **Plan Stage** — 중복 지도 탐색 (Grep + Glob 병렬): maskEmail 3곳 / visitorLabelOf 2곳 / ConvStatus LABEL·CLASS 3곳 / BotStatus LABEL·CLASS 2곳 / api/export → bots/[slug]/… import 경계 2건. 경로 A(`shared/`) vs B(`core/`) 2옵션 비교 → `shared/config/env.ts` 기존 관례 기준 A 권장 → Jayden 승인.
+2. **Build Phase 1** — 신규 8파일 병렬 Write: `shared/bots/status.ts` / `shared/conversations/{status,mask-email,visitor}.ts` (+ 각 test).
+3. **Build Phase 2** — git mv 로 `csv-util.ts` / `meta-util.ts` (+ 각 test) 를 `shared/conversations/{csv,meta}.ts` 로 이동. 히스토리 보존.
+4. **Build Phase 3** — 5 consumer 수정 (local 정의 제거 + shared import): `bots/page.tsx`, `bots/[slug]/page.tsx`, `bots/[slug]/conversations/{page.tsx,[id]/page.tsx,[id]/actions.ts}`, `api/conversations/[id]/export/route.ts`. detail page 의 NOTE 주석(silent divergence 경고) 제거 — 단일 출처가 되어 이유 소멸.
+5. **검증 1차** — typecheck 1 error (`actions.ts` 에서 `./meta-util` 잔존 참조 — 탐색 누락). prettier 3 files 미포맷. vitest 1 fail (visitor.test.ts 의 `extra 필드` 케이스에서 1자 local 을 2자로 잘못 기대). 3건 즉시 Fix. 재검증 clean.
+6. **독립 리뷰 2 병렬** — code-reviewer (MEDIUM 3 + LOW 3) + security-reviewer (HIGH 1 + MEDIUM 2 + LOW 1). 둘 다 Fix-then-ship. CRITICAL/HIGH 블로커는 sec H-1 뿐.
+7. **Fix 7건 반영**:
+   - sec **H-1**: `bots/page.tsx`, `bots/[slug]/page.tsx` 의 `throw new Error(error.message)` 2곳 → 구조화 로깅 + `throw new Error("internal_error")` (Epic 1-8 규약 재적용 — 리팩 범위 파일이었으나 누락)
+   - sec **M-1**: `export/route.ts` statusLabel fallback 복원 (`CONVERSATION_STATUS_LABEL[conv.status] ?? String(conv.status)`) — types.ts ↔ DB 일시 불일치 배포 race 방어
+   - sec **M-2**: `bots/[slug]/page.tsx` logger.error `err: error` → `{errCode, errMsg}` (PII 섞일 수 있는 details/hint 차단)
+   - code **M-1**: `formatRelative` 2곳 중복 → `shared/time/relative.ts` 추출 (이 Task 의 명시 목표인 "silent divergence 제거" 재발)
+   - code **M-3**: `shared/{bots,conversations}/status.ts` JSDoc 사용처 하드코딩 목록 → 의미 단위 단순화 (소비자 추가/이동 시 stale 위험)
+   - code **L-3**: `shared/conversations/{csv,meta}.ts` 의 "Task 1-8-d:" / "Task 1-8-b:" Task 종속 주석 정리 (shared 승격 후 의미 희석)
+8. **의식적 미반영 4건** (근거): code M-2 (shared barrel index.ts — MVP 규모상 premature) / code L-1 (type re-export — M-2 와 함께) / code L-2 (빈 문자열 email 암묵 처리 — 테스트 커버 + JS falsy 관용) / sec L-1 (`"server-only"` — csv/meta 는 Client import 0건 실측 + pure function).
+9. **검증 2차** — vitest **442 → 468 (+26)**. typecheck 0 / lint 3 baseline warnings 유지 / prettier clean / build 14 routes 녹색.
+10. **커밋** — `refactor(shared): Task 1-8-e 공통화 리팩 (Epic 1-8 후처리) + 독립 리뷰 7건 반영`. 21 files changed, +351/-176. rename 4건 (git mv 히스토리 보존 확인).
+
+### 신규 / 이동 / 수정
+
+- _신규 10파일_: `shared/bots/status.ts`(+test), `shared/conversations/{status,mask-email,visitor}.ts`(+각 test), `shared/time/relative.ts`(+test).
+- _이동 4파일 (git mv)_: `csv-util.ts` → `shared/conversations/csv.ts`, `meta-util.ts` → `shared/conversations/meta.ts`, 각 test 동반.
+- _수정 6파일_: `bots/page.tsx`, `bots/[slug]/page.tsx`, `bots/[slug]/conversations/{page.tsx,[id]/page.tsx,[id]/actions.ts}`, `api/conversations/[id]/export/route.ts`.
+- _주석 정리 4파일_: `shared/{bots,conversations}/status.ts` + `shared/conversations/{csv,meta}.ts`.
+
+### 주요 결정 / 교훈 (learnings +2)
+
+1. **리팩 Task 는 기존 파일의 보안 규약 누락을 독립 리뷰가 발견하는 기회** — sec H-1, M-2 가 Epic 1-8 규약을 놓친 레거시였음. 리팩 범위 밖으로 미루지 말고 같은 라운드에 처리. 프롬프트에 "최근 확립 보안 규약 준수 여부" 체크 명시.
+2. **enum Record 완전 매핑 시 fallback 제거는 "types.ts ↔ DB 배포 race" 방어 감소** — 컴파일 타임 완전성 보장은 TypeScript 선에서. 런타임에 마이그레이션이 types 재생성보다 앞서 배포되면 `undefined` 누수. CSV 같이 오프라인 아카이브 대상은 fallback 보존이 안전.
+
+### Backlog (다음 세션 후보)
+
+1. **Phase 1 출시 준비** — README 폴리싱 / 배포 파이프라인 / Vercel 환경 분리 / 테스트 커버리지 리포트.
+2. **Phase 2 첫 Epic 계획 수립** — audit log / soft delete / 원가 환산 / 일별 차트 / typed confirmation / rate limit (delete/export) / RFC 5987 filename / admin_note 컬럼 / shared barrel index.ts / server-only 경계.
+3. **bots 관련 레거시 sweep** — `bots/[slug]/edit/page.tsx:53` / `bots/new/actions.ts:141` 등 Epic 1-8 규약(구조화 로깅) 미적용 지점 일괄 정리. 리뷰 sec M-2 에서 식별.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 Ⅷ (KST)
+- 브랜치: `main`
+- 차단 요소: 없음
+
+---
 
 ## 이번 세션(2026-04-20 Ⅶ) — Epic 1-8 완전 종결: Task 1-8-b + 1-8-c + 1-8-d 한 세션 + 독립 리뷰 3회 병렬
 
