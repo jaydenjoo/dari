@@ -5,8 +5,8 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / **Task 1-7-b URL Plan 작성 완료, 승인 대기 (Build 미시작)**
-- 상태: **Task 1-7-b Plan 단계 — Firecrawl 사전 체크 완료** (계정·유료 ✅, dari 라벨 신규 키 발급 + `.env.local` 입력 Jayden 진행 중). Plan 상세(결정 포인트 10개 / 신규 8 + 수정 5 파일 / 마이그레이션 0009 신규 RPC 일반화)는 본 PROGRESS 에 보존 → 다음 세션에서 키 입력 확인 → Plan 승인 → Build 진입 / 직전 세션(2026-04-20 Ⅰ Sentry Vercel Integration 단일 조직 재설정) ✅ + Task 1-6-c RAG ✅ + Task 1-7-a text ✅ 모두 유지 / **🟡 0007 + 0008 (+ 0009 추가 예정) 마이그레이션 Supabase 실 apply Jayden 수동 대기**
+- Epic: **Epic 1-7 지식 업로드** — Task 1-7-a text ✅ / **Task 1-7-b URL ✅ (Build · 리뷰 2라운드 · Ship-as-is 완료)** / Task 1-7-c file 대기
+- 상태: **Task 1-7-b 완결** — vitest **295 통과** (261 → 295 / +34), typecheck/lint/prettier/build clean. Firecrawl Cloud scrape → sanitize → chunk → Gemini embed → 신규 일반화 RPC `replace_knowledge_chunks_for_source`(0009). Rate limit(user.id 20req/10m) + URL 쿼리스트링 redact + throw 정적화 3단("URL 처리 실패" / "knowledge embedding failed" / "knowledge RPC failed"). **🟡 0007 + 0008 + 0009 마이그레이션 Supabase 실 apply Jayden 수동 대기 (다음 Task 1-7-c 진입 전 일괄 처리 권장).**
 
 ## 완료된 Epic
 
@@ -79,7 +79,78 @@
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
 
-## 이번 세션(2026-04-20 Ⅱ) — Task 1-7-b URL 크롤링 Plan 작성 (Build 미시작, 승인 대기)
+## 이번 세션(2026-04-20 Ⅲ) — Task 1-7-b URL 크롤링 Build 완결 + 독립 리뷰 2라운드 · Ship-as-is
+
+직전 세션(Ⅱ) 에서 보존한 Plan 그대로 Build 진입. 코드 + 리뷰 반영 + 2차 재리뷰까지 한 세션에 마무리. "수정 직전 추가 라운드" 교훈(1-6-b) 형식 절차화 — 반영 6건 후 security 단독 재리뷰로 회귀·bypass 0 확인.
+
+### 흐름 (~2h)
+
+1. **Jayden 키 확인** — `.env.local` + Vercel env + 재배포 완료 응답. 사전 체크 3항목 완전 충족.
+2. **Plan 최종 승인** — 결정 10 / 신규 8 + 수정 5 파일 / 0009 일반화 RPC 그대로.
+3. **Build** — `pnpm add @mendable/firecrawl-js@4.18.3` → 9 파일 신규 + 9 파일 수정 (Plan +4: ratelimit limiter + test / docs/environments.md / vitest.config env / types.ts RPC — 구조 필요에 따른 확장).
+4. **검증 1차** — typecheck(+0009 RPC 타입 수동 추가) / lint / prettier(format 실행) / vitest 289 / build clean.
+5. **독립 리뷰 1차 병렬** — code-reviewer (Ship-as-is / HIGH 1 + MEDIUM 2 + LOW 3 + INFO 2) + security-reviewer (Ship-as-is 조건부 / MEDIUM 1 + LOW 2 + INFO 4).
+6. **반영 6건**
+   - sec MEDIUM: Rate limit (`bot-url-ingest-limiter` 신규 20req/10m, user.id 키) — Firecrawl 공용 API 키 남용 방어 (Phase 2 → MVP 승격)
+   - sec LOW-1: `sanitizeUrlForLog` helper (`origin+pathname`) + 6 로깅 지점 적용 — Pino 필드명 redact 한계 보완
+   - sec LOW-2: `embedding count mismatch` throw 정적화 (`"knowledge embedding failed"` + 내부 수치는 logger 메타)
+   - code H-1: `ingest-url.ts` catch dead-code 주석 정정 (fetchUrlAsMarkdown 은 try 밖이라 catch 미도달)
+   - code M-1: URL form `key={state.success?.url}` — 성공 후 input 초기화 (useActionState state 는 유지)
+   - code M-2: `actions.ts` filter 로직에 "MVP 전제 — 단일-URL-per-소스" 주석 (Phase 2 다중 URL UI 도입 시 회귀 경고)
+7. **검증 2차** — 회귀 fix(`RatelimitCheck.ok`, mock `sanitizeUrlForLog`) → vitest **295** / 전 파이프라인 clean.
+8. **독립 리뷰 2차 (security 단독)** — bypass/회귀 0. 동일 URL 연쇄 추가 시 form 미remount 는 UX 버그(보안 무관)로 수용. **Ship-as-is 확정**.
+
+### 신규 파일 10 + 수정 9
+
+*신규*
+
+- `src/lib/clients/firecrawl.ts` — Firecrawl v2 싱글턴 래퍼
+- `src/core/knowledge/url-fetch.ts` — scrape + markdown + 크기 가드 + `knowledgeUrlSchema` + `sanitizeUrlForLog`
+- `src/core/knowledge/url-fetch.test.ts` — 12 케이스 (schema 6 / fetch 8 + sanitizeUrlForLog 3 — 아래 3 별도 describe)
+- `src/core/knowledge/ingest-url.ts` — fetch→sanitize→chunk→embed→RPC 오케스트레이션
+- `src/core/knowledge/ingest-url.test.ts` — 10 케이스
+- `src/core/ratelimit/bot-url-ingest-limiter.ts` — user.id 기준 20req/10m sliding window
+- `src/core/ratelimit/bot-url-ingest-limiter.test.ts` — 3 케이스 (skip · 허용 · 차단)
+- `supabase/migrations/0009_replace_knowledge_chunks_for_source.sql` — plpgsql `security invoker` + `search_path=''` + 3-key DELETE(bot_id+source_type+source_identifier)
+
+*수정*
+
+- `src/app/bots/[slug]/edit/actions.ts` — `addUrlSourceAction` 추가 (rate limit / Zod URL / owner RLS 3중 / 정적 에러 매핑)
+- `src/app/bots/[slug]/edit/knowledge-section.tsx` — `KnowledgeUrlSection` 내부 컴포넌트 + form `key` + 성공/에러 뱃지
+- `src/app/bots/[slug]/edit/edit-bot-form.tsx` — 메인 form 밖으로 URL SectionCard 분리 (HTML `<form>` 중첩 금지 해결)
+- `src/shared/config/env.ts` — `FIRECRAWL_API_KEY` optional → required(`fc-` prefix)
+- `src/core/db/types.ts` — 0009 RPC 타입 수동 추가
+- `src/core/knowledge/index.ts` — re-export
+- `vitest.config.mts` — `test.env.FIRECRAWL_API_KEY` 전역 주입 (기존 8 파일 깨짐 방지)
+- `src/shared/config/env.test.ts` — baseServer 에 FIRECRAWL 추가
+- `docs/env-template.md` + `docs/environments.md` — Firecrawl 선택 → 필수 승격 정합성
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **261 → 295 (+34)** / build ✅ (11 routes, widget 16.4KB)
+- 독립 리뷰 2 라운드 (1차 병렬 + 2차 security 단독) 모두 **Ship-as-is**
+
+### 주요 결정 / 교훈 (learnings +3)
+
+1. **HTML `<form>` 중첩 금지 해결 — main form 밖 SectionCard 배치 + React `key` remount** — 이유 2개 명시 (form 중첩 + 비동기 UX 분리)
+2. **로깅 URL redact — Pino 필드명 기반 redact 의 구조적 한계 + `origin+pathname` 헬퍼 패턴** — 인라인 토큰 노출 차단
+3. **외부 서비스 공용 API 키 사용 시 rate limit 을 MVP 로 승격** — owner-authed 만으로는 전체 사용자 피해 차단 불가
+
+### Backlog (다음 세션)
+
+1. **🟡 마이그레이션 0007 + 0008 + 0009 일괄 apply** (Jayden 수동, Task 1-7-c 진입 전 선행)
+2. **Task 1-7-c (file 업로드, PDF 파서)** Plan 작성 — 0009 RPC 재사용. 사전 체크: PDF 파서 선정 (`pdf-parse` vs `@react-pdf/pdfjs-dist` vs Firecrawl `parsers: ['pdf']` 직접 재활용 — 후자가 SDK 일관성 + 비용 측면 1위 후보).
+3. **Task 1-7-d (다중 URL/text 목록 UI + 삭제 UI)** — KnowledgeUrlSection controlled input 전환 + url 소스 삭제 버튼 + 재크롤링 버튼.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 Ⅲ (KST)
+- 브랜치: `main`
+- 차단 요소: 없음 (마이그레이션 apply 는 선결 권장이지 차단 아님)
+
+---
+
+## 직전 세션(2026-04-20 Ⅱ) — Task 1-7-b URL 크롤링 Plan 작성 (Build 미시작, 승인 대기)
 
 3 후보(1-7-b URL / 1-7-c file / 1-7-d 다중 text)를 순서대로 진행하기로 합의. Task 1-7-b 진입 — Firecrawl 외부 SDK 도입 사전 체크리스트 + 3 경로 비교 + 상세 Plan 까지 완료. 키 발급 보안성 고려해 `.env.local` 입력은 Jayden 직접. **코드 변경 0건**, PROGRESS 만 갱신 후 세션 정리.
 
@@ -101,18 +172,18 @@
 
 #### 결정 포인트 10개
 
-| # | 결정 | 권장 | 이유 |
-|---|---|---|---|
-| 1 | Firecrawl 모드 | scrape 단일 페이지 | crawl(전체)은 페이지 수 폭발·비용 예측 불가 |
-| 2 | 출력 포맷 | markdown | Firecrawl 기본 / LLM-friendly / 기존 sanitize 호환 |
-| 3 | 호출 시점 | 동기 (Server Action) | 5~30초 + UI loading. 백그라운드는 Phase 2 |
-| 4 | 에러 메시지 | 정적화 (`"URL 처리 실패"`) | 1-7-a 교훈 — Firecrawl/Postgres 내부 메시지 차단 |
-| 5 | 동일 URL 재요청 | idempotent replace | 그 URL의 기존 청크 삭제 후 재삽입. 다른 URL 무영향 |
-| 6 | URL 검증 | `z.string().url()` + http/https + ≤2048자 | localhost/사설IP 별도 차단 불필요 (Firecrawl 외부 → 도달 불가) |
-| 7 | 응답 상한 | markdown 200KB 초과 시 절단 + warn | 비용/저장 폭발 방어 |
-| 8 | Rate limiting | MVP 보류 → Phase 2 | owner-authed 만 호출 → 남용 가능성 낮음 |
-| 9 | UI | knowledge-section.tsx 확장: text 영역 유지 + URL 카드 1개 추가 | 다중 list view 는 1-7-d |
-| 10 | RPC | 0009 신규 일반화 RPC `replace_knowledge_chunks_for_source(bot_id, source_type, source_identifier, jsonb)` | 1-7-c/d 도 재사용. 0008(text) 그대로 유지 |
+| #   | 결정            | 권장                                                                                                      | 이유                                                           |
+| --- | --------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 1   | Firecrawl 모드  | scrape 단일 페이지                                                                                        | crawl(전체)은 페이지 수 폭발·비용 예측 불가                    |
+| 2   | 출력 포맷       | markdown                                                                                                  | Firecrawl 기본 / LLM-friendly / 기존 sanitize 호환             |
+| 3   | 호출 시점       | 동기 (Server Action)                                                                                      | 5~30초 + UI loading. 백그라운드는 Phase 2                      |
+| 4   | 에러 메시지     | 정적화 (`"URL 처리 실패"`)                                                                                | 1-7-a 교훈 — Firecrawl/Postgres 내부 메시지 차단               |
+| 5   | 동일 URL 재요청 | idempotent replace                                                                                        | 그 URL의 기존 청크 삭제 후 재삽입. 다른 URL 무영향             |
+| 6   | URL 검증        | `z.string().url()` + http/https + ≤2048자                                                                 | localhost/사설IP 별도 차단 불필요 (Firecrawl 외부 → 도달 불가) |
+| 7   | 응답 상한       | markdown 200KB 초과 시 절단 + warn                                                                        | 비용/저장 폭발 방어                                            |
+| 8   | Rate limiting   | MVP 보류 → Phase 2                                                                                        | owner-authed 만 호출 → 남용 가능성 낮음                        |
+| 9   | UI              | knowledge-section.tsx 확장: text 영역 유지 + URL 카드 1개 추가                                            | 다중 list view 는 1-7-d                                        |
+| 10  | RPC             | 0009 신규 일반화 RPC `replace_knowledge_chunks_for_source(bot_id, source_type, source_identifier, jsonb)` | 1-7-c/d 도 재사용. 0008(text) 그대로 유지                      |
 
 #### 신규 파일 8
 

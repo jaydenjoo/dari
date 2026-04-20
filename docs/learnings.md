@@ -32,6 +32,80 @@
 
 ## 기록
 
+### 2026-04-20 HTML `<form>` 중첩 금지 해결 — main form 밖 SectionCard + React `key` remount (설계 결정)
+
+**증상**: Task 1-7-b 에서 봇 편집 폼(메인 form = `updateBot` Server Action) 안에 "URL 크롤링 · 추가" 섹션을 두려 했다. URL 추가는 Firecrawl 5~30초 호출이라 즉시 적용 별도 Server Action(`addUrlSourceAction`). 메인 form 내부에 `<form action={addUrlSourceAction}>` 를 중첩하면 HTML 스펙 위반 + 브라우저가 자식 form submit 시 부모 form 도 trigger 가능 + 스펙상 innerform 은 parsing 중 closing 될 수 있어 예측 불가.
+
+**원인**: HTML5 명세가 `<form>` 중첩 명시적 금지. 대안 3가지 존재 — ① React Portal (body 직속 render, CSS 배치 복잡) ② HTML5 `form=` attribute (모든 input 에 `form="edit-bot-form"` 명시 필요, 영향 범위 6 섹션) ③ DOM 구조 자체를 분리 (메인 form 밖에 별도 SectionCard 배치). 1-5-d 편집 폼이 이미 `<form>` 으로 전체 감싸진 구조라 ①·② 는 영향 범위 대비 이익 부족.
+
+또한 URL 추가 성공 후 uncontrolled input(`defaultValue=""`) 이 브라우저 이전 값 유지 → 연쇄 입력 시 오탈자 반복. `useActionState` 는 컴포넌트 식별 기반 상태 유지이므로 form 만 remount 해도 hook state 는 유지됨 — `key={state.success?.url ?? "form-id"}` 로 성공 시에만 form remount 되어 input 초기화 + 성공 메시지 유지 양립.
+
+**해결**:
+
+1. `EditBotForm` 리팩터 — 최상위 `<form>` 을 `<div>` 로 변경 → 내부에 메인 `<form action={updateBot}>` 배치 → 닫은 직후 SectionCard(knowledge-url) 를 form 밖 sibling 으로 추가.
+2. SectionNav 앵커에 `knowledge-url` id 포함 (UX 연속성).
+3. `KnowledgeUrlSection` 에 자체 `<form action={addUrlSourceAction.bind(null, slug)}>` + `key={state.success?.url}` 적용.
+4. 주석으로 "이유 2 가지" 명시 (HTML form 중첩 금지 + 비동기 UX 분리).
+
+**규칙** ⭐:
+
+- **`<form>` 중첩이 필요해 보이면 먼저 "정말 중첩이 필요한가" 되묻기**. 보통은 "메인 제출과 별도 적용 시점" 때문인데, 이건 UX 요구이지 DOM 요구가 아님. DOM 구조를 분리하고 UI 만 시각적 연속성 유지 (SectionCard 두 개를 나란히 배치) 가 최소 변경 해법.
+- **HTML5 `form="id"` attribute 는 Last Resort**. 영향 범위(모든 input 수정) 대비 이익 박하면 DOM 분리가 낫다. 단일 섹션에서만 쓰이는 경우에도 유지보수 주의.
+- **`useActionState` + uncontrolled input 의 remount 패턴**: `<form key={state.success?.uniqueId}>` 로 form 만 remount → hook state 는 유지되며 input 만 초기화. controlled input 을 피하면서 성공 후 input clear UX 구현하는 React 19 best practice.
+- **동일 key 로 재제출하는 엣지 케이스**: 같은 URL 을 다시 제출하면 `state.success.url` 값이 동일 → key 동일 → remount 안 됨 → input 미초기화. MVP 수용. Phase 2 controlled input 전환 시 자연 해소.
+
+---
+
+### 2026-04-20 로깅 URL redact — Pino 필드명 기반 redact 의 구조적 한계 + `origin+pathname` 헬퍼 (설계 결정)
+
+**증상**: Task 1-7-b security 리뷰 LOW. `logger.error({ err, url }, ...)` 에서 url 은 사용자 입력 원본. URL 쿼리스트링에 `?access_token=abc` / `?token=xyz` / `?api_key=...` 가 담긴 페이지(OAuth redirect 후 URL, 내부 관리자 도구 등) 를 크롤링하면 Pino 가 Sentry/로그에 전체 URL 을 기록 → 토큰이 로그 aggregator 에 잔존.
+
+**원인**: Pino `redact` 옵션은 **필드명 기반** (SENSITIVE_FIELD_NAMES 에 `password` / `authorization` / `cookie` 등). `url` 필드는 URL **문자열 자체**가 값이고, 그 문자열 내부에 인라인 시크릿이 포함된 경우 redact 는 감지 불가 — 필드명 매칭이 아닌 값 내부 pattern 스캐닝이 필요하나 Pino 는 기본 미지원. Pino `redact.censor` 함수로 정규식 기반 값 scrubber 가능하지만, URL 마다 토큰 쿼리 이름이 제각각(`access_token`/`api_key`/`session`/`sid`) 이라 정규식 유지보수 비용 높음.
+
+**해결**:
+
+1. `sanitizeUrlForLog(raw: string): string` 헬퍼 신규 — `new URL(raw).origin + pathname` 반환. 쿼리스트링·해시·userInfo(`user:pass@`) 전부 제거. 파싱 실패 시 `"(invalid-url)"` 반환으로 내부 문자열 비노출.
+2. `url-fetch.ts` 의 3 로깅 지점 + `ingest-url.ts` 의 3 로깅 지점 모두 `sanitizeUrlForLog(url)` 경유로 교체.
+3. 회귀 방지 테스트 3 케이스: 정상 축소 / 쿼리&해시 제거 / invalid URL fallback.
+
+**규칙** ⭐:
+
+- **로깅 시 URL 은 항상 `origin + pathname` 으로 축소** — 쿼리스트링에 토큰이 포함되는 경우가 드물지 않다(OAuth redirect / Google Drive share / 관리자 도구). Pino `redact` 로는 불가능한 영역.
+- **`new URL().origin` 은 RFC 6454 기준 scheme+host+port 만 포함, userInfo(`user:pass@`) 제외** — credential 유출 자동 방어 보너스. 명시적 검증 테스트 필수.
+- **파싱 실패 fallback 은 `"(invalid-url)"` 같은 **리터럴 상수**** — 원본 문자열을 `logger.warn("parse failed: ${raw}")` 같이 부분 노출하면 sanitize 무효화. fallback 도 정적.
+- **"값 내부 시크릿" 은 보통 필드 타입별 전용 헬퍼** — URL 은 `sanitizeUrlForLog`, 전화번호는 `maskPhone`, 이메일은 `maskEmail` 등. Pino 전역 redact 를 정규식으로 오버엔지니어링하지 말고 로깅 시점에 명시 sanitize.
+- **Grep 으로 기존 `logger.*({ ..., url, ..., }, ...)` 패턴 전부 조사** — 한 곳만 교체하면 구멍 남음. 이번엔 6 지점 모두 교체 + 회귀 방지는 단위 테스트 (그러나 기존 로깅 지점이 sanitize 경유하는지 검증하는 테스트는 별도 작업, 비용 대비 이익 낮음 — 리뷰 단계 체크리스트로 대체).
+
+---
+
+### 2026-04-20 외부 서비스 공용 API 키 — rate limit 은 MVP 필수 (owner-authed 만으로 부족) (설계 결정)
+
+**증상**: Task 1-7-b Plan 에서 rate limiting 을 Phase 2 로 보류 (결정 #8: "owner-authed 만 호출 → 남용 가능성 낮음"). 1차 security 리뷰가 이 결정을 MEDIUM 으로 재검토 — `FIRECRAWL_API_KEY` 는 **앱 공용 API 키** 라 한 bot owner 의 남용이 다른 bot owner 의 크롤링 실패(402/429) 로 이어진다. 크레딧 플랜이 한도를 공유하는 SaaS 특성이 문제.
+
+**원인**: "owner-authed → 공격 범위 제한" 은 자주 쓰는 논거지만 **공용 자원** 관점을 놓치면 부분 진실. 공용 자원 타입:
+
+- **공용 API 키** (Firecrawl / OpenAI / Anthropic / Upstash 등 SaaS) — 한 owner 의 요청 폭주가 모든 owner 의 요청 실패로 직결.
+- **공용 DB 커넥션 풀** — Supabase connection 상한 초과 시 다른 Server Action 동시 실패.
+- **공용 외부 이메일/SMS 쿼터** (Resend / Twilio) — 한 owner 의 bulk send 가 평판 점수·도메인 블록으로 전체 영향.
+
+MVP 에서 rate limit 을 보류해도 되는 경우: 사용자당 독립된 자원 (예: 자기 DB row CRUD 만), 원가가 한도가 아니라 O(n) linear 한 경우 (컴퓨트만 사용). 이번 1-7-b 는 둘 다 아님.
+
+**해결**:
+
+1. `src/core/ratelimit/bot-url-ingest-limiter.ts` 신규 — `user.id` 기준 20req/10m sliding window. 기존 `createMemoizedLimiter` / `checkRatelimit` 인프라 재사용.
+2. `addUrlSourceAction` 에 세션 검증 직후 → DB 조회/Firecrawl 호출 전 위치에 배치 (인증 없이 rate limit 소비 경로 차단).
+3. Upstash 장애 시 fail-open (factory 기본 동작) — rate limit infra 장애가 서비스 중단으로 직결되지 않도록.
+4. 한도 설계: 정상 UX 로 URL 을 수동 입력하는 간격(수 초~분) 고려하여 20req/10m. 연쇄 입력·오탈자 수정·브라우저 재시도 수용.
+
+**규칙** ⭐:
+
+- **외부 SaaS API 키가 공용(앱 단일 키) 인 경로는 rate limit MVP 필수**. "owner-authed" 논거가 성립하려면 **자원도 owner-분리** 여야 한다. Firecrawl, OpenAI, Anthropic 등은 owner 별로 key 분리 안 하는 구조(멀티테넌트) 라 공용 한도 소진 경로 존재.
+- **rate limit 호출 위치는 세션 검증 **직후**, DB/외부 호출 **전**** — 비인증 요청은 redirect 분기에서 먼저 차단되어야 rate limit slot 을 소비하지 않는다.
+- **Upstash fail-open 전략 유지** — rate limit infra 장애 시 서비스 전체 차단보다 통과시키는 쪽이 DoS 회피. factory 가 이미 구현.
+- **Plan 결정 #X 이 "Phase 2 보류" 로 적혀있어도 security 리뷰 MEDIUM 은 재검토 대상** — 경로별 risk matrix 를 Plan 에 포함하면 1차 security 리뷰가 MEDIUM 이 아니라 Plan 수락 단계에서 바로 MVP 범위로 올 것. 이번 교훈은 Plan template 에 "외부 SaaS 공용 자원 사용 여부 → 있으면 rate limit MVP" 체크박스 추가 근거.
+
+---
+
 ### 2026-04-20 Next.js App Router `_` prefix = private folder (라우팅 완전 제외) (기술 이슈)
 
 **증상**: Phase 4 Sentry 검증용 임시 라우트를 `src/app/api/__sentry-test/route.ts` 에 생성. `/api/__sentry-test` 호출 시 `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"Cannot GET /api/__sentry-test"}}` envelope 응답. 초기에는 포트 4000 을 Docker `pg-system-api` 가 점유하던 문제로 착각(그것도 실제 별개 문제)했으나, 포트 해제 후에도 `_` prefix 라우트는 인식 안 됨. 디렉토리명을 `sentry-test` 로 변경하고 나서야 정상 라우트 등록.
