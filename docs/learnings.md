@@ -1497,3 +1497,68 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - ADR 권장 (Phase 2): "PII 로깅 정책" — 어떤 PII 를 어떤 변환으로 다룰지 단일 진실.
 
 ---
+
+### 2026-04-20 CSV Injection OWASP 3단 방어 — prefix + wrap + escape 조합 (설계 결정)
+
+**증상**: Task 1-8-d 대화 CSV export. 방문자가 챗봇에 입력한 content 가 그대로 CSV 로 내려가는데, `=HYPERLINK("http://evil.com","click")` 같은 수식이 Excel/Sheets 에서 자동 실행되면 피싱/외부 요청 유발. React escape 는 HTML DOM 용, CSV 환경에선 무력.
+
+**원인**: CSV 는 "포맷" 이지 언어 아님. Excel/Sheets 가 `=`/`+`/`-`/`@` 시작 셀을 수식으로 해석하는 동작은 CSV 파서 레벨이 아닌 spreadsheet 앱의 관행. 따라서 방어는 CSV 작성 시점에서 문자열 조작으로만 가능. 또한 `,` `"` 개행 등 레코드 분리자도 wrap 안 하면 행 구조 자체 파괴.
+
+**해결**: 3단 방어 조합.
+
+1. **prefix** — 첫 글자가 `=,+,-,@,\t,\r,\n` 중 하나면 `'` 를 앞에 붙여 수식 해석 무력화. `\t` 는 Tab Separated 환경 오인 방어. `\r`/`\n` 은 Excel 에서 셀 경계 오인 유발.
+2. **wrap** — 셀에 `,`/`"`/`\n`/`\r` 포함되면 `"..."` 로 감싸기. 이렇게 해야 파서가 1 셀로 인식.
+3. **escape** — wrap 내부의 `"` 는 `""` 로 이중화 (RFC 4180).
+
+**규칙** ⭐:
+
+- **CSV 는 정규식 escape 로 안전 안 됨** — `content` 가 빈번 변형되는 데이터면 반드시 `escapeCsvCell` 유틸 통과. 인라인 조합 금지.
+- **prefix + wrap 은 별개 방어** — prefix 만으로 `,` 행 분리 방어 불가, wrap 만으로 `=` 수식 실행 방어 불가. **둘 다** 필요.
+- **\r`/`\n`/`\t` 같은 제어문자도 PREFIX 대상** — 경계 문자뿐 아니라 Excel UX 에서 보이지 않는 셀 경계 오인을 유발. OWASP 권장.
+- **UTF-8 BOM (`\uFEFF`) prepend** — Excel 한국어 Windows 에서 기본 인코딩이 CP949 로 잡혀 한글 깨짐. BOM 한 글자로 자동 UTF-8 인식 강제.
+- **테스트 케이스는 injection payload 중심** — 정상 문자열은 파서 통과만 확인. `=HYPERLINK`, `+CMD`, `-2+3`, `@example`, `\t`, `\r`, `\n` 각각 별도 케이스. wrap 여부도 명시 (prefix-only vs prefix+wrap).
+- **방문자 입력(content) 뿐 아니라 메타(botName, visitorLabel) 도 escape 대상** — 모든 셀이 어트래커의 조작 가능 입력이라 가정.
+
+---
+
+### 2026-04-20 Supabase PostgrestError 는 raw 로 로깅 금지 — `{errCode, errMsg}` 구조 추출만 (설계 결정)
+
+**증상**: Task 1-8-b security review HIGH-1. `logger.error({ err: botErr, ... })` 패턴이 1-8-a 에서 설치됐으나, security 리뷰어가 "Supabase error 의 `details`/`hint` 에 row 파편/PII 섞일 수 있어 `redactDeep` 만으로 불충분" 지적.
+
+**원인**: `@supabase/postgrest-js` 의 `PostgrestError` 는 `{ code, message, details, hint }` 4 필드. `code`/`message` 는 주로 분류용 정적 문자열, `details`/`hint` 는 Postgres 가 뱉는 **동적 진단 문자열** — 실패한 쿼리 변수값, RLS 조건, 위반된 row 일부 포함 가능. 예: `duplicate key value violates unique constraint "..."`. `details="Key (email)=(hidream72@gmail.com) already exists."` 식. 이 문자열 안의 PII/쿼리 파편은 Pino redact 의 "필드명 화이트리스트" 로 잡히지 않음 — 필드명이 `message` 나 `details` 이지 PII 필드명이 아니기 때문.
+
+**해결**: Task 1-8-b/c/d 전반에서 로깅 패턴을 `{errCode: e.code, errMsg: e.message, ...}` 로 통일. `details`/`hint` 는 의도적으로 버림. 필요시 별도 디버그 경로(에러 ID 연동)로만 확인.
+
+**규칙** ⭐:
+
+- **외부 SDK error 객체는 raw 로 `err` 필드에 넣지 않기** — Supabase/Stripe/Resend 등 모두 "부가 진단 필드" 가 있고 그 안에 민감 파편 가능. 명시 필드만 extraction.
+- **로깅 시 추출 패턴 고정** — `{errCode, errMsg}` 만 허용. `{err: fullObject}` 는 "디버그 전용, 개발 환경에서만" 으로 분리. 프로덕션 로그 수집 경로와 분리.
+- **`redactDeep` 필드명 기반 방어의 한계 인식** — 필드명이 `details`/`hint` 같이 일반어면 민감 여부 자동 판별 불가. 방어선은 "필드 포함 여부" 가 아니라 "필드 포함 자체를 막기".
+- **정책을 한 번 정하면 신규 Task 에 **복제 적용**** — 1-8-b/c/d 에서 동일 패턴 확정 후 `page.tsx` 기존 `throw new Error(error.message)` 같은 레거시 패턴은 별도 sweep Task 로 인식 (리뷰어도 권장).
+- **주석에 "왜 raw 금지" 명시** — 코드 리뷰어/향후 본인이 `err` 그대로 넣을 유혹을 차단. "details 에 PII 섞임 가능" 한 줄로 충분.
+
+---
+
+### 2026-04-20 상한 도달 truncation 은 파일 + 헤더 양쪽에 투명 표시 — silent failure 방지 (설계 결정)
+
+**증상**: Task 1-8-d code review M-3. CSV export 에 `.limit(5000)` DoS 가드 + `logger.warn` 만 있고, 사용자가 내려받은 CSV 파일 자체에는 truncation 여부가 표시 안 됨. "일부 누락된 사실을 관리자가 모름" 시나리오. 유사 패턴이 Task 1-8-a 목록의 `MESSAGES_FETCH_LIMIT` / 1-8-b 상세의 500 상한 / 1-8-c RPC 실패 0 폴백까지 네 군데 반복.
+
+**원인**: "서버 측 가드 + 서버 측 로그" 만 있으면 서버 운영자는 신호 받지만, **엔드 유저(관리자)는 무지**. 특히 CSV 같은 "오프라인 자료" 는 한번 내려받은 뒤 재요청 없이 계속 쓰이는 특성 → silent truncation 의 피해가 시간에 비례 확대. 단순 `logger.warn` 만으로는 불충분.
+
+**해결**: 투명성 2중 채널.
+
+1. **파일 자체** — CSV 메타 섹션에 "알림" 행 추가 (`알림,메시지 5,000개 상한 도달 — 일부 누락`). 사람이 파일 열면 즉시 보임.
+2. **HTTP 헤더** — `X-Truncated: true` + `X-Truncated-Limit: 5000`. 프로그램/스크립트가 분기 가능.
+3. **로그** — 기존 `logger.warn` 유지 (운영자용).
+
+1-8-b 상세 페이지도 같은 철학 — `reachedLimit` 배너로 UI 에 표시. 1-8-c RPC 실패 `statsError` flag 로 배너 (실제 0 ↔ 실패 0 구분).
+
+**규칙** ⭐:
+
+- **silent failure 는 사용자 불신의 근원** — 숫자가 작게 보이는데 "실제 0" 인지 "집계 실패" 인지 구분 안 되면 관리자가 대시보드 자체를 믿지 않게 됨. 구분 표시는 UX 가 아니라 **데이터 신뢰성**.
+- **투명성은 형식별 적합 채널로** — 웹 UI 면 배너, API 면 헤더, 파일이면 메타 행. 한 채널만으론 대상 자동화 도구에 전달 안 됨.
+- **로그는 운영자용, UI/헤더는 사용자용** — 둘을 혼동하지 말 것. "logger.warn 찍었으니 됐다" 는 SRE 관점, 관리자 UX 는 별개.
+- **상한 값(매직 넘버)은 노출 수준 결정** — 5000 같은 값을 UI 에 그대로 보이는 것도 정보 노출이지만, 🟡 관리자 전용 도구에서는 수용. 공개 API 라면 일반 메시지로 추상화.
+- **이 패턴은 "가드가 있는 모든 경로" 에 복제 필요** — 1-8-a 목록 상한 1000, 1-8-b 상세 상한 500, 1-8-d CSV 상한 5000 모두 동일 철학. Task 별로 잊지 않고 적용 (코드 리뷰 체크리스트).
+
+---

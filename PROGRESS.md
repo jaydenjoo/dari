@@ -5,10 +5,10 @@
 ## 현재 위치
 
 - Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-8 진입 (대시보드 로그·통계)** — Task 1-8-a 대화 로그 목록 ✅ / 1-8-b 대화 상세 / 1-8-c KPI / 1-8-d (선택)
-- 상태: **Task 1-8-a 완결** — vitest **389 통과** (380 → 389 / +9 preview-util), typecheck/lint/prettier/build clean (12 routes, 신규 `/bots/[slug]/conversations` 등록). Server Component + RLS 3중 방어 + slug 검증 + offset pagination + 4쿼리(bot/count/conversations/messages) + 메모리 join. 독립 리뷰 2 병렬 → Fix 4건 반영 (sec M-1 messages `.limit(1000)` DoS 가드 + warn / sec L-1 정적 에러 메시지 4지점 / sec L-2 maskEmail local=1 / code MED canonical URL 주석).
-  - 부가: `playwright-report/**` + `test-results/**` eslint ignore 추가 (직전 세션 E2E artifact 가 매번 lint 오염시키던 인프라 문제 해결).
-  - Epic 1-7 종결 후 Phase 1 잔여 실사 → Epic 1-8 (대화 로그 + KPI) 선정. PRD Task 1-5 관리 대시보드의 "대화 로그 열람" 부분 실현.
+- Epic: **Epic 1-8 완전 종결 (4/4 Task)** — 1-8-a 목록 ✅ / 1-8-b 상세 ✅ / 1-8-c KPI ✅ / 1-8-d 삭제+CSV ✅
+- 상태: **Task 1-8-d 완결** — vitest **442 통과** (389 → 442 / +53 in-session: meta-util 25 + stats-util 15 + csv-util 13), typecheck/lint/prettier/build clean (14 routes, 신규 1 동적 route + 1 API route + 2 마이그레이션). 독립 리뷰 **세션 내 3회 병렬 (code+security × 3 Task)** → 최종 19건 Fix 반영. 3 Task 모두 Ship 판정 (CRITICAL/HIGH 0).
+  - Epic 1-8 → PRD Task 1-4 (대화 로그) + Task 1-5 (관리 대시보드) 대시보드 기능 MVP 수준 완결.
+  - 마이그레이션 +2: 0011 `bot_stats` RPC (security invoker + search_path='' + authenticated 만 EXECUTE) / 0012 `conversations_delete_owner` DELETE RLS.
 
 ## 완료된 Epic
 
@@ -80,6 +80,101 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-20 Ⅶ) — Epic 1-8 완전 종결: Task 1-8-b + 1-8-c + 1-8-d 한 세션 + 독립 리뷰 3회 병렬
+
+한 세션에 **3 Task 연속 완결** + 각 Task 당 독립 리뷰 2 에이전트 병렬 (code + security) 총 6 병렬 호출. 전부 CRITICAL/HIGH 0 + Ship 판정. 누적 Fix 반영 **19건** (Task 1-8-b 8건 + 1-8-c 7건 + 1-8-d 4건). Auto mode 에서 Plan → Approve → Build → Review → Fix → Commit 사이클 3회 반복. learnings +3.
+
+### Task 1-8-b — 대화 상세 페이지 (~1.5h)
+
+**신규 7파일 + 수정 0** — `/bots/[slug]/conversations/[conversationId]` 라우트 (13 routes).
+
+- `page.tsx`: Server Component. 3중 방어 (slug/uuid 형식 → bot 소유 → `conversation.bot_id === bot.id` 재검증). RLS 2-hop 자동 (messages → conv → bots.owner).
+- `message-timeline.tsx`: Client. user/assistant/system 3분기 버블 + sources `<details>` 접이식.
+- `meta-util.ts` + test: isValidUuid / sumTokens / formatMessageTime (KST 고정, hydration mismatch 차단) / formatFullTime / formatDuration. **25 케이스**.
+- `loading.tsx` / `error.tsx` (Sentry.captureException — Pino logger 는 server 전용이라 Client 금지).
+- `tests/e2e/bot-conversation-detail.spec.ts`: 6 케이스 (비로그인 / uuid 포맷 / 미존재 / smoke / cross-bot IDOR / 목록→상세 네비).
+
+**독립 리뷰 Fix 8건**:
+
+- sec H-1: Supabase error raw 로깅 → `{errCode,errMsg}` 3곳 (`err.details/hint` 에 row 파편/PII 섞일 가능성 차단, `redactDeep` 만으로 불충분)
+- sec H-2: redirect next path 불변조건 주석
+- sec M-2: `score` `Number.isFinite` 가드 (jsonb NaN/Infinity 방어)
+- sec M-3: invalid ISO fallback raw → `"—"` (내부 에러 문자열 노출 차단)
+- code M-1: `ended_at` 미사용 select 제거
+- code M-2: `<time dateTime={isoTime}>` 접근성 (Server 포맷 문자열 + 기계 판독 분리)
+- code L-1: MetaCard `suffix` 로직 단순화
+- code L-2: E2E 6번째 cross-bot IDOR 차단 케이스
+
+### Task 1-8-c — 봇별 KPI 집계 (~1.5h)
+
+**신규 5 + 수정 2** — `/bots/[slug]` 에 기간 필터 + 5 지표 카드. 14 routes 유지 (이 Task 는 라우트 추가 없음).
+
+- `supabase/migrations/0011_create_bot_stats_rpc.sql`: security invoker + search_path='' + revoke all + grant execute to authenticated 3단 방어. jsonb 5 필드 (conversationCount / Total / activeCount / messageCount / totalTokens). **bot owner 아니면 내부 쿼리 0 → 지표 전부 0 (enumeration 차단)**.
+- `stats-util.ts` + test: parseRange (unknown + 화이트리스트 + silent fallback) / rangeToSince (KST DST 없음 고정 오프셋) / `botStatsSchema` Zod `int().nonnegative()` 로 NaN/Infinity/음수 거부 / parseBotStats safeParse + EMPTY_STATS 폴백. **15 케이스**.
+- `stats-section.tsx`: Server Component. 4 preset Link (`?range=7d|30d|90d|all`) + default `'7d'` 은 canonical URL 에서 쿼리 생략 + KpiCard 5.
+- `page.tsx` 확장: searchParams Promise + RPC 호출 + stats 폴백 + `statsError` 배너.
+- `tests/e2e/bot-stats.spec.ts`: 4 케이스.
+
+**독립 리뷰 Fix 7건**:
+
+- code M-1: `BotStatsRpcReturn` 제거 → `Returns: unknown` + Zod 단일 진실 (타입 drift 원천 차단)
+- code M-2: `BotStatsView` 중간 인터페이스 제거 → `BotStats` 직접
+- code M-4: `activeCount` 기간 무관 SQL 주석 + KpiCard `title` tooltip
+- code L-2: E2E `ghost-slug` 전제 주석 (SLUG_PATTERN 통과 → auth redirect 먼저)
+- sec L-1: RPC 실패 시 `statsError` flag + UI 배너 (silent 실패 가시화, 실제 0 ↔ 실패 0 구분)
+- sec L-2: playwright.config trace/artifact 에 service_role 리스크 주석
+
+**미반영 (근거)**: sec M-1 bigint overflow (10^15 실전 불가) / sec M-2 기존 `throw error.message` (별도 Task) / code M-3 E2E 모듈 상태 (1-8-a·b 일관) / code L-1 3-value 체인 (충분)
+
+### Task 1-8-d — 대화 삭제 + CSV export (~1.5h)
+
+**신규 7 + 수정 1** — Epic 1-8 마지막. 14 routes (신규 `/api/conversations/[conversationId]/export`).
+
+- `supabase/migrations/0012_add_conversation_delete_policy.sql`: `conversations_delete_owner` RLS + idempotent drop + create + `to authenticated`. messages 는 FK `on delete cascade` (0003) 자동 정리 → 별도 정책 불필요.
+- `actions.ts`: Server Action `deleteConversationAction`. 3중 방어 (slug/uuid → bot 소유 → `bot_id` 재검증) + RLS + redirect 고정 경로 (open redirect 차단).
+- `delete-button.tsx`: Client. confirm modal + `useActionState` + `useFormStatus` + `role="dialog"` + `aria-modal` + **ESC keydown 리스너** (WAI-ARIA Dialog Pattern).
+- `csv-util.ts` + test: **OWASP CSV Injection 3단 방어** — `=,+,-,@,\t,\r,\n` prefix + `,/"/\n/\r` 포함 시 `"..."` wrap + `""` escape. UTF-8 BOM (Excel 한글 호환). truncationNotice 메타 행. **13 케이스**.
+- `route.ts`: GET API. UUID 검증 → auth → RLS 2-hop. `Cache-Control: no-store`. 5000 메시지 상한 + `X-Truncated`/`X-Truncated-Limit` 헤더. 파일명 ASCII only (`dari-conversation-{8자 UUID prefix}.csv`).
+- `tests/e2e/bot-conversation-manage.spec.ts`: 5 케이스.
+
+**독립 리뷰 Fix 4건**:
+
+- code M-2: 모달 ESC keydown 리스너
+- code M-3: `X-Truncated` / `X-Truncated-Limit` 헤더 + CSV 알림 메타 행 (truncation 투명성)
+- sec MEDIUM-3: `\n` 을 `INJECTION_PREFIX_CHARS` 에 추가 (Excel 셀 경계 UX 방어)
+- code INFO: csv-util.test.ts `\t` vs `\r`/`\n` wrap 차이 주석
+
+**미반영 (근거)**: code M-1 `api/` → `bots/[slug]/...` import 경계 (후속 공통화 Task 로) / maskEmail·STATUS_LABEL 3곳 중복 (후속) / sec RFC 5987 (ASCII 전용 안전) / sec rate limit (Phase 2 통합) / sec typed confirmation (🟡 현재 충분)
+
+### 검증 (누적)
+
+- typecheck / lint (기존 3 warnings 유지) / prettier / build (14 routes, 신규 API route +1) ✅
+- vitest **389 → 442 (+53)**: meta-util 25 + stats-util 15 + csv-util 13
+- E2E spec 신규 3 파일 (16 케이스 추가)
+- Supabase advisor 신규 0건 (마이그레이션 0011/0012 apply)
+- gitleaks pre-commit 2회 통과 (no leaks)
+- 독립 리뷰 6 병렬 (3 Task × 2 에이전트) — 전부 Ship 판정
+
+### 주요 결정 / 교훈 (learnings +3)
+
+1. **CSV Injection OWASP 3단 방어** — `=,+,-,@,\t,\r,\n` prefix + `"..."` wrap + `""` escape. `\r`/`\n` 은 prefix + wrap 이중 방어. 국제화(UTF-8 한글)와 분리 유지.
+2. **Supabase RPC error 구조화 로깅** (1-8-b H-1 → 1-8-c/d 재적용 확정) — `{errCode, errMsg}` 만 추출. Supabase error 의 `details`/`hint` 에 row 파편/PII 섞일 수 있어 redact 만으로 불충분.
+3. **truncation 투명성 패턴** — 상한 도달 시 파일(meta 알림 행) + 헤더(`X-Truncated: true`) 양쪽에 노출. silent failure 방지. 관리자가 "일부 누락" 사실을 코드 읽지 않고 인지 가능.
+
+### Backlog (다음 세션 후보)
+
+1. **공통화 리팩 Task** — `api/` → `shared/lib/` 경계 정리 + `maskEmail` / `STATUS_LABEL` / `STATUS_CLASS` 3곳 중복 해소 (1-8-a/b/d 에 흩어짐).
+2. **Phase 1 출시 준비** — 테스트 커버리지 최종 점검 / README / 배포 파이프라인 / Vercel 환경 분리.
+3. **Phase 2 Backlog 정리** — audit log / soft delete / 원가 환산 / 일별 차트 / typed confirmation / rate limit (delete/export) / RFC 5987 filename / admin_note 컬럼.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 Ⅶ (KST)
+- 브랜치: `main`
+- 차단 요소: 없음
+
+---
 
 ## 이번 세션(2026-04-20 Ⅳ) — Task 1-7-c file 업로드 Build 완결 + 독립 리뷰 2라운드 · Fix 반영 6건
 
