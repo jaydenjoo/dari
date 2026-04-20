@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: 1 (MVP 기능) 진행 중
-- Epic: **Epic 1-8 완전 종결 (4/4 Task) + 후속 리팩 1-8-e ✅** — 1-8-a 목록 ✅ / 1-8-b 상세 ✅ / 1-8-c KPI ✅ / 1-8-d 삭제+CSV ✅ / **1-8-e 공통화 리팩 ✅**
-- 상태: **Task 1-8-e 완결** — vitest **468 통과** (442 → 468 / +26: bots/status 7 + conv/status 6 + mask-email 5 + visitor 5 + relative 8 − 이동 중복 ~5), typecheck/lint/prettier/build clean (14 routes 유지, 기능 변경 0). 독립 리뷰 2 병렬 (code + security) → **Fix 7건 반영** (sec H×2 / sec M×2 / code M×2 / code L×1) + 미반영 4건 근거 기록. Epic 1-8 이월 5건 전부 해소 + silent divergence 재발 차단.
-  - 이월 해소: maskEmail 3곳 / visitorLabelOf 3곳 / ConvStatus LABEL·CLASS 3곳 / BotStatus LABEL·CLASS 2곳 / api→bots import 경계 2건 / formatRelative 2곳(신규 발견).
-  - shared/ 확장: `shared/bots/status.ts` / `shared/conversations/{mask-email,visitor,status,csv,meta}.ts` / `shared/time/relative.ts`.
+- Phase: **1 완결 (출시 준비 단계)** · Phase 2 Epic 결정 대기
+- Epic: **Epic 1-8 완전 종결 + 후속 리팩 1-8-e ✅ + 출시 준비 문서 3건 ✅ + 로깅 sweep 17지점 ✅**
+- 상태: **Phase 1 MVP 코드 완결** — vitest **468 통과** (442 → 468 / +26), typecheck/lint/prettier/build clean (14 routes). 독립 리뷰 2 병렬 → Fix 7건 반영. Epic 1-8 이월 5건 전부 해소 + 17지점 Epic 1-8 로깅 규약 sweep (기능 변경 0).
+  - 출시 준비 3문서: **README 전면 재작성** (36 → 175줄) + `docs/phase-1-release-checklist.md` (Stage 1 진입 체크리스트) + `docs/phase-2-plan.md` (Phase 2 Epic 후보 4종 비교 + 권장 순서 A→B→D→C).
+  - Phase 2 결정 대기: **Jayden 의 Epic A (위젯 런타임) / B (운영 품질) / C (멀티테넌트) / D (카카오톡) 선택**. 권장: Epic A 진입.
 
 ## 완료된 Epic
 
@@ -80,6 +80,64 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-20 Ⅸ) — Phase 1 출시 준비 3연속 Task (README + Phase 1 체크리스트 + Epic 1-8 로깅 sweep + Phase 2 계획)
+
+Jayden 의 "순서대로 모두 진행" 지시로 3 Task 연속 실행. Auto 모드 + 문서 중심 작업이라 리스크 낮음. 각 Task 완료 후 개별 커밋 + 최종 세션 저장.
+
+### 흐름 (~1.5h)
+
+1. **(a) Phase 1 출시 준비**
+   - **a-1**: `README.md` Next.js 템플릿 (36줄) → Dari 프로젝트 종합 소개 (175줄). 주요 기능 / 기술 스택 / 시작 가이드 / 구조 / 명령 / 문서 링크 / 보안 / 로드맵 섹션.
+   - **a-2 / a-3 / a-4** 통합: `docs/phase-1-release-checklist.md` 신규 (8 섹션) — Stage 1 진입용 체크리스트.
+     - 커버리지 현황 분석: **52.01% 전체** (`pnpm test:coverage`). 핵심 로직은 우수 (`core/knowledge` 98.75% / `core/security` 93.84% / `core/observability` 93.84%). widget(42%) / firecrawl(0%) / login-limiter(0%) 는 Phase 2 이후.
+     - CI 파이프라인 점검: `verify + secret-scan` 2-job. 개선 후보 4건 (pnpm action / E2E job / coverage gate / tsconfig backup) — Stage 1 블로커 아님.
+     - Vercel 환경 구성 체크리스트 (Jayden 수동): 프로젝트 생성 + prod 11 env + Preview env + 도메인 연결 + Supabase prod 생성 + smoke test 6항목.
+     - Go/No-Go 기준 + Phase 2 Backlog.
+   - 커밋: `docs: Phase 1 출시 준비 문서` (83ae12a).
+
+2. **(c) bots 레거시 로깅 sweep** (Task 1-8-e 리뷰 sec M-2 이월 완결)
+   - Grep 전수 탐색: `{ err: *Err, ... }` 패턴 17지점 식별 (logger.test.ts 와 ZodError parsed.error 는 의식적 제외).
+   - 파일 6개: `login/actions.ts` ×2 / `core/knowledge/ingest.ts` ×1 / `bots/new/actions.ts` ×1 / `auth/callback/route.ts` ×1 / `bots/[slug]/edit/page.tsx` ×2 / `bots/[slug]/conversations/page.tsx` ×4 / `bots/[slug]/edit/actions.ts` ×6 (`selectErr` ×4 replace_all + `updateErr` ×2 개별).
+   - 변환 규약: `{ err: X, ... }` → `{ errCode: X.code, errMsg: X.message, ... }`. AuthError 와 PostgrestError 둘 다 `code`/`message` 있음. fallback `?.` 적용 (AuthError null 가능성).
+   - 검증: vitest 468 유지 (기능 변경 0) / typecheck 0 / lint 3 baseline warnings / format clean / Grep 패턴 0 hits (완전 sweep 확인).
+   - 커밋: `refactor(logging): Epic 1-8 구조화 로깅 규약 sweep (17지점 일괄 반영)` (c63629a).
+
+3. **(b) Phase 2 첫 Epic 계획 수립**
+   - PRD §7 읽고 Phase 2 원안(카카오톡 / n8n / 멀티테넌트 / 랜딩 / dairect.kr) 재확인.
+   - **핵심 인사이트 발견**: PRD Task 1-4 (임베드 위젯 SDK) 가 Phase 1 에 있었으나 Epic 1-8 에 밀림 → Phase 2 첫 후보로 승격 필요.
+   - `docs/phase-2-plan.md` 신규 (7 섹션):
+     - Epic 후보 4종 비교 (A 위젯 / B 운영 품질 / C 멀티테넌트 / D 카톡).
+     - 권장 순서: **A → B → D → C** (출시 완결 → 안정화 → 채널 확장 → SaaS 확장).
+     - Epic A (위젯) Task 분해 초안 5개 (5~7일 예상): 설계/ADR → chat API → widget.js → 보안 검증 → CDN 배포.
+     - Jayden 결정 체크리스트 6건 (CDN 호스트 / Shadow DOM vs iframe / 병렬 or 순차 등).
+   - 커밋: `docs: Phase 2 진입 계획서 — Epic 후보 4종 비교 + 권장 순서` (820c3d4).
+
+### 검증 (누적)
+
+- typecheck 0 / lint 3 baseline warnings / prettier clean / build 14 routes ✅
+- vitest 468 유지 (기능 변경 0) ✅
+- gitleaks pre-commit 3회 통과 (no leaks) ✅
+- coverage: 52.01% statements — 핵심 로직 영역(core/knowledge/security/observability) 90%+ 확인
+
+### 주요 결정 / 교훈 (learnings +1)
+
+1. **PRD 원안 vs 실제 Epic 구조 불일치는 Phase 전환 시점에 재정렬해야** — PRD Task 1-4 (위젯) 가 Phase 1 에 있었으나 실제 Epic 1-8 까지 이월되어 있었음. 이런 "숨겨진 이월" 은 Phase 2 진입 계획서 작성 시 전수 재확인 필요.
+
+### Backlog 재정렬
+
+- **🔴 Epic A (위젯 런타임)**: Phase 2 첫 후보 — Jayden 승인 대기
+- **🟡 Epic B (운영 품질)**: audit log / soft delete / rate limit / typed confirmation / 원가 환산 / 일별 차트 / CI 현대화 / shared barrel index.ts
+- **🟡 Epic C (멀티테넌트)**: SaaS 수익 모델 결정 + 실사용자 확보 후 재평가
+- **🟢 Epic D (카카오톡)**: Epic A 완료 후, 카카오 비즈니스 채널 개설 선결
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 Ⅸ (KST)
+- 브랜치: `main`
+- 차단 요소: 없음. Phase 2 Epic 선택 대기 중.
+
+---
 
 ## 이번 세션(2026-04-20 Ⅷ) — Task 1-8-e 공통화 리팩 (Epic 1-8 후처리) + 독립 리뷰 7건 반영
 
