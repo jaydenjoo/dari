@@ -19,11 +19,13 @@ import {
   ingestUrlKnowledge,
   knowledgeUrlSchema,
   MAX_FILE_BYTES,
+  removeKnowledgeSource,
   sanitizeFilename,
   sanitizeKnowledgeText,
 } from "@/core/knowledge";
 import { logger } from "@/core/logging";
 import { checkBotFileIngestRatelimit } from "@/core/ratelimit/bot-file-ingest-limiter";
+import { checkBotSourceRemoveRatelimit } from "@/core/ratelimit/bot-source-remove-limiter";
 import { checkBotUrlIngestRatelimit } from "@/core/ratelimit/bot-url-ingest-limiter";
 
 import { isValidSlug } from "../../new/slug-util";
@@ -669,6 +671,9 @@ export async function addFileSourceAction(
   //    - **MVP 전제 (1-7-b learnings 동일 패턴)**: 이 액션은 파일 1개씩
   //      `{ type:"file", files:[name] }` 소스 1개로 append. Phase 2 다중 파일 UI 도입 시
   //      "해당 파일만 제거 + 나머지 보존" 으로 로직 갱신 필요.
+  //    - Task 1-7-d: `storagePaths` 에 Storage 실제 경로({bot_id}/{uuid}.{ext}) 를 함께
+  //      기록해 삭제 시점에 정확히 제거 가능. 기존 저장 데이터(storagePaths 없음)는
+  //      optional 필드로 호환 (removeSource 가 없으면 best-effort skip).
   const existingSources = existingParsed.data.knowledge.sources;
   const filtered = existingSources.filter(
     (s) => !(s.type === "file" && s.files.includes(result.sanitizedFilename)),
@@ -676,6 +681,7 @@ export async function addFileSourceAction(
   const newFileSource = fileSourceSchema.parse({
     type: "file",
     files: [result.sanitizedFilename],
+    storagePaths: [result.storagePath],
   });
   const newSources: KnowledgeSource[] = [...filtered, newFileSource];
 
@@ -718,6 +724,266 @@ export async function addFileSourceAction(
       chunkCount: result.chunkCount,
       bytes: result.bytes,
       ext: result.ext,
+    },
+  };
+}
+
+// ─── Task 1-7-d: 지식 소스 개별 삭제 ─────────────────────────────────────────
+
+export type RemoveSourceFormState = {
+  // 폼 전체 에러.
+  error?: string;
+  // 성공 응답.
+  success?: {
+    sourceType: "text" | "url" | "file";
+    identifier: string;
+    removedChunks: number;
+    removedFiles: number;
+    hadStorageFailures: boolean;
+  };
+};
+
+const VALID_SOURCE_TYPES: ReadonlyArray<"text" | "url" | "file"> = [
+  "text",
+  "url",
+  "file",
+] as const;
+
+/**
+ * 지식 소스 개별 삭제 Server Action (Task 1-7-d).
+ *
+ * 흐름:
+ *   1. slug/sourceType/identifier 검증 (DB 왕복 전 fail-fast).
+ *   2. 세션 → rate limit (10req/5m user.id).
+ *   3. 봇 조회 (RLS 2중 방어).
+ *   4. 기존 config 파싱 (fail-fast — 다른 소스 보존).
+ *   5. 해당 source 존재 확인 + storagePaths 수집 (file 타입만).
+ *   6. `removeKnowledgeSource`: RPC 빈 배열 = chunks 삭제 + Storage best-effort.
+ *   7. config.knowledge.sources 갱신 (해당 source 제거).
+ *   8. bots UPDATE + revalidatePath.
+ *
+ * 보안 (owner-authed 5중):
+ *   - slug/타입/식별자 정적 검증 → 세션 → rate limit → RLS select/update → chunks RPC
+ *     (security invoker + RLS delete/insert_owner).
+ *   - Mass assignment: 폼 필드는 sourceType/sourceIdentifier 둘뿐. owner_id/slug/botId
+ *     조작 경로 없음.
+ *   - 사용자에게 노출되는 에러 메시지는 정적 (내부 errcode/RPC 상세 숨김).
+ *
+ * MVP 전제 (1-7-b/c 패턴 일관):
+ *   - 한 source = 1-원소 배열 (files:[name] / urls:[url]) 기준. 다중 UI 도입 시
+ *     "해당 원소만 제거 + 나머지 보존" 으로 filter/map 로직 갱신 필요.
+ */
+export async function removeSourceAction(
+  slug: string,
+  _prev: RemoveSourceFormState,
+  formData: FormData,
+): Promise<RemoveSourceFormState> {
+  // 1. slug.
+  if (!isValidSlug(slug)) {
+    return { error: "잘못된 봇 주소예요." };
+  }
+
+  // 2. sourceType.
+  const rawType = String(formData.get("sourceType") ?? "");
+  if (!(VALID_SOURCE_TYPES as readonly string[]).includes(rawType)) {
+    return { error: "지식 소스 타입이 올바르지 않아요." };
+  }
+  const sourceType = rawType as "text" | "url" | "file";
+
+  // 3. identifier (text 는 빈값 허용, url/file 은 필수).
+  //    길이 상한은 DB jsonb + 개별 스키마에 의존. 여기선 과도한 입력 방어 목적 1024자.
+  const identifier = String(formData.get("sourceIdentifier") ?? "");
+  if (identifier.length > 1024) {
+    return { error: "지식 소스 식별자가 너무 길어요." };
+  }
+  if (sourceType !== "text" && identifier.length === 0) {
+    return { error: "삭제할 소스를 찾을 수 없어요." };
+  }
+
+  // 4. 세션.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
+  }
+
+  // 4-1. Rate limit.
+  const rl = await checkBotSourceRemoveRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error:
+        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (5분 안에 10회 제한)",
+    };
+  }
+
+  // 5. 봇 조회.
+  const { data: existing, error: selectErr } = await supabase
+    .from("bots")
+    .select("id, config")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (selectErr) {
+    logger.error({ err: selectErr, slug, userId: user.id }, "봇 조회 실패");
+    return {
+      error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  if (!existing) {
+    return { error: "봇을 찾을 수 없어요." };
+  }
+
+  // 6. 기존 config 파싱 (fail-fast).
+  const existingParsed = dariConfigSchema.safeParse(existing.config);
+  if (!existingParsed.success) {
+    logger.error(
+      { err: existingParsed.error, slug, userId: user.id },
+      "기존 봇 config 파싱 실패 (소스 삭제 중단)",
+    );
+    return {
+      error:
+        "봇 설정을 불러오는 중 오류가 발생했어요. 관리자에게 문의해 주세요.",
+    };
+  }
+
+  const existingSources = existingParsed.data.knowledge.sources;
+
+  // 7. 해당 source 존재 확인 + storagePaths 수집 (file 만).
+  //    "이미 삭제된 소스" 에 대한 호출을 거부 — idempotent 로 만들지 않음으로써
+  //    UI 버그/경쟁 조건을 가시화 (사용자에겐 친화 메시지).
+  let sourceFound = false;
+  const storagePaths: string[] = [];
+  for (const s of existingSources) {
+    if (sourceType === "text" && s.type === "text") {
+      sourceFound = true;
+      break;
+    }
+    if (
+      sourceType === "url" &&
+      s.type === "url" &&
+      s.urls.includes(identifier)
+    ) {
+      sourceFound = true;
+      // url 에는 Storage 없음.
+      break;
+    }
+    if (
+      sourceType === "file" &&
+      s.type === "file" &&
+      s.files.includes(identifier)
+    ) {
+      sourceFound = true;
+      if (s.storagePaths && s.storagePaths.length > 0) {
+        storagePaths.push(...s.storagePaths);
+      }
+      // 여러 source 가 같은 filename 을 담은 경우까지 전부 청소하기 위해
+      // break 하지 않고 계속 수집 (MVP 에선 드물지만 방어적).
+      continue;
+    }
+  }
+  if (!sourceFound) {
+    return { error: "이미 삭제되었거나 찾을 수 없는 소스예요." };
+  }
+
+  // 7-2. storagePaths prefix 재검증 — defense-in-depth (sec review MEDIUM-1).
+  //   - Storage RLS 0010 이 이미 `storage.foldername(name)[1] = bot_id` 로 owner 격리.
+  //   - 앱 레이어에서도 prefix 일치를 확인해 단일 방어선을 2중화. config jsonb 가 비정상
+  //     경로로 조작되었거나(타 Server Action/관리자 도구), 스키마 regex 우회 경로가 생겨도
+  //     Storage 삭제 호출 자체를 차단.
+  //   - 불일치 발견 시 해당 경로만 degrade (제외) — chunks 삭제는 계속 진행하여 UX 연속성 유지.
+  const expectedPrefix = `${existing.id}/`;
+  const safeStoragePaths = storagePaths.filter((p) =>
+    p.startsWith(expectedPrefix),
+  );
+  if (safeStoragePaths.length !== storagePaths.length) {
+    logger.error(
+      {
+        botId: existing.id,
+        expectedPrefix,
+        invalidCount: storagePaths.length - safeStoragePaths.length,
+        userId: user.id,
+      },
+      "storagePaths prefix 불일치 감지 — 해당 경로는 Storage 삭제 건너뜀",
+    );
+  }
+
+  // 8. chunks + Storage 삭제.
+  let removeResult;
+  try {
+    removeResult = await removeKnowledgeSource({
+      supabase,
+      botId: existing.id,
+      sourceType,
+      identifier,
+      storagePaths: safeStoragePaths.length > 0 ? safeStoragePaths : undefined,
+    });
+  } catch (err) {
+    logger.error(
+      {
+        err,
+        botId: existing.id,
+        sourceType,
+        userId: user.id,
+      },
+      "지식 소스 삭제 실패",
+    );
+    return { error: "삭제에 실패했어요. 잠시 후 다시 시도해 주세요." };
+  }
+
+  // 9. config.knowledge.sources 에서 해당 source 제거 (MVP 1-원소 가정).
+  //    Phase 2 다중 UI 도입 시 map + 원소 필터로 세분화.
+  const newSources = existingSources.filter((s) => {
+    if (sourceType === "text") return s.type !== "text";
+    if (sourceType === "url") {
+      return !(s.type === "url" && s.urls.includes(identifier));
+    }
+    // file
+    return !(s.type === "file" && s.files.includes(identifier));
+  });
+
+  const newConfig: DariConfig = {
+    ...existingParsed.data,
+    knowledge: { sources: newSources },
+  };
+
+  // 10. bots UPDATE.
+  const { data: updated, error: updateErr } = await supabase
+    .from("bots")
+    .update({
+      config: newConfig,
+    } satisfies Database["public"]["Tables"]["bots"]["Update"])
+    .eq("slug", slug)
+    .select("id");
+
+  if (updateErr) {
+    logger.error(
+      {
+        err: updateErr,
+        slug,
+        userId: user.id,
+        sourceType,
+      },
+      "봇 UPDATE 실패 (소스 삭제 단계)",
+    );
+    return { error: "봇 수정에 실패했어요. 잠시 후 다시 시도해 주세요." };
+  }
+  if (!updated || updated.length === 0) {
+    return { error: "봇을 수정할 권한이 없어요." };
+  }
+
+  // 11. 캐시 갱신.
+  revalidatePath(`/bots/${slug}/edit`);
+
+  return {
+    success: {
+      sourceType,
+      identifier,
+      removedChunks: removeResult.removedChunks,
+      removedFiles: removeResult.removedFiles,
+      hadStorageFailures: removeResult.failedFiles.length > 0,
     },
   };
 }

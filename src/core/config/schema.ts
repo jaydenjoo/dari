@@ -47,6 +47,21 @@ export const urlSourceSchema = z.object({
 export const fileSourceSchema = z.object({
   type: z.literal("file"),
   files: z.array(z.string().min(1)).min(1).max(50),
+  // Task 1-7-d: Storage 파일 경로 추적 — 삭제 시 정확한 파일 제거용.
+  // optional — 1-7-c 초기 저장 데이터(storagePaths 없음) 호환. 신규 저장부터 채워짐.
+  // 삭제 오케스트레이션은 storagePaths 없으면 best-effort skip (chunks/sources 만 삭제).
+  //
+  // 포맷 강제 (sec review LOW-1): `{bot_id UUID}/{file UUID}.{pdf|txt|md}`.
+  //   - Storage RLS 0010 이 `storage.foldername(name)[1] = bot_id` 로 owner 격리.
+  //   - 스키마 자체에 regex 를 걸어 "임의 문자열 삽입" 경로를 DB 레벨에서 차단.
+  //   - 정확한 UUID 시간복잡도 대신 hex+hyphen 32~40자 범위로 느슨하게 받아 uuid v1/v4/nil 등
+  //     Postgres gen_random_uuid() 출력 전반과 호환.
+  storagePaths: z
+    .array(
+      z.string().regex(/^[0-9a-f-]{32,40}\/[0-9a-f-]{32,40}\.(pdf|txt|md)$/i),
+    )
+    .max(50)
+    .optional(),
 });
 
 export const textSourceSchema = z.object({

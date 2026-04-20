@@ -200,4 +200,80 @@ describe("dariConfigSchema", () => {
       expect(source.content.length).toBeGreaterThanOrEqual(10);
     }
   });
+
+  // ─── Task 1-7-d: fileSourceSchema.storagePaths optional 호환성 ───
+  describe("fileSourceSchema.storagePaths (Task 1-7-d)", () => {
+    it("storagePaths 없는 기존 데이터(1-7-c 초기) 도 통과한다", () => {
+      const result = dariConfigSchema.parse({
+        ...minimalValidInput,
+        knowledge: {
+          sources: [{ type: "file", files: ["report.pdf"] }],
+        },
+      });
+      expect(result.knowledge.sources).toHaveLength(1);
+      const source = result.knowledge.sources[0];
+      expect(source.type).toBe("file");
+      if (source.type === "file") {
+        expect(source.files).toEqual(["report.pdf"]);
+        expect(source.storagePaths).toBeUndefined();
+      }
+    });
+
+    it("storagePaths 포함 데이터(1-7-d 신규) 는 파싱 + 값 보존", () => {
+      const validPath =
+        "00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111.pdf";
+      const result = dariConfigSchema.parse({
+        ...minimalValidInput,
+        knowledge: {
+          sources: [
+            {
+              type: "file",
+              files: ["manual.pdf"],
+              storagePaths: [validPath],
+            },
+          ],
+        },
+      });
+      const source = result.knowledge.sources[0];
+      expect(source.type).toBe("file");
+      if (source.type === "file") {
+        expect(source.storagePaths).toEqual([validPath]);
+      }
+    });
+
+    it("storagePaths 가 빈 배열이어도 통과 (legacy append 안전망)", () => {
+      const result = dariConfigSchema.parse({
+        ...minimalValidInput,
+        knowledge: {
+          sources: [{ type: "file", files: ["x.md"], storagePaths: [] }],
+        },
+      });
+      const source = result.knowledge.sources[0];
+      if (source.type === "file") {
+        expect(source.storagePaths).toEqual([]);
+      }
+    });
+
+    // sec review LOW-1 회귀 방지 — regex 로 bot_id/uuid.ext 포맷만 허용.
+    it("storagePaths 포맷이 잘못된 경로는 거부 (path traversal / 임의 문자열)", () => {
+      const invalidPaths = [
+        "../etc/passwd", // path traversal
+        "some/random/string.pdf", // 깊은 경로 (3+ segment)
+        "abc/def.exe", // 허용 외 확장자
+        "short/short.pdf", // segment 가 UUID 길이 미달
+        "plainstring", // slash 없음
+        "/absolute/path.pdf", // 절대 경로
+      ];
+      for (const p of invalidPaths) {
+        expect(() =>
+          dariConfigSchema.parse({
+            ...minimalValidInput,
+            knowledge: {
+              sources: [{ type: "file", files: ["x.pdf"], storagePaths: [p] }],
+            },
+          }),
+        ).toThrow();
+      }
+    });
+  });
 });

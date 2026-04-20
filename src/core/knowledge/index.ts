@@ -8,6 +8,7 @@
 //   - ingestFileKnowledge (Task 1-7-c): PDF/TXT/MD → extract → sanitize → chunk + embed + Storage + 일반화 RPC.
 //   - fetchUrlAsMarkdown + knowledgeUrlSchema (Task 1-7-b): URL 수집 프리미티브.
 //   - extractTextFromFile + sanitizeFilename (Task 1-7-c): 파일 수집 프리미티브.
+//   - removeKnowledgeSource (Task 1-7-d): 지식 소스 삭제 오케스트레이션 (chunks + Storage best-effort).
 //
 // 조회 (Task 1-6-c):
 //   - retrieveRelevantChunks: 사용자 질의 → 임베딩 → match_knowledge_chunks → 상위 K.
@@ -38,6 +39,17 @@ export {
 export { ingestTextKnowledge } from "./ingest";
 export { ingestUrlKnowledge, type IngestUrlResult } from "./ingest-url";
 export { ingestFileKnowledge, type IngestFileResult } from "./ingest-file";
+export {
+  removeKnowledgeSource,
+  type RemoveSourceArgs,
+  type RemoveSourceResult,
+} from "./remove-source";
+export {
+  chunkKey,
+  mapUiToDb,
+  type UiSourceType,
+  type DbSourceType,
+} from "./source-key";
 export {
   KNOWLEDGE_FILES_BUCKET,
   buildKnowledgeFilePath,

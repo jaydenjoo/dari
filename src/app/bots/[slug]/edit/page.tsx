@@ -80,6 +80,32 @@ export default async function EditBotPage({
     });
   }
 
+  // Task 1-7-d: 소스별 청크 개수 집계 (SourcesList 표시용).
+  //   - RLS knowledge_chunks_select_owner 자동 격리 → 타 owner 봇 chunks 노출 방지.
+  //   - 단일 SELECT + 메모리 aggregation (N+1 방지). bot 당 수백 row 수준 MVP 허용.
+  //   - 실패 시 빈 Record 로 fallback — 페이지는 표시, 청크 수만 0 으로 노출.
+  const chunkCounts: Record<string, number> = {};
+  const { data: chunkRows, error: chunksErr } = await supabase
+    .from("knowledge_chunks")
+    .select("source_type, source_identifier")
+    .eq("bot_id", data.id);
+
+  if (chunksErr) {
+    // code review L-1: warn 레벨 선택 이유.
+    //   - data loss 없음 — 실제 삭제 식별은 identifier 기반이므로 안전.
+    //   - 표시 지표만 0 으로 fallback → UX 미세 이슈, 페이지 자체는 정상.
+    //   - error 로 올리면 알람 잡음 증가 → 실제 서비스 영향 없는 실패는 warn 유지.
+    logger.warn(
+      { err: chunksErr, slug, userId: user.id },
+      "knowledge_chunks 집계 실패 — SourcesList 는 청크 수 0 으로 표시",
+    );
+  } else {
+    for (const row of chunkRows ?? []) {
+      const key = `${row.source_type}:${row.source_identifier}`;
+      chunkCounts[key] = (chunkCounts[key] ?? 0) + 1;
+    }
+  }
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#fafbfc] px-6 py-12">
       <div
@@ -135,7 +161,11 @@ export default async function EditBotPage({
           className="animate-in fade-in slide-in-from-bottom-2 duration-500"
           style={{ animationDelay: "160ms", animationFillMode: "both" }}
         >
-          <EditBotForm slug={data.slug} config={config} />
+          <EditBotForm
+            slug={data.slug}
+            config={config}
+            chunkCounts={chunkCounts}
+          />
         </div>
       </div>
     </main>

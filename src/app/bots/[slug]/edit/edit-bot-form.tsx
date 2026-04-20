@@ -16,6 +16,7 @@ import {
   KnowledgeSection,
   KnowledgeUrlSection,
 } from "./knowledge-section";
+import { SourcesList } from "./sources-list";
 
 const initialState: UpdateBotFormState = {};
 
@@ -25,6 +26,7 @@ const SECTIONS = [
   { id: "behavior", label: "행동" },
   { id: "appearance", label: "외관" },
   { id: "analytics", label: "분석" },
+  { id: "knowledge-sources", label: "등록된 지식" },
   { id: "knowledge", label: "지식 · 텍스트" },
   { id: "knowledge-url", label: "지식 · URL" },
   { id: "knowledge-file", label: "지식 · 파일" },
@@ -33,9 +35,13 @@ const SECTIONS = [
 export default function EditBotForm({
   slug,
   config,
+  chunkCounts,
 }: {
   slug: string;
   config: DariConfig;
+  // Task 1-7-d: source_type:source_identifier → 청크 개수 맵.
+  // page.tsx 에서 knowledge_chunks 단일 쿼리 후 빌드. RSC→Client 직렬화 위해 Record.
+  chunkCounts: Readonly<Record<string, number>>;
 }) {
   // slug 는 client bind 인자. 보안 핵심은 RLS — slug 조작해도 owner 미일치 시 0-row.
   const boundUpdate = updateBot.bind(null, slug);
@@ -107,6 +113,24 @@ export default function EditBotForm({
 
         <SubmitBar />
       </form>
+
+      {/*
+        Task 1-7-d: 등록된 지식 소스 통합 리스트 + 개별 삭제.
+        - 메인 form 밖 SectionCard (삭제가 개별 Server Action → HTML form 중첩 금지).
+        - 현재 봇이 가진 모든 지식(text/url/file) 한눈에 확인 + 청크 개수 표시.
+        - 삭제는 각 row 자체 form + `removeSourceAction` + `useActionState`.
+      */}
+      <SectionCard
+        id="knowledge-sources"
+        title="등록된 지식"
+        description="현재 봇이 답변 근거로 사용하는 소스 목록 — 개별 삭제 가능"
+      >
+        <SourcesList
+          slug={slug}
+          knowledge={config.knowledge}
+          chunkCounts={chunkCounts}
+        />
+      </SectionCard>
 
       {/*
         URL 지식 추가는 메인 편집 폼과 **독립된 form**.
