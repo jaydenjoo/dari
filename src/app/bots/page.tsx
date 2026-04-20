@@ -2,6 +2,9 @@ import Link from "next/link";
 import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
 import type { BotStatus } from "@/core/db/types";
+import { logger } from "@/core/logging";
+import { BOT_STATUS_CLASS, BOT_STATUS_LABEL } from "@/shared/bots/status";
+import { formatRelative } from "@/shared/time/relative";
 
 export const metadata = {
   title: "내 봇 — Dari",
@@ -15,29 +18,6 @@ type BotListItem = {
   updated_at: string;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  active: "운영 중",
-  paused: "일시정지",
-};
-
-const STATUS_CLASS: Record<string, string> = {
-  active: "bg-blue-50 text-blue-700 ring-blue-200",
-  paused: "bg-amber-50 text-amber-700 ring-amber-200",
-};
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "방금 전";
-  if (diffMin < 60) return `${diffMin}분 전`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}시간 전`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 30) return `${diffD}일 전`;
-  return d.toLocaleDateString("ko-KR");
-}
-
 export default async function BotsListPage() {
   const supabase = await createClient();
 
@@ -48,7 +28,11 @@ export default async function BotsListPage() {
     .order("updated_at", { ascending: false });
 
   if (error) {
-    throw new Error(error.message);
+    logger.error(
+      { errCode: error.code, errMsg: error.message },
+      "봇 목록 조회 실패",
+    );
+    throw new Error("internal_error");
   }
 
   const hasBots = bots && bots.length > 0;
@@ -99,9 +83,9 @@ export default async function BotsListPage() {
                   </h2>
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${STATUS_CLASS[bot.status] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${BOT_STATUS_CLASS[bot.status]}`}
                     >
-                      {STATUS_LABEL[bot.status] ?? bot.status}
+                      {BOT_STATUS_LABEL[bot.status]}
                     </span>
                     <code className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-600">
                       {bot.slug}

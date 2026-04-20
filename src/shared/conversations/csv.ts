@@ -1,5 +1,5 @@
 /**
- * Task 1-8-d: 대화 CSV export 유틸.
+ * 대화 CSV export 유틸.
  *
  * 순수 함수로 대화 메타 + 메시지 타임라인을 CSV 문자열로 변환한다.
  * Excel/Sheets 호환 (UTF-8 BOM + "" escape).

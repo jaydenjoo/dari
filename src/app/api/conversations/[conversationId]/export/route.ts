@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 
+import { createClient } from "@/core/db/client-server";
+import { logger } from "@/core/logging";
 import {
   buildConversationCsv,
   type CsvMessageRow,
-} from "@/app/bots/[slug]/conversations/[conversationId]/csv-util";
-import { isValidUuid } from "@/app/bots/[slug]/conversations/[conversationId]/meta-util";
-import { createClient } from "@/core/db/client-server";
-import { logger } from "@/core/logging";
+} from "@/shared/conversations/csv";
+import { isValidUuid } from "@/shared/conversations/meta";
+import { CONVERSATION_STATUS_LABEL } from "@/shared/conversations/status";
+import { visitorLabelOf } from "@/shared/conversations/visitor";
 
 /**
  * Task 1-8-d: 대화 CSV export API.
@@ -28,23 +30,6 @@ import { logger } from "@/core/logging";
  */
 
 const CSV_MESSAGE_LIMIT = 5000;
-
-type ConvStatus = "active" | "closed" | "handed_off";
-const STATUS_LABEL: Record<ConvStatus, string> = {
-  active: "진행 중",
-  closed: "종료",
-  handed_off: "담당자 이관",
-};
-
-// 1-8-a/b 와 동일 로직. 공통화는 후속 Task 에서.
-function maskEmail(email: string): string {
-  const atIdx = email.indexOf("@");
-  if (atIdx <= 0) return "***";
-  const local = email.slice(0, atIdx);
-  const domain = email.slice(atIdx);
-  if (local.length === 1) return `***${domain}`;
-  return `${local.slice(0, 2)}***${domain}`;
-}
 
 function jsonError(message: string, status: number): NextResponse {
   return NextResponse.json({ error: message }, { status });
@@ -149,13 +134,12 @@ export async function GET(
     );
   }
 
-  const statusLabel: string =
-    STATUS_LABEL[conv.status as ConvStatus] ?? String(conv.status);
-  const visitorLabel = conv.email
-    ? maskEmail(conv.email)
-    : conv.user_id
-      ? "로그인 방문자"
-      : "익명 방문자";
+  // fallback 은 TypeScript 유니온 기준으론 unreachable 이나, 마이그레이션으로
+  // 새 status 값이 먼저 DB 에 반영되고 types.ts 가 뒤따라 갱신되는 일시적
+  // 불일치 구간에서 `"undefined"` 문자열이 CSV 에 흘러가는 것을 차단한다.
+  const statusLabel =
+    CONVERSATION_STATUS_LABEL[conv.status] ?? String(conv.status);
+  const visitorLabel = visitorLabelOf(conv);
 
   const csv = buildConversationCsv(messages, {
     botName: bot.name,

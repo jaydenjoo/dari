@@ -45,7 +45,7 @@
 - **테스트/빌드 artifact 폴더는 반드시 linter ignore 에 명시** — 초기 세팅 시 `.next/` / `coverage/` / `dist/` 같이 당연한 것 외에 `playwright-report/` / `test-results/` / `storybook-static/` 등 **테스트 프레임워크 전용 artifact** 까지 일괄 등록. 생성 시점(로컬 dev / CI / E2E)이 다양해 "안 생기는 환경" 에선 안 보임.
 - **"baseline clean 이었는데 갑자기 오염" 패턴은 코드 아닌 artifact 의심** — 내 diff 에 해당 파일 없고 에러가 `column 17000+` 같은 minified 표식이면 인프라 문제. `pnpm lint 2>&1 | grep "^/Volumes" | sort -u` 로 파일 경로 목록 먼저 확인.
 - **CI 녹색 ≠ 로컬 green 보장** — CI 는 artifact 미보존이라 이 종류 이슈에 취약. 로컬 E2E 첫 실행 시점에 발견되는 경향 → 발견 즉시 ignore 추가.
-- **globalIgnores 패턴은 `폴더/**` 재귀 형태로** — 테스트 프레임워크가 하위에 난잡 구조를 만들 수 있어 top-level 만으론 부족.
+- **globalIgnores 패턴은 `폴더/**` 재귀 형태로\*\* — 테스트 프레임워크가 하위에 난잡 구조를 만들 수 있어 top-level 만으론 부족.
 
 ---
 
@@ -1534,7 +1534,7 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **외부 SDK error 객체는 raw 로 `err` 필드에 넣지 않기** — Supabase/Stripe/Resend 등 모두 "부가 진단 필드" 가 있고 그 안에 민감 파편 가능. 명시 필드만 extraction.
 - **로깅 시 추출 패턴 고정** — `{errCode, errMsg}` 만 허용. `{err: fullObject}` 는 "디버그 전용, 개발 환경에서만" 으로 분리. 프로덕션 로그 수집 경로와 분리.
 - **`redactDeep` 필드명 기반 방어의 한계 인식** — 필드명이 `details`/`hint` 같이 일반어면 민감 여부 자동 판별 불가. 방어선은 "필드 포함 여부" 가 아니라 "필드 포함 자체를 막기".
-- **정책을 한 번 정하면 신규 Task 에 **복제 적용**** — 1-8-b/c/d 에서 동일 패턴 확정 후 `page.tsx` 기존 `throw new Error(error.message)` 같은 레거시 패턴은 별도 sweep Task 로 인식 (리뷰어도 권장).
+- **정책을 한 번 정하면 신규 Task 에 **복제 적용\*\*\*\* — 1-8-b/c/d 에서 동일 패턴 확정 후 `page.tsx` 기존 `throw new Error(error.message)` 같은 레거시 패턴은 별도 sweep Task 로 인식 (리뷰어도 권장).
 - **주석에 "왜 raw 금지" 명시** — 코드 리뷰어/향후 본인이 `err` 그대로 넣을 유혹을 차단. "details 에 PII 섞임 가능" 한 줄로 충분.
 
 ---

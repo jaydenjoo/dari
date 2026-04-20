@@ -6,7 +6,7 @@ import {
   formatMessageTime,
   isValidUuid,
   sumTokens,
-} from "./meta-util";
+} from "./meta";
 
 describe("isValidUuid", () => {
   it("정상 UUID 형식은 true", () => {

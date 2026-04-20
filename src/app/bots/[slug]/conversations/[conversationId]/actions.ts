@@ -5,9 +5,9 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
+import { isValidUuid } from "@/shared/conversations/meta";
 
 import { isValidSlug } from "../../../new/slug-util";
-import { isValidUuid } from "./meta-util";
 
 export type DeleteConversationState = {
   error?: string;

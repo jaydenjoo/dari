@@ -5,8 +5,9 @@ import { notFound, redirect } from "next/navigation";
 import { PageBackground } from "@/components/ui/page-background";
 import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createClient } from "@/core/db/client-server";
-import type { BotStatus, Database } from "@/core/db/types";
+import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
+import { BOT_STATUS_CLASS, BOT_STATUS_LABEL } from "@/shared/bots/status";
 
 import { isValidSlug } from "../new/slug-util";
 import CopySnippet from "./copy-snippet";
@@ -27,18 +28,6 @@ type BotDetail = Pick<
 
 export const metadata: Metadata = {
   title: "봇 상세 — Dari",
-};
-
-const STATUS_LABEL: Record<BotStatus, string> = {
-  active: "운영 중",
-  paused: "일시정지",
-  deleted: "삭제됨",
-};
-
-const STATUS_CLASS: Record<BotStatus, string> = {
-  active: "bg-blue-50 text-blue-700 ring-blue-200",
-  paused: "bg-amber-50 text-amber-700 ring-amber-200",
-  deleted: "bg-gray-100 text-gray-500 ring-gray-200",
 };
 
 // 위젯 런타임 URL — Phase 2 에서 실제 배포 URL 확정.
@@ -111,8 +100,16 @@ export default async function BotDetailPage({
     .maybeSingle();
 
   if (error) {
-    logger.error({ err: error, slug, userId: user.id }, "봇 상세 조회 실패");
-    throw new Error(error.message);
+    logger.error(
+      {
+        errCode: error.code,
+        errMsg: error.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 상세 조회 실패",
+    );
+    throw new Error("internal_error");
   }
 
   if (!data) {
@@ -197,9 +194,9 @@ export default async function BotDetailPage({
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${STATUS_CLASS[data.status]}`}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.05em] ring-1 ring-inset ${BOT_STATUS_CLASS[data.status]}`}
               >
-                {STATUS_LABEL[data.status]}
+                {BOT_STATUS_LABEL[data.status]}
               </span>
               <code
                 data-testid="bot-detail-slug"

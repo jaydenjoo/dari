@@ -4,21 +4,23 @@ import { notFound, redirect } from "next/navigation";
 
 import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
-import type { ConversationStatus, Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
-
-import { isValidSlug } from "../../../new/slug-util";
-import { DeleteConversationButton } from "./delete-button";
-import { MessageTimeline, type TimelineMessage } from "./message-timeline";
 import {
   formatDuration,
   formatFullTime,
   formatMessageTime,
   isValidUuid,
   sumTokens,
-} from "./meta-util";
+} from "@/shared/conversations/meta";
+import {
+  CONVERSATION_STATUS_CLASS,
+  CONVERSATION_STATUS_LABEL,
+} from "@/shared/conversations/status";
+import { visitorLabelOf } from "@/shared/conversations/visitor";
 
-type ConversationRow = Database["public"]["Tables"]["conversations"]["Row"];
+import { isValidSlug } from "../../../new/slug-util";
+import { DeleteConversationButton } from "./delete-button";
+import { MessageTimeline, type TimelineMessage } from "./message-timeline";
 
 export const metadata: Metadata = {
   title: "대화 상세 — Dari",
@@ -28,40 +30,6 @@ export const metadata: Metadata = {
 // 250 왕복(수 시간 인터랙션) 에 해당하며 실 운영 거의 도달 X. 초과 시 logger.warn
 // 으로 모니터링 + UI 배너 표시. 정확도가 중요한 분석은 1-8-c KPI 에서 별도 처리.
 const MESSAGES_FETCH_LIMIT = 500;
-
-const STATUS_LABEL: Record<ConversationStatus, string> = {
-  active: "진행 중",
-  closed: "종료",
-  handed_off: "담당자 이관",
-};
-
-const STATUS_CLASS: Record<ConversationStatus, string> = {
-  active: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  closed: "bg-gray-50 text-gray-600 ring-gray-200",
-  handed_off: "bg-amber-50 text-amber-700 ring-amber-200",
-};
-
-// 1-8-a 와 동일 로직. 공통화는 Task 1-8-d 에서 conversations/ 공유 유틸로
-// 이관 판단 (현재는 성급한 추상화 회피 — 내부 상태 동기화 부담 대비 이득 작음).
-// NOTE: 이 함수 / `visitorLabelOf` / `STATUS_LABEL` / `STATUS_CLASS` 를 수정할
-// 때는 `src/app/bots/[slug]/conversations/page.tsx` 의 동일 로직도 함께
-// 업데이트할 것 — silent divergence 방지.
-function maskEmail(email: string): string {
-  const atIdx = email.indexOf("@");
-  if (atIdx <= 0) return "***";
-  const local = email.slice(0, atIdx);
-  const domain = email.slice(atIdx);
-  if (local.length === 1) return `***${domain}`;
-  return `${local.slice(0, 2)}***${domain}`;
-}
-
-function visitorLabelOf(
-  row: Pick<ConversationRow, "user_id" | "email" | "visitor_id">,
-): string {
-  if (row.email) return maskEmail(row.email);
-  if (row.user_id) return "로그인 방문자";
-  return "익명 방문자";
-}
 
 export default async function ConversationDetailPage({
   params,
@@ -182,8 +150,8 @@ export default async function ConversationDetailPage({
   const lastMessageISO = conversation.last_message_at;
   const duration = formatDuration(firstMessageISO, lastMessageISO);
   const visitor = visitorLabelOf(conversation);
-  const statusLabel = STATUS_LABEL[conversation.status];
-  const statusClass = STATUS_CLASS[conversation.status];
+  const statusLabel = CONVERSATION_STATUS_LABEL[conversation.status];
+  const statusClass = CONVERSATION_STATUS_CLASS[conversation.status];
 
   // Client Component 로 전달할 메시지는 KST 로 이미 포맷된 timeLabel 을 포함.
   // Server 에서 미리 계산 → hydration mismatch 차단. `isoTime` 은 `<time

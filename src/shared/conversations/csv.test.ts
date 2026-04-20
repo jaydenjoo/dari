@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildConversationCsv,
-  escapeCsvCell,
-  type CsvMessageRow,
-} from "./csv-util";
+import { buildConversationCsv, escapeCsvCell, type CsvMessageRow } from "./csv";
 
 describe("escapeCsvCell", () => {
   it("평범한 텍스트는 그대로 wrap 없이 반환", () => {

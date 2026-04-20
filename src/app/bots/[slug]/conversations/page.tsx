@@ -5,8 +5,14 @@ import { z } from "zod";
 
 import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
-import type { ConversationStatus, Database } from "@/core/db/types";
+import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
+import {
+  CONVERSATION_STATUS_CLASS,
+  CONVERSATION_STATUS_LABEL,
+} from "@/shared/conversations/status";
+import { visitorLabelOf } from "@/shared/conversations/visitor";
+import { formatRelative } from "@/shared/time/relative";
 
 import { isValidSlug } from "../../new/slug-util";
 import {
@@ -15,7 +21,6 @@ import {
 } from "./conversations-list";
 import { pickFirstUserMessage, truncatePreview } from "./preview-util";
 
-type ConversationRow = Database["public"]["Tables"]["conversations"]["Row"];
 type MessageRow = Database["public"]["Tables"]["messages"]["Row"];
 
 export const metadata: Metadata = {
@@ -33,53 +38,6 @@ const PREVIEW_MAX = 80;
 const MESSAGES_FETCH_LIMIT = 1000;
 
 const pageParamSchema = z.coerce.number().int().min(1).catch(1);
-
-const STATUS_LABEL: Record<ConversationStatus, string> = {
-  active: "진행 중",
-  closed: "종료",
-  handed_off: "담당자 이관",
-};
-
-const STATUS_CLASS: Record<ConversationStatus, string> = {
-  active: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  closed: "bg-gray-50 text-gray-600 ring-gray-200",
-  handed_off: "bg-amber-50 text-amber-700 ring-amber-200",
-};
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "방금 전";
-  if (diffMin < 60) return `${diffMin}분 전`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}시간 전`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 30) return `${diffD}일 전`;
-  return d.toLocaleDateString("ko-KR");
-}
-
-// email 마스킹: `ab***@domain.com` — 본인 owner 만 볼 수 있으나 로그·스크린샷 공유 시
-// 식별자 노출 최소화. local 길이별 처리:
-//   0자 (atIdx<=0, 비정상 입력) → "***"
-//   1자 → "***@domain" (원자 미노출)
-//   2자+ → "ab***@domain" (앞 2자 + 나머지 마스킹)
-function maskEmail(email: string): string {
-  const atIdx = email.indexOf("@");
-  if (atIdx <= 0) return "***";
-  const local = email.slice(0, atIdx);
-  const domain = email.slice(atIdx);
-  if (local.length === 1) return `***${domain}`;
-  return `${local.slice(0, 2)}***${domain}`;
-}
-
-function visitorLabelOf(
-  row: Pick<ConversationRow, "user_id" | "email" | "visitor_id">,
-): string {
-  if (row.email) return maskEmail(row.email);
-  if (row.user_id) return "로그인 방문자";
-  return "익명 방문자";
-}
 
 export default async function ConversationsPage({
   params,
@@ -222,8 +180,8 @@ export default async function ConversationsPage({
           : "(프리뷰 없음)",
       messageCount: bucket.length,
       visitorLabel: visitorLabelOf(c),
-      statusLabel: STATUS_LABEL[c.status],
-      statusClass: STATUS_CLASS[c.status],
+      statusLabel: CONVERSATION_STATUS_LABEL[c.status],
+      statusClass: CONVERSATION_STATUS_CLASS[c.status],
       lastActivityRelative: formatRelative(c.last_message_at),
       lastActivityISO: c.last_message_at,
     };
