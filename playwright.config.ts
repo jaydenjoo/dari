@@ -27,6 +27,11 @@ export default defineConfig({
 
   use: {
     baseURL: "http://localhost:4000",
+    // 주의 (sec L-2): trace / video 는 실패 테스트에 한해 기록되지만, E2E 에서
+    // admin client 가 `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>` 헤더를
+    // 사용하므로 실패 시 artifact 에 키가 포함될 수 있다. CI artifact 접근 제어
+    // + 단기 보존 정책을 유지하고, 로컬 `.gitignore` 의 `playwright-report/` /
+    // `test-results/` 차단은 필수.
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",

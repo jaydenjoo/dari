@@ -10,6 +10,14 @@ import { logger } from "@/core/logging";
 
 import { isValidSlug } from "../new/slug-util";
 import CopySnippet from "./copy-snippet";
+import { StatsSection } from "./stats-section";
+import {
+  EMPTY_STATS,
+  parseBotStats,
+  parseRange,
+  rangeToSince,
+  type BotStats,
+} from "./stats-util";
 
 type BotRow = Database["public"]["Tables"]["bots"]["Row"];
 type BotDetail = Pick<
@@ -65,10 +73,14 @@ function truncate(text: string, max: number): string {
 
 export default async function BotDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ range?: string }>;
 }) {
   const { slug } = await params;
+  const { range: rangeParam } = await searchParams;
+  const range = parseRange(rangeParam);
 
   // DB CHECK(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`) / DariConfig.botId 정규식과
   // 일치하지 않는 slug 는 DB 왕복 없이 즉시 404. (매우 긴/유니코드 slug 로 리소스
@@ -116,6 +128,32 @@ export default async function BotDetailPage({
       { err: parsed.error.issues, slug, userId: user.id },
       "DariConfig 파싱 실패 — 최소 정보만 표시",
     );
+  }
+
+  // Task 1-8-c: 기간별 KPI. RPC 실패 시 페이지 렌더가 무너지지 않도록 0 지표로
+  // 폴백하고 warn 로그만 남긴다 (지식 retrieval 과 동일 철학). Postgres 에러
+  // 메시지는 구조적 필드만 로깅 (sec H-1 학습 재적용).
+  const since = rangeToSince(range, new Date());
+  const { data: statsRaw, error: statsErr } = await supabase.rpc("bot_stats", {
+    p_bot_id: data.id,
+    p_since: since,
+  });
+  let stats: BotStats = EMPTY_STATS;
+  let statsError = false;
+  if (statsErr) {
+    statsError = true;
+    logger.warn(
+      {
+        errCode: statsErr.code,
+        errMsg: statsErr.message,
+        slug,
+        userId: user.id,
+        range,
+      },
+      "bot_stats RPC 실패 — 0 지표 폴백",
+    );
+  } else {
+    stats = parseBotStats(statsRaw);
   }
 
   const snippet = `<script src="${WIDGET_URL}" data-bot-slug="${data.slug}" defer></script>`;
@@ -192,9 +230,16 @@ export default async function BotDetailPage({
           </div>
         </header>
 
+        <StatsSection
+          slug={data.slug}
+          range={range}
+          stats={stats}
+          statsError={statsError}
+        />
+
         <section
           className="animate-in fade-in slide-in-from-bottom-2 mb-6 rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] duration-500"
-          style={{ animationDelay: "160ms", animationFillMode: "both" }}
+          style={{ animationDelay: "280ms", animationFillMode: "both" }}
         >
           <h2 className="mb-5 text-lg font-bold tracking-[-0.01em] text-gray-900">
             기본 정보

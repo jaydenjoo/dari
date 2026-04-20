@@ -63,6 +63,11 @@ export type TextKnowledgeChunkPayload = {
   metadata?: Record<string, unknown>;
 };
 
+// RPC bot_stats 반환은 jsonb → unknown. 구체 타입 선언은 `stats-util.ts` 의
+// Zod `botStatsSchema` 가 단일 진실 (code M-1: 이중 타입 drift 방지).
+// 모든 숫자는 bigint cast → JS number 파싱 시 10^15 미만 안전 (토큰 누적 기준
+// 실질적 한계 아님).
+
 // ─── Database ───
 export type Database = {
   __InternalSupabase: {
@@ -255,6 +260,15 @@ export type Database = {
           p_chunks: TextKnowledgeChunkPayload[];
         };
         Returns: number;
+      };
+      // Task 1-8-c: 봇별 KPI 집계. security invoker + search_path=''.
+      // Returns: unknown — 앱에서 `botStatsSchema.safeParse` 로 구조 확정.
+      bot_stats: {
+        Args: {
+          p_bot_id: string;
+          p_since: string; // timestamptz ISO
+        };
+        Returns: unknown;
       };
     };
     Enums: Record<string, never>;
