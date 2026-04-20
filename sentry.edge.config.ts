@@ -6,9 +6,13 @@ import { beforeSend } from "./src/core/observability/beforeSend";
  *
  * ⚠️ sentry.server.config.ts 와 의도적으로 거의 동일한 내용.
  *    Node 와 Edge 런타임 번들 분리가 필수라 추출 불가 — 한쪽 수정 시 반대편 동기화 필수.
+ *
+ * DSN 참조 순서: `SENTRY_DSN` → `NEXT_PUBLIC_SENTRY_DSN` fallback.
+ * (Vercel Native Integration 의 `NEXT_PUBLIC_SENTRY_DSN` 단일 주입에 대응 — server 와 동기)
  */
 
-const dsn = process.env.SENTRY_DSN?.trim();
+const dsn =
+  process.env.SENTRY_DSN?.trim() ?? process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
 const IS_DEV = process.env.NODE_ENV === "development";
 
 if (dsn) {

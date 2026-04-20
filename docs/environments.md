@@ -209,6 +209,39 @@ Sentry.init({
 - **Sentry UI 필터 준비**: Issues 목록에서 `environment:production` 필터로 실사용자 에러만 집계
 - **Alert 규칙**: `environment:production AND level:error` → Jayden 알림. preview 는 PR 단위 사전 검증용으로 노이즈 감안하고 관찰
 
+### Vercel Native Integration (2026-04-20 재설정, 단일 경로 확정)
+
+Sentry 조직 2개 공존(수동 `dari-vb` + Vercel 자동 `jayden-f0`)으로 인한 source map/release 이중화 이슈를 2026-04-20 해결. 두 조직 완전 삭제 후 **Vercel Marketplace → Sentry Native Integration** 단일 경로로 재설치. 현행 단일 조직/프로젝트: `jayden-k4 / jayden-projects` (DSN host `o4511246432796672.ingest.us.sentry.io`).
+
+**Vercel Integration 이 자동 주입하는 env 7개** (Project → Settings → Environment Variables UI 숨김 주입, 빌드/런타임 양쪽 사용):
+
+| env                           | 역할                                      | 코드 참조                                                               |
+| ----------------------------- | ----------------------------------------- | ----------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SENTRY_DSN`      | 브라우저 + 서버/엣지 DSN (fallback 경유)  | `instrumentation-client.ts` / `sentry.{server,edge}.config.ts` fallback |
+| `SENTRY_ORG`                  | 빌드 시 source map 업로드 대상 조직       | `next.config.ts` (`withSentryConfig`)                                   |
+| `SENTRY_PROJECT`              | 빌드 시 source map 업로드 대상 프로젝트   | `next.config.ts` (`withSentryConfig`)                                   |
+| `SENTRY_AUTH_TOKEN`           | source map + release 인증 토큰            | `next.config.ts` (빌드 전용)                                            |
+| `SENTRY_PUBLIC_KEY`           | DSN 의 public key 부분 (Integration 메타) | ➖ 미사용                                                               |
+| `SENTRY_VERCEL_LOG_DRAIN_URL` | Vercel 로그 → Sentry 전송 URL             | ➖ 미사용 (선택 기능)                                                   |
+| `SENTRY_OTLP_TRACES_URL`      | OpenTelemetry tracing endpoint            | ➖ 미사용 (고급 기능)                                                   |
+
+> ⚠️ **`SENTRY_DSN` (non-public) 은 주입되지 않음**. Vercel Native Integration 설계 철학은 `NEXT_PUBLIC_*` 단일 DSN 을 서버/클라가 공유. 이에 대응해 `sentry.server.config.ts` + `sentry.edge.config.ts` 는 `SENTRY_DSN ?? NEXT_PUBLIC_SENTRY_DSN` fallback 적용 (2026-04-20). 로컬 `.env.local` 에서는 두 변수 모두 명시 (env-template.md 일관성).
+
+**검증 방법** (재설치/이관 시):
+
+1. Vercel Dashboard → Project → Settings → Integrations → Sentry "Configured" 상태
+2. 배포 로그 3개 라인 동시 확인 (UI 에 env 가 안 보여도 이게 진실의 근원):
+   - `Organization: jayden-k4`
+   - `Uploaded X sourcemaps`
+   - `Creating release ...`
+3. Sentry Issues 탭에 의도적 에러 1건 도착 (임시 `/api/sentry-test` 라우트 → 검증 후 즉시 삭제)
+
+**주의사항 (Vercel Marketplace Sentry 특성)**:
+
+- "Create New Sentry Account" 는 기존 Sentry 계정 탐색 없이 **별도 조직 자동 생성**. Resource Name 이 **프로젝트 slug** 로 반영되지만 **조직 slug** 은 Vercel 계정 기준 자동 slug (예: `jayden-k4`) 으로 생성. 이후 rename 은 Sentry 대시보드에서 가능하나 URL 변경 전파 시간 고려.
+- 설치 시 **Plan = Developer (Free)** 선택 필수 (5k errors/월, 1 user). Team/Business 는 신용카드 요구.
+- Next.js 앱 라우터에서 테스트 라우트 경로에 `_` prefix 사용 금지 — private folder 로 취급되어 라우팅 제외 (`__sentry-test` 실패 케이스, `sentry-test` 로 수정).
+
 ---
 
 ## 8. Preview 데이터 격리 전략

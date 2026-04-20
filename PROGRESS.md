@@ -6,7 +6,7 @@
 
 - Phase: 1 (MVP 기능) 진행 중
 - Epic: **Epic 1-6 위젯 런타임 1-6-a/b/c/d ✅ + γ-3 ✅** + **Epic 1-7 지식 업로드 — Task 1-7-a text 타입 ✅**
-- 상태: **Task 1-6-c RAG 연결 완료** (vitest 243 → 261, +18 / retrieval + prompt-augment + route.ts 통합 / 독립 리뷰 2 Fix-then-ship + 6건 반영) + **Sentry Vercel Native Integration 이관 진행 중** (`jayden-f0 / sentry-copper-mountain` 자동 생성 조직으로 배포 정상 작동 — `.env.local` DSN 최종 교체 대기) / **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** → 다음 **Jayden 수동 마이그레이션 apply 후 브라우저 스모크 또는 Task 1-7-b/c (URL/파일 지식)**
+- 상태: **Sentry Vercel Native Integration 완결 (2026-04-20)** — `dari-vb` + `jayden-f0` 두 조직 완전 삭제 후 `jayden-k4 / jayden-projects` 단일 재생성 / `sentry.{server,edge}.config.ts` 에 `SENTRY_DSN ?? NEXT_PUBLIC_SENTRY_DSN` fallback 추가 (Vercel Integration 이 `NEXT_PUBLIC_*` 만 주입) / 로컬 dev 서버 의도적 에러 5회 → Sentry Issues 수집 실증 / `docs/environments.md §7` 갱신. + **Task 1-6-c RAG 연결 완료** (vitest 261) + **Task 1-7-a text 업로드 파이프라인 완료** / **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** → 다음 **Jayden 수동 마이그레이션 apply 후 브라우저 스모크 또는 Task 1-7-b/c (URL/파일 지식)**
 
 ## 완료된 Epic
 
@@ -79,7 +79,75 @@
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
 
-## 이번 세션(2026-04-19 Ⅲ) 완료 내역 — Task 1-6-c RAG 연결 + Sentry Vercel Integration 이관 진행
+## 이번 세션(2026-04-20) 완료 내역 — Sentry Vercel Native Integration 재설정 완결 (단일 조직 확정)
+
+직전 세션(Task 1-6-c, 2026-04-19 Ⅲ) 에서 남겨둔 "Sentry 조직 2개 공존" 기술 부채 정리. 기존 수동 조직 `dari-vb` + Vercel 자동 조직 `jayden-f0` 을 전부 삭제하고 Vercel Marketplace 단일 경로로 `jayden-k4 / jayden-projects` 재생성. 이 과정에서 Vercel Native Integration 이 `NEXT_PUBLIC_SENTRY_DSN` 만 주입하는 설계를 실증으로 발견하고 `sentry.{server,edge}.config.ts` 에 fallback 추가. 로컬 dev 서버에서 의도적 에러 5회 → Sentry Issues 수집 실증 (스크린샷 2장 증거).
+
+### 흐름 (~90분)
+
+1. **Plan → Approve** (~10분) — 3 경로 비교표 (코드 fallback / Vercel 수동 추가 / 방치). 경로 A (fallback) 승인.
+2. **Sentry 외부 재설정** (Jayden 수동, ~25분)
+   - Phase 1: Vercel → Settings → Integrations → Sentry "Remove" → 두 조직 모두 "Remove Organization"
+   - Phase 2: Vercel Marketplace 경유 Sentry Native Integration 재설치 → Resource Name = `jayden-projects` (조직 slug 은 Vercel 계정 기반 자동 `jayden-k4`), Plan = Developer (Free)
+   - Phase 3: `.env.local` 에 새 DSN + `SENTRY_ENVIRONMENT` 교체
+3. **코드 fallback 패치** (~10분)
+   - `sentry.{server,edge}.config.ts`: `SENTRY_DSN?.trim() ?? NEXT_PUBLIC_SENTRY_DSN?.trim()` + 주석
+   - 검증: typecheck / test 261 / prettier 모두 clean
+4. **Phase 4 로컬 검증** (~20분) — 3번 막힘 후 성공
+   - 포트 4000 을 `pg-system-api` Docker 컨테이너가 점유 → Jayden 이 `!docker stop pg-system-api`
+   - 디렉토리명 `__sentry-test` → Next App Router `_` prefix = private folder, 라우팅 완전 제외 → `sentry-test` 로 rename
+   - `.env.local` 저장했으나 dev 서버 미재시작 → `instrumentation.ts` 는 부팅 시점만 실행되므로 Sentry.init 재실행 안 됨 → Ctrl+C → `pnpm dev` 재시작
+   - 최종 성공 — 진단 라우트 `?debug=1` 로 `clientInitialized: true` + `dsnHost: o4511246432796672.ingest.us.sentry.io` + `dsnProjectId: 4511249849450496` 확인 → 에러 5회 발생 → Sentry Issues 탭에 events 5개 수집
+5. **Phase 6 문서/코드 정리** (~15분)
+   - `docs/environments.md §7` 에 "Vercel Native Integration (2026-04-20 재설정, 단일 경로 확정)" 서브섹션 추가: 주입 env 7개 표 + fallback 설계 근거 + 검증 방법 + 함정 3가지
+   - 임시 라우트 `src/app/api/sentry-test/` 디렉토리 완전 삭제
+6. **세션 저장** (`/save`) — 본 PROGRESS 섹션 + learnings +2 + git 커밋/푸시
+
+### 신규 / 수정 파일
+
+- **수정 4**:
+  - `sentry.server.config.ts` — DSN fallback + 주석
+  - `sentry.edge.config.ts` — 동일 (server 와 동기)
+  - `docs/environments.md` — §7 Vercel Native Integration 서브섹션 +33줄
+  - `PROGRESS.md` — 현재 위치 + 이번 세션 내역
+- **신규(이후 삭제)**: `src/app/api/sentry-test/route.ts` — Phase 4 검증 후 제거
+
+### 검증
+
+- **pnpm typecheck**: clean
+- **pnpm test**: **261 passed** (회귀 0, 직전 세션과 동일 카운트)
+- **pnpm prettier**: clean
+- **Sentry 로컬 실증**: `clientInitialized: true` + DSN host/projectId 확인 + Issues 탭 5 events 수집
+
+### 주요 결정 / 교훈 (learnings.md 기록 +2)
+
+- **`_` prefix = Next.js App Router private folder** — `__sentry-test` 가 라우트로 인식 안 된 근본 원인. 테스트/디버그 prefix 로 `debug-*`, `internal-*` 사용 + NODE_ENV 가드. **learnings.md 기록**.
+- **Vercel Native Integration = `NEXT_PUBLIC_SENTRY_DSN` 만 주입** — `SENTRY_DSN` (non-public) 은 설계상 주입 안 함. 서버 config 는 `SENTRY_DSN ?? NEXT_PUBLIC_SENTRY_DSN` fallback 이 표준. 검증은 빌드 로그가 아닌 런타임 `Sentry.getClient()?.getDsn()`. **learnings.md 기록**.
+- **Docker 포트 점유 진단** — `lsof -i :4000` + `docker ps --filter` 로 호스트-컨테이너 매핑 확인. Supabase realtime 처럼 내부 포트만 쓰는(매핑 없음) 컨테이너와 실제 호스트 점유 컨테이너를 구분해야 오진단 없음. (learnings 미기록 — 상식 범주)
+
+### Backlog (다음 세션)
+
+- **🎯 Phase 5 — Vercel Preview 검증 (commit + push)** — 본 세션의 코드/문서 변경이 Vercel Preview 빌드 로그에서 `Organization: jayden-k4` / `Uploaded X sourcemaps` / `Creating release ...` 3개 라인 동시 출력되는지 실증. 이전 warning 2건(`No auth token provided`) 완전 제거 확인.
+- **🟡 0007 + 0008 마이그레이션 Supabase 실 apply (Jayden 수동)** — `check_message_limit()` + `replace_text_knowledge_chunks` 한 번에 처리 → 실 E2E 검증 해금 (이월).
+- **🎯 Jayden 브라우저 스모크** — 마이그레이션 apply 후, 위젯 플로팅 버튼 / 메시지 송수신 / 봇별 브랜드 / **RAG 응답** (Task 1-6-c 실증).
+- **Sentry 정리 (선택)** — Vercel Resource Name `jayden-projects` 를 조직+프로젝트 양쪽 일관된 네이밍으로 rename 검토 (slug 변경 시 URL 전파 시간 고려). 현행 `jayden-k4 / jayden-projects` 동작 정상, 단순 미관.
+- **Phase 2 이월** (직전 세션에서 계승):
+  - Task 1-7-b (url 크롤링, Firecrawl) / 1-7-c (file 업로드, PDF 파서) / 1-7-d (다중 text source UI)
+  - RAG history-aware 개선 / sec MEDIUM-1 Upstash ephemeralCache / sec MEDIUM-1 Rate limit (봇당 ingest)
+  - code H-2 `embeddings[index]!` non-null 단언 / L-2 이모지 surrogate 테스트 / L-3 values null/undefined 에러 메시지 / L-4 SVG 공유 컴포넌트
+  - chat API `origin_not_allowed` → 404 통일 / OPTIONS preflight DB 이중 호출 리팩터 / env.ts `as ServerEnv` 단언 개선 / CDN purge
+  - welcomeMessage 콘텐츠 정책 (피싱 링크 검사, 설계 수준)
+  - `knowledge-placeholder.tsx` dead code 제거
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-20 (KST)
+- 브랜치: `main`
+- 차단 요소: 없음
+
+---
+
+## 직전 세션(2026-04-19 Ⅲ) 완료 내역 — Task 1-6-c RAG 연결 + Sentry Vercel Integration 이관 진행
 
 Task 1-7-a 에서 확보한 지식 저장 경로 위에, chat API 가 질의 → 임베딩 → 상위 K 청크 → XML 태그 주입으로 RAG 응답을 만드는 엔드투엔드 경로 완성. 병행하여 Sentry 빌드타임 env 가 Vercel 에 없어 발생하던 warning 을 Vercel Native Integration 으로 해결하는 과정에서 조직 2개 공존 상태 발견.
 
@@ -186,7 +254,7 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 ### 주요 결정 / 교훈
 
-- **source_type 매핑 분리** — DB CHECK(`manual|url|pdf|markdown`) vs DariConfig(`text|url|file`). 변환 지점은 ingest* 함수 단일 진입점. 주석 단일화로 Task 1-7-b/c 진입 시 혼란 예방 (code H-1+M-1).
+- **source_type 매핑 분리** — DB CHECK(`manual|url|pdf|markdown`) vs DariConfig(`text|url|file`). 변환 지점은 ingest\* 함수 단일 진입점. 주석 단일화로 Task 1-7-b/c 진입 시 혼란 예방 (code H-1+M-1).
 - **공개 에러 메시지 정적화** — RPC/외부 호출 실패 시 throw 에는 static identifier(`"knowledge RPC failed"`)만, 내부 상세(Postgres errcode/정책명/테이블명)는 logger 메타에만. 상위 catch 가 일반화 응답으로 바꿀 여지 + catch 없이 전파되는 경로에서도 내부 누출 방지. **learnings.md 에 1건 기록** (+44건째).
 - **sanitize 시점 = 저장 단계** — 지식 content 는 LLM 입력 + UI 렌더 양쪽 경로를 통과 → 저장 시점 단일 sanitize 로 downstream 방어 중복 회피 (sec H-2).
 - **existingParsed fail-fast** — `success=false` 로 두면 url/file sources 가 조용히 삭제. Task 1-7-b/c 이후 실데이터 손실 경로 → 사전 방어 (code M-4).
@@ -1096,7 +1164,7 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - [x] **Task 1-6-a: 위젯 Chat API 최소 구현 (Epic 1-6 진입) — anon `/api/chat/[botId]` POST + OPTIONS + Anthropic SDK 싱글턴 + bot-chat-limiter 봇당 IP 100/h + 6중 보안 레이어 + 독립 리뷰 2 + 일괄 5건 반영 (sanitize / 메시지 상한 200 / max_tokens clamp 2048 / warn 로깅 / null origin 문서화)**
 - [x] **Task 1-6-b: `/widget.js` 번들 스캐폴딩 — esbuild + Shadow DOM(closed) + Vanilla JS + localStorage / 번들 5.3→5.4KB gzip / 독립 리뷰 2 + 옵션 C 일괄 9건 반영 + security 재리뷰 MEDIUM 3건 반영 (C0+C1 제어문자 / Unicode 방향제어 / Tag chars)**
 - [x] **Task 1-6-d: DariConfig 로더 — anon `/api/widget-config/[botId]` + `pickPublicConfig` 화이트리스트 9필드 명시 복제 (spread 금지) + 복합키 rate limit (`botId:ip` 1000/h) + 독립 리뷰 2 + 일괄 6건 반영 (enumeration 통일 404 / avatar referrerpolicy / fontFamily 정규화)**
-- [x] **Task γ-3: 브라우저 Sentry 환경 분리 — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum(dev/preview/production) + clientSchema export + summarizeFieldErrors / 독립 리뷰 2 Ship as-is + 선제 보강 3건 (필드별 에러 요약 / env-template 주석 / fake-* prefix)**
+- [x] **Task γ-3: 브라우저 Sentry 환경 분리 — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` enum(dev/preview/production) + clientSchema export + summarizeFieldErrors / 독립 리뷰 2 Ship as-is + 선제 보강 3건 (필드별 에러 요약 / env-template 주석 / fake-\* prefix)**
 - [x] **Task 1-7-a (Epic 1-7 진입): text 지식 업로드 + 임베딩 파이프라인 — chunking/embedding/ingest/sanitize util + 0008 RPC (security invoker + search_path) + 단일 textarea UI + 독립 리뷰 2 Fix-then-ship + 5건 반영 (공개 에러 메시지 정적화 / sanitize / existingParsed fail-fast / 매핑 주석 / dead code) / vitest 212 → 243 (+31)**
 
 ## 세션 이력

@@ -32,6 +32,41 @@
 
 ## 기록
 
+### 2026-04-20 Next.js App Router `_` prefix = private folder (라우팅 완전 제외) (기술 이슈)
+
+**증상**: Phase 4 Sentry 검증용 임시 라우트를 `src/app/api/__sentry-test/route.ts` 에 생성. `/api/__sentry-test` 호출 시 `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"Cannot GET /api/__sentry-test"}}` envelope 응답. 초기에는 포트 4000 을 Docker `pg-system-api` 가 점유하던 문제로 착각(그것도 실제 별개 문제)했으나, 포트 해제 후에도 `_` prefix 라우트는 인식 안 됨. 디렉토리명을 `sentry-test` 로 변경하고 나서야 정상 라우트 등록.
+
+**원인**: Next.js App Router 공식 컨벤션 — `_` 로 시작하는 폴더는 **private folder** 로 취급되어 **라우팅에서 완전 제외**. 설계 의도는 `_components`, `_lib`, `_utils` 같은 "구현 세부사항 네임스페이스" 를 라우트 트리와 분리. `__` (double underscore) 도 `_` 로 시작이므로 동일 규칙 적용. `route.ts` / `page.tsx` 가 존재해도 라우트 미등록.
+
+**해결**: `mv src/app/api/__sentry-test src/app/api/sentry-test` — 내용 유지, `_` 제거.
+
+**규칙** ⭐:
+
+- **`src/app/**/\_\*` 는 Next.js App Router private folder** — 라우팅 제외. 조직화 용도 (`\_components`, `\_lib`).
+- 테스트/디버그 라우트라도 `_` prefix 금지. 대안: `debug-*` / `internal-*` 같은 가시적 prefix + `if (process.env.NODE_ENV === "production") return 404` 가드.
+- **빌드 로그 라우트 목록에 표시되지 않음** (`pnpm build` 의 `○ (Static)` 리스트에 안 뜸) — "내가 만든 라우트인데 왜 안 되지?" 디버깅 시간 낭비의 주요 원인.
+- Dari 에서 `/api/_foo` 호출 시 envelope(`Cannot GET ...`) 응답은 `proxy.ts` 또는 전역 404 경유 — private folder 라서 라우트 매칭 실패 → 일반 404 경로.
+
+---
+
+### 2026-04-20 Vercel Native Integration 은 `NEXT_PUBLIC_SENTRY_DSN` 만 주입 → 서버 config fallback 필수 (설계 결정)
+
+**증상**: Vercel Marketplace 경유 Sentry Native Integration 재설치 후, Environment Variables UI 에 7개 env 자동 주입 (`SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_PUBLIC_KEY`, `SENTRY_VERCEL_LOG_DRAIN_URL`, `SENTRY_OTLP_TRACES_URL`). 그러나 **`SENTRY_DSN` (non-public) 은 주입 목록에 없음**. `sentry.server.config.ts` + `sentry.edge.config.ts` 가 기존에 `process.env.SENTRY_DSN?.trim()` 만 참조 → 로컬 debug 엔드포인트(`/api/sentry-test?debug=1`) 로 `Sentry.getClient()?.getDsn()` 확인 시 `null` / `clientInitialized: false`. 즉 Vercel 배포 환경에서 **서버/엣지 Sentry 가 no-op**.
+
+**원인**: Vercel Native Integration 의 설계 철학 — **단일 DSN 을 `NEXT_PUBLIC_*` 으로만 주입하고 서버/클라가 공유**하는 가정. Sentry SDK 관례인 "서버 전용 DSN" 패턴 (같은 DSN 값을 non-public env 로도 제공) 을 Integration 이 표준화하지 않음. 반면 로컬 `.env.local` 은 `SENTRY_DSN` + `NEXT_PUBLIC_SENTRY_DSN` 두 변수 모두 명시 관례. 코드가 `SENTRY_DSN` 에만 의존하면 Vercel 에서 깨진다.
+
+**해결**: `sentry.{server,edge}.config.ts` 에 `process.env.SENTRY_DSN?.trim() ?? process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()` fallback 적용. 서버 런타임에서 `NEXT_PUBLIC_*` env 접근은 안전 (빌드 시 인라인 + 런타임 `process.env` 양쪽 제공).
+
+**규칙** ⭐:
+
+- **Sentry SDK + Vercel Native Integration 조합 시, 서버/엣지 config 는 반드시 `SENTRY_DSN ?? NEXT_PUBLIC_SENTRY_DSN` fallback**. Vercel 이 non-public DSN 을 주입하지 않는 건 버그 아닌 설계 결정. 서버 전용 env 를 기대하면 필연적으로 깨진다.
+- **검증 방법은 빌드 로그가 아님**. source map 업로드 메시지만 보면 런타임 SDK init 여부 알 수 없다. 진단 라우트에서 `Sentry.getClient()?.getDsn()` 반환값 확인 필수 (`clientInitialized: true` + `dsnHost` 비null 둘 다).
+- 대안 (Vercel 에 `SENTRY_DSN` 수동 등록) 은 Integration 주입 env 와 중복 관리 비용 증가 → 코드 fallback 이 표준 패턴.
+- `instrumentation.ts` 는 **서버 부팅 시점에만** 실행 — env 변경 후 Next.js hot reload 는 `process.env` 를 갱신하지만 **Sentry.init 은 재실행되지 않음**. dev 서버 완전 재시작(`Ctrl+C → pnpm dev`) 필수. "env 저장했는데 왜 Sentry 반영 안 되지?" 혼선의 구조적 원인.
+- **로컬 `.env.local` 은 두 변수 모두 명시** 관례 유지 — fallback 덕에 하나만 있어도 동작하나, 명시 쪽이 의도 표현 + env-template.md 일관성.
+
+---
+
 ### 2026-04-19 supabase-js `.rpc()` 안전 계약 — `{data,error}` + throw 두 경로 모두 감싸야 함 (기술 이슈)
 
 **증상**: Task 1-6-c `retrieveRelevantChunks` 초안. `embedBatch` 는 try-catch 로 감쌌는데 `admin.rpc("match_knowledge_chunks", ...)` 는 `{ data, error }` 분기만 처리. 독립 code-reviewer 리뷰 MEDIUM-1: `admin.rpc()` 자체가 네트워크 단절/fetch 레이어 예외 시 throw 로 나올 수 있고, 이 경로는 catch 되지 않아 상위 `callAnthropic` 까지 예외가 전파됨 → `null` 반환 → 502 응답. "RAG 는 보조 기능이므로 chat 전체 실패로 전파 금지" 안전 계약 위반.
@@ -41,6 +76,7 @@
 **해결**: `admin.rpc(...)` 호출을 try-catch 로 감싸 throw 경로도 빈 배열 fallback 으로 귀결시키고, 회귀 방지 테스트 (`mockRpc.mockRejectedValueOnce(new Error("fetch failed"))`) 로 catch 누락을 즉시 노출하도록 추가.
 
 **규칙** ⭐:
+
 - supabase-js `.rpc()` / `.from().select()` 등 네트워크 호출이 **안전 계약(throw 금지)** 을 가지는 함수 안에 있으면 **반드시 try-catch + `{error}` 분기 둘 다** 처리.
 - 동일 함수 내에서 외부 호출이 여러 개면 모든 외부 호출에 대해 **대칭적으로** catch 적용 (일부만 감싸면 경로 불일치가 독립 리뷰에서 반드시 잡힌다).
 - 안전 계약 구현을 증명하는 것은 **해피 패스 아닌 실패 경로 테스트**. throw 케이스를 mock 하는 테스트는 필수.
@@ -56,6 +92,7 @@
 **해결**: escape 적용 범위를 "외부 입력 청크 content" 로 한정하고, basePrompt 는 그대로 전달. 주석에 "basePrompt 는 봇 소유자가 작성한 systemPrompt 로 신뢰된 입력이며... `<role>` 등 XML 태그를 사용하는 것이 정당 ... 소유자가 실수로 `</knowledge>` 를 넣는 시나리오는 소유자 자기 책임 영역으로 수용" 명시 (security MEDIUM-2 의식적 미반영 근거).
 
 **규칙** ⭐:
+
 - Prompt / Template 조립 함수에서 여러 입력이 들어올 때, 각 입력의 **신뢰 경계**를 먼저 식별: 외부 입력(사용자·크롤러·API) / 소유자 입력(설정값·systemPrompt) / 시스템 상수.
 - escape/sanitize 는 **외부 입력**에만 적용. 소유자 입력에 escape 를 걸면 Claude 공식 XML 패턴 같은 정당한 사용을 차단.
 - 신뢰 경계 분기의 **근거를 주석에 명시** — 미래 리뷰어가 "왜 한쪽만 escape 하지?" 로 되묻지 않게.
@@ -68,6 +105,7 @@
 **증상**: Jayden 이 Sentry 설정을 위해 ① Sentry 웹에서 수동으로 `dari-vb` 조직 + `javascript-nextjs` 프로젝트 생성 + DSN 복사 → `.env.local` 에 등록 ② Vercel Marketplace 에서 Sentry Integration 설치 (Create New 선택). Vercel 배포 로그 확인 시 source map 은 전혀 다른 조직(`jayden-f0`) + 프로젝트(`sentry-copper-mountain`) 로 업로드. Vercel Project Settings → Environment Variables UI 에는 `SENTRY_*` env 가 하나도 안 보임에도 빌드 시점에는 정상 주입되어 warning 2건 제거됨.
 
 **원인**:
+
 - Vercel Marketplace 의 "Create New Sentry Account" (Vercel Native) 경로는 **기존 Sentry 계정과 완전 독립적으로 신규 조직을 자동 생성**. Jayden 이 이미 만든 `dari-vb` 를 탐색/연결하지 않는다. 결과적으로 조직 2개 공존.
 - Integration-주입 env (`SENTRY_AUTH_TOKEN` 등) 는 Project Settings → Environment Variables UI 에 표시되지 않는 숨김 경로로 주입. 사용자 관리 env 와 구분되어 "숨김 주입" 방식. UI 에서 존재 확인 불가, 배포 로그에서만 동작 증명.
 - AI 가 `@sentry/nextjs` 코드 통합을 먼저 완료한 후 Jayden 이 외부 설정을 해야 하는 의존 관계에서, 설정 절차의 권장 순서(`Vercel Marketplace 먼저 → 자동 프로젝트 생성` vs `수동 프로젝트 먼저 → Integration 나중에`) 를 선행 안내하지 않음 → Jayden 이 수동 조직 + Integration 자동 조직 양쪽 만드는 시행착오.
@@ -75,6 +113,7 @@
 **해결**: 사건 시점에는 `jayden-f0` 유지 + `dari-vb` 폐기 경로 A 채택 (Integration 이 이미 정상 연결). `.env.local` DSN 도 `jayden-f0` 의 것으로 재교체. 근본 재발 방지는 메모리 + 이 교훈:
 
 **규칙** ⭐:
+
 - 외부 SDK 도입 Task 의 Plan 단계에서 **외부 선결 조건 체크리스트**를 먼저 제시 (계정/조직/프로젝트/권한/env/결제/**공식 권장 설치 순서**/수동 구간). 코드 완성 후 Jayden 이 외부 설정 착수하면 늦다 — 배포 warning 이 첫 증상.
 - Vercel Marketplace 류 "Create New" 는 기존 외부 계정을 **탐색하지 않음**. "Link Existing" 선택지가 있으면 이게 기본이어야 한다. 안내 시 반드시 Link Existing 을 기본 추천.
 - Integration-주입 env 는 UI 표시 안 될 수 있다. 존재 확인은 Project Settings 가 아니라 **배포 로그** (`Organization: ...`, `Projects: ...` 라인) 가 진실의 근원.
