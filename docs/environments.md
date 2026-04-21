@@ -10,11 +10,11 @@
 
 Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환경 Lean** 으로 시작한다.
 
-| 환경      | 정의                             | 호스팅             | 도메인                                | Supabase 프로젝트                  |
-| --------- | -------------------------------- | ------------------ | ------------------------------------- | ---------------------------------- |
-| `local`   | 개발자 로컬 머신                 | `pnpm dev` @ :4000 | `http://localhost:4000`               | `dari-dev` (개발 전용 프로젝트)    |
-| `preview` | Vercel Preview (PR 브랜치 자동)  | Vercel Edge        | `dari-git-<branch>-<team>.vercel.app` | `dari-dev` 공유 (preview = dev)    |
-| `prod`    | 프로덕션 (Soft Launch Stage 1~4) | Vercel Production  | `dairect.kr`                          | `dari-prod` (Stage 1 진입 시 생성) |
+| 환경      | 정의                             | 호스팅             | 도메인                                                                                                   | Supabase 프로젝트                  |
+| --------- | -------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `local`   | 개발자 로컬 머신                 | `pnpm dev` @ :4000 | `http://localhost:4000`                                                                                  | `dari-dev` (개발 전용 프로젝트)    |
+| `preview` | Vercel Preview (PR 브랜치 자동)  | Vercel Edge        | `dari-git-<branch>-<team>.vercel.app`                                                                    | `dari-dev` 공유 (preview = dev)    |
+| `prod`    | 프로덕션 (Soft Launch Stage 1~4) | Vercel Production  | 테스트 단계 `dari-theta.vercel.app` → 10곳 업체 검증 후 `dairect.kr` 커스텀 도메인 연결 (ADR-009 §9-1 γ) | `dari-prod` (Stage 1 진입 시 생성) |
 
 **`stg` (스테이징) 환경은 의도적 제외**. Vercel Preview 가 자연스러운 stg 역할을 담당한다. Stage 3(퍼블릭 오픈) 이후 필요성 재평가.
 
@@ -46,23 +46,24 @@ Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환�
 
 ## 3. 환경변수 차이 매트릭스
 
-| 변수                             | `local`                     | `preview`                   | `prod`                            |
-| -------------------------------- | --------------------------- | --------------------------- | --------------------------------- |
-| `NODE_ENV`                       | `development`               | `production` (Vercel 자동)  | `production`                      |
-| `NEXT_PUBLIC_APP_URL`            | `http://localhost:4000`     | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`              |
-| `NEXT_PUBLIC_SUPABASE_URL`       | dari-dev URL                | dari-dev URL                | **dari-prod URL** (교체)          |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | dari-dev anon               | dari-dev anon               | **dari-prod anon** (교체)         |
-| `SUPABASE_SERVICE_ROLE_KEY`      | dari-dev service_role       | dari-dev service_role       | **dari-prod service_role** (교체) |
-| `DATABASE_URL`                   | (선택, migration CLI 전용)  | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI) |
-| `ANTHROPIC_API_KEY`              | 개인 개발 키 (저비용)       | 개인 개발 키                | **프로덕션 키** (사용량 분리)     |
-| `GOOGLE_GENERATIVE_AI_API_KEY`   | 개인 개발 키                | 개인 개발 키                | **프로덕션 키**                   |
-| `UPSTASH_REDIS_REST_URL`         | dari-dev Redis              | dari-dev Redis              | **dari-prod Redis** (교체)        |
-| `UPSTASH_REDIS_REST_TOKEN`       | dari-dev token              | dari-dev token              | **dari-prod token**               |
-| `SENTRY_DSN`                     | (선택, 로컬 디버그용)       | prod 와 동일 DSN            | prod DSN                          |
-| `NEXT_PUBLIC_SENTRY_DSN`         | (선택)                      | prod 와 동일 DSN            | prod DSN                          |
-| `SENTRY_ENVIRONMENT`             | `development`               | `preview`                   | `production`                      |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`               | `preview`                   | `production`                      |
-| `FIRECRAWL_API_KEY`              | 개인 개발 키 (`fc-` 접두어) | 개인 개발 키                | **프로덕션 키**                   |
+| 변수                             | `local`                     | `preview`                   | `prod`                                                                                     |
+| -------------------------------- | --------------------------- | --------------------------- | ------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                       | `development`               | `production` (Vercel 자동)  | `production`                                                                               |
+| `NEXT_PUBLIC_APP_URL`            | `http://localhost:4000`     | `$VERCEL_URL` (Vercel 자동) | `https://dairect.kr`                                                                       |
+| `NEXT_PUBLIC_SUPABASE_URL`       | dari-dev URL                | dari-dev URL                | **dari-prod URL** (교체)                                                                   |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | dari-dev anon               | dari-dev anon               | **dari-prod anon** (교체)                                                                  |
+| `SUPABASE_SERVICE_ROLE_KEY`      | dari-dev service_role       | dari-dev service_role       | **dari-prod service_role** (교체)                                                          |
+| `DATABASE_URL`                   | (선택, migration CLI 전용)  | ❌ 불필요                   | ❌ 불필요 (migration 은 로컬 CLI)                                                          |
+| `ANTHROPIC_API_KEY`              | 개인 개발 키 (저비용)       | 개인 개발 키                | **프로덕션 키** (사용량 분리)                                                              |
+| `GOOGLE_GENERATIVE_AI_API_KEY`   | 개인 개발 키                | 개인 개발 키                | **프로덕션 키**                                                                            |
+| `UPSTASH_REDIS_REST_URL`         | dari-dev Redis              | dari-dev Redis              | **dari-prod Redis** (교체)                                                                 |
+| `UPSTASH_REDIS_REST_TOKEN`       | dari-dev token              | dari-dev token              | **dari-prod token**                                                                        |
+| `SENTRY_DSN`                     | (선택, 로컬 디버그용)       | prod 와 동일 DSN            | prod DSN                                                                                   |
+| `NEXT_PUBLIC_SENTRY_DSN`         | (선택)                      | prod 와 동일 DSN            | prod DSN                                                                                   |
+| `SENTRY_ENVIRONMENT`             | `development`               | `preview`                   | `production`                                                                               |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `development`               | `preview`                   | `production`                                                                               |
+| `FIRECRAWL_API_KEY`              | 개인 개발 키 (`fc-` 접두어) | 개인 개발 키                | **프로덕션 키**                                                                            |
+| `NEXT_PUBLIC_WIDGET_CDN_URL`     | (default 사용)              | (default 사용)              | `dari-theta.vercel.app/widget.js` → 10곳 테스트 후 `dairect.kr/widget.js` (ADR-009 §9-1 γ) |
 
 > **원칙**: **dev 비용 ≠ prod 비용**. AI 키·Redis·Supabase 는 환경별로 **반드시 분리**. 한 key 공유 시 prod 트래픽이 dev 크레딧을 소진하거나 반대로 개발 실수가 prod 데이터를 오염시킨다.
 
@@ -122,8 +123,8 @@ Dari 의 권장 설정:
 
 1. Vercel 계정에서 리포 import → 프로젝트 생성
 2. Build Command: `pnpm build` / Output: `.next` (Turbopack 는 Vercel 자동 감지)
-3. 환경변수 등록 (§4-1 범위 원칙 준수)
-4. `dairect.kr` 도메인 연결 + DNS 설정
+3. 환경변수 등록 (§4-1 범위 원칙 준수) — `NEXT_PUBLIC_WIDGET_CDN_URL` 포함 (ADR-009 §9-1 γ)
+4. 테스트 단계: 도메인 연결 보류 (Vercel 기본 `dari-theta.vercel.app` 유지). **10곳 업체 테스트 완료 후** `dairect.kr` 연결 + DNS 설정 + `NEXT_PUBLIC_WIDGET_CDN_URL` 값 교체
 5. Supabase `dari-prod` 프로젝트 신규 생성
 6. `dari-dev` → `dari-prod` 로 migration 순차 적용 (§6 참조)
 7. Stage 1 smoke test: 본인 계정으로 봇 1개 생성 → 응답 확인

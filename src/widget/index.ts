@@ -1,8 +1,11 @@
 /**
  * 위젯 번들 엔트리 — IIFE 로 빌드되어 즉시 실행.
  *
- * 호스트 페이지 삽입 방식:
- *   <script src="https://dairect.kr/widget.js" data-bot-id="my-slug" async></script>
+ * 호스트 페이지 삽입 방식 (호스트는 서버의 `NEXT_PUBLIC_WIDGET_CDN_URL` 기반 — ADR-009 §9-1 γ):
+ *   <script src="<CDN_URL>/widget.js" data-bot-id="my-slug" async></script>
+ *
+ * 현재 기본 호스트: `dari-theta.vercel.app` (테스트 단계). 커스텀 도메인(`dairect.kr`) 은
+ * 10곳 업체 테스트 완료 후 Vercel env 교체로 스위치.
  *
  * 부팅 절차 (Task 1-6-d):
  *   1. 자기 자신 <script> 태그 탐색 (currentScript 우선, fallback 은 data-bot-id 마지막 요소)

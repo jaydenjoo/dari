@@ -90,11 +90,14 @@ test.describe("/bots/[slug] 상세 페이지", () => {
         "상세 페이지 E2E",
       );
 
-      // 위젯 스니펫 — slug 포함 + 실제 dari.kr 도메인.
+      // 위젯 스니펫 — slug 포함 + https:// + `/widget.js` 경로 (호스트는 env 주입, ADR-009 §9-1 γ).
+      // 보안 회귀 방지 (sec M-1, 2026-04-21): env 가 http://, javascript:, evil host 로
+      // 변조돼도 여기서 최후 검출. Zod `.refine()` (env.ts C-1) 과 2중 방어.
       const snippet = page.getByTestId("widget-snippet");
       await expect(snippet).toBeVisible();
       await expect(snippet).toContainText(`data-bot-slug="${slug}"`);
-      await expect(snippet).toContainText("dari.kr/widget.js");
+      await expect(snippet).toContainText("https://");
+      await expect(snippet).toContainText("/widget.js");
 
       // 편집 버튼 — href 만 검증 (실제 페이지는 Task 1-5-d).
       const editLink = page.getByTestId("bot-detail-edit");

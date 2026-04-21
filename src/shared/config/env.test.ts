@@ -91,3 +91,51 @@ describe("serverSchema — NEXT_PUBLIC_SENTRY_ENVIRONMENT 상속", () => {
     expect(result.success).toBe(false);
   });
 });
+
+// ADR-009 §9-1 γ 경로 + sec C-1 (https 강제)
+describe("clientSchema — NEXT_PUBLIC_WIDGET_CDN_URL", () => {
+  it("미설정 시 default https://dari-theta.vercel.app/widget.js 적용", () => {
+    const result = clientSchema.safeParse(baseClient);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.NEXT_PUBLIC_WIDGET_CDN_URL).toBe(
+        "https://dari-theta.vercel.app/widget.js",
+      );
+    }
+  });
+
+  it("유효한 https:// URL 통과 (커스텀 도메인 스위치 시나리오)", () => {
+    const result = clientSchema.safeParse({
+      ...baseClient,
+      NEXT_PUBLIC_WIDGET_CDN_URL: "https://dairect.kr/widget.js",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.NEXT_PUBLIC_WIDGET_CDN_URL).toBe(
+        "https://dairect.kr/widget.js",
+      );
+    }
+  });
+
+  it.each([
+    "http://cdn.example.com/widget.js",
+    "javascript:alert(1)",
+    "data:text/javascript,alert(1)",
+    "ftp://example.com/widget.js",
+    "file:///etc/passwd",
+  ])("비-https 스킴 %p 거부 (sec C-1)", (value) => {
+    const result = clientSchema.safeParse({
+      ...baseClient,
+      NEXT_PUBLIC_WIDGET_CDN_URL: value,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("URL 형식 자체가 아닌 문자열 거부 (Zod .url())", () => {
+    const result = clientSchema.safeParse({
+      ...baseClient,
+      NEXT_PUBLIC_WIDGET_CDN_URL: "not-a-url",
+    });
+    expect(result.success).toBe(false);
+  });
+});

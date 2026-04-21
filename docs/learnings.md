@@ -32,6 +32,43 @@
 
 ## 기록
 
+### 2026-04-21 ADR 확정 전 외부 리소스(도메인/계정/청구 권한) 소유 체크 + 기존 코드 주석 전수 Grep 필수 — 3중 URL 드리프트 고착 사례 (설계 결정 / AI 이탈)
+
+**증상**: Task A-1 에서 ADR-009 결정 #1 "CDN 호스트 `dari.kr`" 를 확정 + 272줄 ADR 작성 + 커밋까지 완료 (세션 종료). 같은 세션 직후 Task A-2 진입 시 Jayden 이 "`dari.kr` 미보유 + 현재 `dari-theta.vercel.app` 사용" 알림 → 결정 #1 전면 재작성 필요. 코드 전수 Grep 결과 **호스트 3개가 서로 다른 위치에 공존** 확인:
+
+- `src/app/bots/[slug]/page.tsx:35` `WIDGET_URL = "https://dari.kr/widget.js"` (Task 1-5-c 투입 — 사전 결정 없이)
+- `src/widget/config.ts:5` JSDoc 스니펫 예시 `https://dairect.kr/widget.js` (Task 1-6-b 투입)
+- `docs/environments.md:17` prod 도메인 `dairect.kr`
+- ADR-009 (2026-04-21) `dari.kr`
+- 실제 배포 = `dari-theta.vercel.app`
+
+**원인**:
+
+1. Task A-1 ADR 작성 직전 "외부 리소스 선결 조건 체크" 루틴 미실행. 메모리 `feedback_external_service_precheck.md` 가 "SDK/Integration" 에 한정된 해석으로 **도메인/호스트 소유권** 확인이 scope 밖으로 잘못 분류.
+2. Task A-1 현황 감사(Read 9파일 병렬)가 `src/widget/` 코드 중심. **`docs/environments.md` + `src/widget/config.ts` JSDoc 의 URL 예시** 는 감사 대상에서 빠짐. 문서 계층 drift 감사 범위 누락.
+3. PROGRESS.md 기록의 "§7-1 권장안 `dari.kr`" 이 세션 내 권위로 작용 — 다른 파일이 이미 `dairect.kr` 를 쓰고 있는 사실을 사전 Grep 없이 판단.
+4. 권장안 도출 시 "도메인 $15/yr" 비용 계산이 Jayden 의 **실제 의사 결정 자원/의지** 와 무관할 수 있음을 간과. "구입 가능" 과 "구입 결심" 은 별개.
+
+**해결**:
+
+1. Task A-2 **γ 경로** 도입: `NEXT_PUBLIC_WIDGET_CDN_URL` 환경변수화 + Zod default `dari-theta.vercel.app`. 향후 도메인 확보 시 env 교체만으로 스위치. 문서·코드·테스트 모두 env 만 참조.
+2. ADR-009 제목 / Context / §9-1 / 다이어그램 / Deploy / Open Q #6 재작성.
+3. `phase-2-plan.md` §2 / §5 / §7-1 / §7-7 현실화 (α/β/γ 3경로 비교로 교체).
+4. `src/app/bots/[slug]/page.tsx` + `tests/e2e/bot-detail.spec.ts` + `src/widget/config.ts` JSDoc 일관화 (`env.NEXT_PUBLIC_WIDGET_CDN_URL` 참조 또는 주석 표기).
+5. `docs/environments.md` prod 도메인 + §5-1 체크리스트 업데이트 — 도메인 연결은 10곳 테스트 후로 미룸.
+
+**규칙** ⭐:
+
+- **ADR 작성 전 자문: "이 결정이 외부 리소스(도메인/계정/권한/API 키/스토어/SDK/청구) 소유를 전제하는가?"** — Yes 면 **Jayden 에게 보유·계획·미보유 3-state 체크리스트 선제시**. 결정 묶은 후 확인하는 역순 금지.
+- **"외부 서비스 선결 조건" scope 확장** — 기존 메모리(SDK/Integration) 에 **도메인·호스팅 URL·계정 소유권·청구 계정** 포함. 계약·브랜딩 요소도 "외부 리소스" 로 간주.
+- **현황 감사 범위에 문서 계층 전체 포함** — `src/` 외에 `docs/{환경·아키텍처·runbook}.md` + 코드 **JSDoc/주석** + `.env` 템플릿. 이전 세션 요약(PROGRESS.md)만 신뢰하면 drift 누락.
+- **URL/호스트/ID/식별자는 Grep 전수 확인 후 ADR 진입** — 후보 키워드(`dari.kr` + `dairect.kr` + `vercel.app`) Grep 병렬 3회 = 5분 투자. ADR 재작성(~1시간) 보다 ROI 12배.
+- **권장안 비용 추정은 "Jayden 의 실제 의사 자원" 과 무관할 수 있음** — "$15/yr 저렴" 은 코드 관점 판단. "이 도메인 살 의향 있나?" 를 선제 질문. AI 가 "합리적" 이라고 본 것이 **Jayden 자원 배분** 과 충돌 가능.
+- **드리프트 고착 방지 = 환경변수 추상화** — URL/호스트/ID 처럼 변경 가능성 있는 값은 **default 있는 env** 로 추상화. 단일 진실 포인트(env.ts) 를 통해 문서·코드·테스트 모두 같은 값 참조.
+- **"AI 방향 이탈" 재발 방지** — 외부 리소스 전제 결정은 Plan 의 **첫 단계에 선결 체크**. Auto mode 여도 이 단계는 반드시 Jayden 확인 대기.
+
+---
+
 ### 2026-04-21 Phase 전환 계획서의 "이미 구현된 것 vs 미구현" 구분은 코드 전수 감사로만 확정된다 — 문서 메모만 믿으면 범위가 과대 추정 (설계 결정 / AI 이탈)
 
 **증상**: Phase 2 Epic A (위젯 런타임) 진입 Task A-1 에서 현황 감사 전 `docs/phase-2-plan.md` §2 에 "`src/widget/widget.ts` (현재 42.59% 커버, 실질 빈 스텁) 실구현" 으로 서술. Epic A 예상 규모를 **2~3주 (4~5 Task)** 로 추정. 결정 체크리스트(§7-5 스트리밍, §7-6 세션)도 "쿠키 도입 / fetch-stream 신설" 같은 신규 구축 전제로 권장안 작성.

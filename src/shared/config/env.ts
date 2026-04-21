@@ -29,6 +29,23 @@ export const clientSchema = z.object({
   NEXT_PUBLIC_SENTRY_ENVIRONMENT: z
     .enum(["development", "preview", "production"])
     .optional(),
+  // 위젯 스크립트 CDN URL — ADR-009 γ 경로.
+  // 기본값: 테스트 단계 Vercel 호스팅 (`dari-theta.vercel.app`).
+  // 10군데 업체 테스트 완료 후 커스텀 도메인(`dairect.kr`) 연결 시 env 만 교체.
+  // `/bots/[slug]` 설치 스니펫에 URL 그대로 인라인되므로 민감 정보 아님 (공개 의도).
+  //
+  // **https:// 강제** (sec C-1 2026-04-21): `z.string().url()` 만으로는
+  // `javascript:` / `data:` / `http://` / `ftp://` 가 통과. 이 값이 고객사 HTML 의
+  // `<script src="...">` 로 inline 되므로 Vercel Dashboard 실수·내부자 위협으로
+  // 악성 스킴 주입 시 위젯 embed 한 전 고객사에 XSS/공급망 공격. `.refine()` 으로 차단.
+  NEXT_PUBLIC_WIDGET_CDN_URL: z
+    .string()
+    .url()
+    .refine((v) => v.startsWith("https://"), {
+      message:
+        "위젯 CDN URL 은 https:// 로 시작해야 합니다 (javascript:/data:/http:/ftp: 거부)",
+    })
+    .default("https://dari-theta.vercel.app/widget.js"),
 });
 
 // 서버 전용 (API keys, secrets)
@@ -99,6 +116,7 @@ function parseEnv(): ServerEnv | ClientEnv {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
     NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
+    NEXT_PUBLIC_WIDGET_CDN_URL: process.env.NEXT_PUBLIC_WIDGET_CDN_URL,
   });
   if (!parsed.success) {
     const fieldErrors = parsed.error.flatten().fieldErrors;

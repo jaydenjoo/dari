@@ -49,8 +49,8 @@ PRD §7 Phase 2 원안 + Backlog(운영 품질) + 미완(위젯) 을 통합해 4
 
 **Phase 2 에서 남은 것**:
 
-- 🎯 **A-2 실 CDN 배포**: `dari.kr` 도메인 Vercel 연결 + `public/widget.js` 프로덕션 배포 + `/bots/[slug]` 설치 스니펫 URL 갱신
-- 🎯 **A-3 Dairect smoke test**: `dairect.kr` 등 실 사이트에 스크립트 삽입 + 데스크톱/모바일 수동 QA
+- 🎯 **A-2 실 CDN 배포 (γ 경로)**: `NEXT_PUBLIC_WIDGET_CDN_URL` 환경변수화 + Vercel 기본 호스트(`dari-theta.vercel.app`) 프로덕션 검증 + `/bots/[slug]` 설치 스니펫 env 주입. **10곳 업체 테스트 완료 후** `dairect.kr` 커스텀 도메인 연결은 env 한 줄 교체로 스위치.
+- 🎯 **A-3 실사이트 smoke test**: `dairect.kr` (Jayden 보유 기존 사이트) 등에 스크립트 삽입 + 데스크톱/모바일 수동 QA
 - ⚙️ **A-4 스트리밍 전환**: JSON 단일 → **Vercel AI SDK Data Stream Protocol** (결정 #5 확정)
 - ✨ **A-5 Dairect 4개 배포**: Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom Config 작성 + embed
 
@@ -173,12 +173,13 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
   - ADR-009 (위젯 아키텍처) 작성
   - 본 문서 §2 / §5 / §7 현실화
 
-- **Task A-2: `dari.kr` 배포 + 설치 스니펫 갱신** (0.5~1일)
-  - Vercel 도메인 연결 (`dari.kr` DNS — Jayden 수동)
-  - `public/widget.js` 프로덕션 빌드 체인 검증
-  - `/bots/[slug]` 설치 스니펫 URL 갱신 (`https://dari.kr/widget.js`)
+- **Task A-2: 위젯 CDN γ 경로 — env 주입 + Vercel 기본 호스트 검증** (0.5일)
+  - `NEXT_PUBLIC_WIDGET_CDN_URL` 환경변수화 (Zod default `https://dari-theta.vercel.app/widget.js`)
+  - `/bots/[slug]` 설치 스니펫 = `env.NEXT_PUBLIC_WIDGET_CDN_URL` 주입 (하드코딩 제거)
+  - Vercel Preview/Production 환경변수 등록
+  - `public/widget.js` 프로덕션 빌드 체인 검증 + HTTPS 인증서 자동 발급 확인
   - Cache-Control 전략 결정 (immutable hash vs latest short-TTL) — ADR-009 Open Q #1
-  - HTTPS 인증서 자동 발급 확인
+  - **미포함** (별도 Task, 10곳 테스트 완료 후 트리거): `dairect.kr` Vercel 커스텀 도메인 연결 + DNS 설정 + env 값 교체
 
 - **Task A-3: Dairect smoke test (dairect.kr 1개 사이트)** (0.5일)
   - `dairect.kr` 에 스크립트 삽입 (Task A-2 의 실증)
@@ -232,21 +233,28 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
 
 ---
 
-### 7-1. 결정 #1 — 위젯 CDN 호스트
+### 7-1. 결정 #1 — 위젯 CDN 호스트 (재작성 2026-04-21, γ 확정)
 
-| 경로                | URL 예시                                 | 장점                                          | 단점                                                                       | 비용      | 구현 시간   |
-| ------------------- | ---------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------- | --------- | ----------- |
-| **a. `dari.kr`**    | `https://dari.kr/widget.js`              | 독립 제품 브랜드. 스크립트 URL 이 제품 정체성 | 도메인 신규 구매. DNS + HTTPS 설정                                         | 연 ~1.5만 | 중 (30분)   |
-| **b. `dairect.kr`** | `https://dairect.kr/widget.js`           | 이미 소유. 추가 비용 0                        | "Dairect 포트폴리오" 인상 (제품 독립성 약함). CI/CD 경로 경합 가능성       | 0         | 낮음 (15분) |
-| **c. Vercel 기본**  | `https://dari-xxxx.vercel.app/widget.js` | 설정 0. 즉시 사용                             | 고객 사이트 HTML 에 Vercel 냄새. 프로 브랜드 약함. Vercel 정책 변경 리스크 | 0         | 최저 (0분)  |
+> **재작성 배경**: 초기 권장안 `dari.kr` 은 **Jayden 미보유 도메인**. 현황 감사 결과 실제 배포는 `dari-theta.vercel.app`, 기존 코드 주석은 `dairect.kr` (보유) — 3중 드리프트 발견 → `NEXT_PUBLIC_WIDGET_CDN_URL` 환경변수 추상화로 해소.
 
-**권장**: **a. `dari.kr`** — Dari 는 독립 제품(챗봇 엔진) 지향. 스크립트 URL 이 고객사에 박히는 첫인상. 연 1.5만원은 SI 계약 1건(100~500만) 의 0.3% 이하.
+| 경로                               | 호스트 구성                                                      | 장점                                                                                                      | 단점                                                                                       | 비용 | 구현    |
+| ---------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---- | ------- |
+| **α. Vercel 기본 고정**            | `dari-theta.vercel.app/widget.js` 하드코딩                       | 즉시 작동. 추가 비용 0                                                                                    | 미래 도메인 확보 시 코드 수정 필요. 프로젝트 rename 시 URL 무효                            | 0    | 0분     |
+| **β. `dairect.kr` 로 통일**        | `dairect.kr/widget.js` 하드코딩                                  | Jayden 보유. 기존 `config.ts` JSDoc / `environments.md` 와 일치. 브랜딩                                   | **10곳 업체 테스트 단계부터** "Dairect 포트폴리오 산하" 인상. Dari 독립 제품 포지셔닝 약화 | 0    | 30분    |
+| **γ. env 주입 (기본 α, 나중에 β)** | `NEXT_PUBLIC_WIDGET_CDN_URL` Zod default `dari-theta.vercel.app` | 테스트 단계 즉시 작동 + 10곳 검증 후 env 1줄 교체로 `dairect.kr` 스위치. 코드·테스트·ADR 단일 진실 포인트 | env 1개 추가 관리                                                                          | 0    | 20~30분 |
 
-**대안**: 단기 MVP 만 원하면 b. 로 시작 → 추후 a. 로 이전 시 301 리다이렉트로 하위호환.
+**권장**: **γ** — Jayden 의 실제 타임라인("10곳 업체 테스트 → 실서비스") 과 정렬. α 의 즉시성 + β 의 브랜드 전환 유연성 양립.
 
-- [ ] a. `dari.kr` (권장)
-- [ ] b. `dairect.kr`
-- [ ] c. Vercel 기본
+**결정 근거**:
+
+- `dari.kr` 미보유 확인(2026-04-21) — 초기 권장안 근거 `$15/yr` 비용 계산은 **Jayden 의사 결정 자원과 무관** (구입 가능 vs 구입 결심 별개).
+- `dairect.kr` 보유이나 브랜드 모호성(Dairect 포트폴리오) 때문에 10곳 검증 완료 전 전환 보류.
+- Vercel 기본 호스트 `dari-theta.vercel.app` 은 **프로젝트 rename 금지** 원칙 유지 시 수명 안정.
+- 환경변수 추상화로 **URL 유출 지점 단일화** — `page.tsx` / `e2e spec` / `config.ts` JSDoc 모두 env 만 참조.
+
+- [ ] α. Vercel 기본 고정
+- [ ] β. `dairect.kr` 즉시 전환
+- [x] **γ. `NEXT_PUBLIC_WIDGET_CDN_URL` + 기본값 `dari-theta.vercel.app` (권장, 확정 2026-04-21)**
 
 ---
 
@@ -342,17 +350,17 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
 
 ### 7-7. 결정 확정표 (2026-04-21)
 
-| #   | 결정          | Jayden 선택                                                       | 확정일     |
-| --- | ------------- | ----------------------------------------------------------------- | ---------- |
-| 0   | Epic A 진입   | ✅ 진행 (5~3일 — Phase 1 구현 선행분 반영 단축)                   | 2026-04-21 |
-| 1   | CDN 호스트    | **a. `dari.kr`** — 독립 제품 브랜드                               | 2026-04-21 |
-| 2   | 스타일 격리   | **a. Shadow DOM (closed mode)** — Phase 1 구현 유지               | 2026-04-21 |
-| 3   | A/B 병렬      | **a. 순차** (A → B)                                               | 2026-04-21 |
-| 4   | 빌드 툴       | **a. esbuild 확장** — 이미 동작 중 (`scripts/build-widget.mjs`)   | 2026-04-21 |
-| 5   | 스트리밍 방식 | **c. Vercel AI SDK Data Stream Protocol** — 2026 표준 (권장 변경) | 2026-04-21 |
-| 6   | 세션 관리     | **a. localStorage + 서버 UUID** — 현행 유지 (쿠키 도입 보류)      | 2026-04-21 |
+| #   | 결정          | Jayden 선택                                                                                                                         | 확정일     |
+| --- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0   | Epic A 진입   | ✅ 진행 (5~3일 — Phase 1 구현 선행분 반영 단축)                                                                                     | 2026-04-21 |
+| 1   | CDN 호스트    | **γ. `NEXT_PUBLIC_WIDGET_CDN_URL` env + 기본 `dari-theta.vercel.app`** (10곳 테스트 후 `dairect.kr` 스위치) — **재작성 2026-04-21** | 2026-04-21 |
+| 2   | 스타일 격리   | **a. Shadow DOM (closed mode)** — Phase 1 구현 유지                                                                                 | 2026-04-21 |
+| 3   | A/B 병렬      | **a. 순차** (A → B)                                                                                                                 | 2026-04-21 |
+| 4   | 빌드 툴       | **a. esbuild 확장** — 이미 동작 중 (`scripts/build-widget.mjs`)                                                                     | 2026-04-21 |
+| 5   | 스트리밍 방식 | **c. Vercel AI SDK Data Stream Protocol** — 2026 표준 (권장 변경)                                                                   | 2026-04-21 |
+| 6   | 세션 관리     | **a. localStorage + 서버 UUID** — 현행 유지 (쿠키 도입 보류)                                                                        | 2026-04-21 |
 
-> **다음 단계**: Task A-2 (`dari.kr` 배포 + 설치 스니펫 갱신) — Plan 은 다음 세션에 별도 작성. ADR-009 에 본 결정 7건 전체 근거 기록.
+> **다음 단계**: Task A-2 γ 경로 (env 주입 + Vercel 기본 호스트 검증) — 본 세션에서 구현 진입. ADR-009 에 본 결정 7건 전체 근거 기록.
 
 ---
 

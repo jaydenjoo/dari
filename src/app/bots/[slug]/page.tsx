@@ -8,6 +8,7 @@ import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
 import { BOT_STATUS_CLASS, BOT_STATUS_LABEL } from "@/shared/bots/status";
+import { env } from "@/shared/config/env";
 
 import { isValidSlug } from "../new/slug-util";
 import CopySnippet from "./copy-snippet";
@@ -30,9 +31,10 @@ export const metadata: Metadata = {
   title: "봇 상세 — Dari",
 };
 
-// 위젯 런타임 URL — Phase 2 에서 실제 배포 URL 확정.
-// 현재는 베타 미리보기. 사용자가 자신의 사이트에 "복사해둘" 수 있는 형태만 제공.
-const WIDGET_URL = "https://dari.kr/widget.js";
+// 위젯 런타임 URL — `NEXT_PUBLIC_WIDGET_CDN_URL` 주입 (ADR-009 γ 경로).
+// 기본값은 테스트 단계 `dari-theta.vercel.app`. 10곳 업체 테스트 완료 후
+// 커스텀 도메인(`dairect.kr`) 연결 시 env 만 교체하면 스니펫 자동 갱신.
+const WIDGET_URL = env.NEXT_PUBLIC_WIDGET_CDN_URL;
 
 // systemPrompt 는 10~8000자 허용. 상세 페이지에서는 개요만 보이고, 전체 편집은 Task 1-5-d.
 const SYSTEM_PROMPT_PREVIEW_MAX = 400;

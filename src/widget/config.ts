@@ -1,14 +1,17 @@
 /**
  * 위젯 설정 — data-* attribute 파싱 (보안 강화: sec H-1 + sec M-1).
  *
- * 설치 스니펫:
- *   <script src="https://dairect.kr/widget.js" data-bot-id="my-bot-slug" async></script>
+ * 설치 스니펫 (호스트는 서버의 `NEXT_PUBLIC_WIDGET_CDN_URL` 이 주입 — ADR-009 §9-1 γ 경로):
+ *   <script src="<CDN_URL>/widget.js" data-bot-id="my-bot-slug" async></script>
+ *
+ * 현재 기본 호스트: `dari-theta.vercel.app` (테스트 단계). 커스텀 도메인(`dairect.kr`) 은
+ * 10곳 업체 테스트 완료 후 연결 예정 — 그때 `/bots/[slug]` 의 스니펫이 자동 갱신된다.
  *
  * 설계 결정:
  *   - apiUrl 은 script.src 의 origin 만으로 결정한다. (sec H-1)
  *     `data-api-url` 등 속성으로 런타임 override 를 제공하지 않는다.
  *     공격자가 피해 사이트 DOM 에 접근 가능한 상황에서 메시지 유출 벡터가 될 수 있기 때문.
- *     staging/개발 용도는 별도 스크립트 URL (예: staging.dairect.kr/widget.js) 을 발급한다.
+ *     staging/개발 용도는 별도 스크립트 URL 을 발급한다 (예: preview 배포 Vercel URL).
  *
  *   - botId 는 slug 정규식으로 사전 차단. (sec M-1)
  *     서버 DB 쿼리 전에 형식 검증으로 자원 낭비와 enumeration 시도를 줄인다.
