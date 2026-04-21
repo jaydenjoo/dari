@@ -4,12 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 진행 (Task A-1·A-2·A-3 완료)** · Task A-4 (스트리밍 전환) 대기
-- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 재작성 γ 경로) + ADR-009 갱신 + Playwright cross-origin smoke 20/20
-- 상태: **Task A-3 Playwright smoke 완결**. Jayden 정정(`dairect.kr` 별개 프로젝트 + Vercel 실배포 `DEPLOYMENT_NOT_FOUND`)으로 **로컬 cross-origin 목업 + Playwright 자동 QA** 로 전환. **Phase 1 잔존 proxy matcher 버그 수정** (widget.js 가 /login 리다이렉트 당하던 cross-origin embed 차단 해소).
-  - 결정 재확정: #1 CDN 호스트 **`dari.kr` → `NEXT_PUBLIC_WIDGET_CDN_URL` env + 기본 `dari-theta.vercel.app`** (γ 경로 2026-04-21 재작성). Jayden 미보유 `dari.kr` 대신 env 추상화 + 10곳 테스트 후 `dairect.kr` 스위치.
-  - Task A-3 실측 결과 ADR-009 Open Q #3/#4 반영: CSP strict 차단 / permissive 허용 / 고객사 권장 CSP 명시. iOS 실기기는 Task A-5 이월.
-- ⚠️ **차단**: Vercel 실배포 `DEPLOYMENT_NOT_FOUND` — Jayden Vercel Dashboard 수동 복구 필요 (Redeploy 또는 빌드 로그 공유). A-4 (로컬 구현) 는 독립 진행 가능, A-5 (Dairect 배포) 는 복구 필수.
+- Phase: **2 Epic A 진행 (Task A-1·A-2·A-3 완료 + 리뷰 Fix-then-ship 반영 + Vercel 빌드 복구 + prod Playwright 스모크 10/10)** · Task A-4 (스트리밍 전환) 대기
+- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 γ 경로) + ADR-009 + Playwright cross-origin smoke 20/20 + 리뷰 반영 + **Vercel prod 배포 정상** + 실 URL Playwright 10/10
+- 상태: **Vercel 배포 복구 완결.** 원인 규명 = `src/core/observability/beforeSend.ts` 의 `@sentry/core` transitive import (Phase 0-E-3 부터 잠복, 로컬 pnpm hoist 로 은폐) → `@sentry/nextjs` 로 수정. 리뷰 Fix-then-ship 일괄 반영 (HIGH-1 설치 스니펫 `data-bot-id`/`async` + MEDIUM-1 loader.js origin 화이트리스트 + LOW-3 보안 헤더 3종 + LOW-1 learnings matcher drift 원칙). **실 URL Playwright MCP 스모크 10/10** 통과 (랜딩/보안 헤더/widget.js 1:1/IIFE 유효/login OAuth/auth redirect/health 200/404 정적 메시지/console errors 0).
+- ⚠️ **차단**: 없음. Task A-4 (스트리밍 로컬) 또는 A-5 (Dairect 사이트 embed) 양쪽 진입 가능.
 
 ## 완료된 Epic
 
@@ -81,6 +79,86 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-21 Ⅱ) — 리뷰 Fix-then-ship (2 에이전트) + Vercel 빌드 실제 원인 규명·복구 + Playwright MCP prod 스모크 10/10
+
+Jayden 의 "현재까지의 개발 내용들 모두 자세하게 리뷰해줘 현재 버셀배포 오류 발생하고있어" 지시 + "Vercel + Supabase 참고해서 진행 승인" 으로 2시간에 걸친 종합 리뷰·수정·빌드 복구·prod 검증 세션.
+
+### 흐름 (~2h)
+
+1. **독립 리뷰 2 에이전트 병렬 (15분)**
+   - `code-reviewer` (Fix-then-ship): HIGH 1 / MEDIUM 2 / LOW 2 / INFO 1
+   - `security-reviewer` (Ship as-is): CRITICAL 0 / HIGH 0 / MEDIUM 1 / LOW 3 / INFO 3 — 독립 통과 항목 8건 (https 강제 / slug 주입 방지 / path traversal / env 경계 / sourcemap 차단 / SSRF / prompt injection 3중 / updateSession race)
+   - 공통 판단: Vercel `DEPLOYMENT_NOT_FOUND` = 코드 단서 0건 → Dashboard 레벨 이슈 추정 (리뷰어 올바름 — 후술)
+
+2. **리뷰 HIGH-1 + MEDIUM + LOW 일괄 수정 (30분, 커밋 `a22db92`)**
+   - **HIGH-1 (code)**: `src/app/bots/[slug]/page.tsx:158` 설치 스니펫 `data-bot-slug` → `data-bot-id` + `defer` → `async`. **고객 설치 시 위젯 초기화 실패하던 silent bug** — widget 런타임은 `data-bot-id` 찾는데 스니펫은 `data-bot-slug` 출력. E2E `bot-detail.spec.ts:98` 도 잘못된 속성명 assert 로 이 버그를 통과시킴. assertion 동기화.
+   - **MEDIUM-1 (sec)**: `tests/e2e/widget-embed/loader.js` `cdn` 파라미터 origin 화이트리스트 (CWE-79 방어, localhost:4000/:3000 만 허용).
+   - **LOW-3 (sec)**: `next.config.ts` 보안 HTTP 헤더 3종 — `X-Content-Type-Options: nosniff` / `X-Frame-Options: SAMEORIGIN` / `Referrer-Policy: strict-origin-when-cross-origin`. 고객 사이트 embed SaaS 기본 경계.
+   - **LOW-1 (code+sec 공통)**: proxy matcher 확장자 제외 drift 원칙 `docs/learnings.md` 명문화 — 향후 동적 `.js` 라우트 추가 시 matcher 긍정 예외 선언 의무.
+   - 검증: typecheck 0 / lint 3 baseline / prettier clean / vitest **476/476** / build 14 routes.
+
+3. **Vercel 빌드 실제 원인 규명 (10분, Jayden 빌드 로그 전문 공유 결정적)**
+   - 실패 지점: `src/core/observability/beforeSend.ts:1:56` → `Cannot find module '@sentry/core' or its corresponding type declarations.` TS2307.
+   - 원인: `@sentry/core` 가 `package.json` 직접 선언 안 된 **transitive 의존성** (`@sentry/nextjs` 전이 설치). 로컬 pnpm hoist 로 우연히 해석돼 typecheck/build 통과 → PROGRESS.md "clean" 기록이 실제 배포 실패를 은폐. Vercel strict 해석에서 TS2307 발생.
+   - `DEPLOYMENT_NOT_FOUND` = 이 빌드 실패로 배포 URL 이 생성되지 않은 플랫폼 응답 → **리뷰어의 "코드 단서 없음" 판단이 본질상 맞았음** (이 이슈는 `package.json` 의존성 선언 누락 + 환경 해석 차이의 인프라 계층 문제, 코드/보안 리뷰 범위 밖).
+
+4. **Sentry import 복구 (15분, 커밋 `08881d9`)**
+   - `beforeSend.ts` + `beforeSend.test.ts` — `@sentry/core` → `@sentry/nextjs` (공식 re-export 경로, `package.json` 기존 의존성).
+   - 검증: typecheck 0 / vitest beforeSend 13/13 / build 14 routes clean.
+   - `docs/learnings.md` 신규 교훈 +1 (환경 drift + Vercel 진단 순서 + TypeScript import = package.json 직접 의존성만).
+
+5. **Push + Vercel 자동 재배포 (즉시)**
+   - `f087c20..08881d9 main -> main` 성공. gitleaks pre-commit 2회 통과.
+   - Vercel webhook 자동 트리거 → 빌드 ~90초 내 완료.
+
+6. **Playwright MCP prod 스모크 10/10 (15분)**
+   - `/` 200 + Page Title "Dari" + 헤드라인/CTA 렌더 ✅
+   - **보안 헤더 3종 랜딩 + 로그인 양쪽 적용 확인** (이번 커밋 LOW-3 실 반영) ✅
+   - `/widget.js` 200 + `application/javascript` + **16,768 bytes (로컬 16.4KB 1:1 일치)** (Task A-3 matcher 확장 효과) ✅
+   - widget.js IIFE 문법 유효 (`new Function()` 파싱 성공) + `parseConfig` + `attachShadow` 포함 ✅
+   - `/login` Google OAuth 버튼 노출 ✅
+   - `/bots` 비로그인 → `/login?next=%2Fbots` redirect (`isSafeNextPath` 정상) ✅
+   - **`/api/health` 200 + Supabase prod DB 응답 (latency 815ms)** — prod DB 이미 존재 확인 (예상 밖 발견) ✅
+   - `/api/widget-config/nonexistent` 404 + `{"error":"해당 봇을 찾을 수 없어요.","code":"bot_not_available"}` (enumeration 방지) ✅
+   - 콘솔 에러 0건 (의도된 404 제외) ✅
+
+### 검증 (누적)
+
+- typecheck 0 / lint 3 baseline warnings / prettier clean / vitest **476/476** passed / build 14 routes ✅
+- gitleaks pre-commit 2회 통과 (no leaks) ✅
+- **prod 실 URL Playwright 스모크 10/10 통과** ✅
+
+### 주요 결정 / 교훈 (learnings.md +2)
+
+1. **proxy matcher 확장자 제외 drift 원칙** — 부정 lookahead 로 공개 제외한 확장자는 향후 동적 `.js` 라우트 추가 시 인증 우회 위험. 주석만 아닌 learnings + 체크리스트 양쪽 명문화 필요. 독립 리뷰 2 에이전트 동일 지적 시 문서화까지 진행.
+2. **@sentry/core transitive import 환경 drift** — 로컬 pnpm hoist ≠ Vercel strict 으로 로컬 빌드만으로는 배포 성공 담보 불가. `DEPLOYMENT_NOT_FOUND` 는 빌드 실패의 결과 응답일 수 있음 (플랫폼 레벨 "배포 부재"). **외부 빌드 서비스 진단 순서** = (1) 빌드 로그 전문 확보 (2) 실패 스택 라인 파악 (3) 로컬 재현 시도 (4) 환경 drift 의심 (5) 수정. 의존성 선언 감사는 리뷰 별도 축.
+
+### 예상 밖 발견
+
+- **prod Supabase 이미 존재** — `/api/health` latency 815ms 응답 → `phase-1-release-checklist.md` §1 "Supabase prod 미생성" 기록과 불일치. Jayden 이 이미 생성한 것으로 추정. 문서 현실화 이월.
+- **Sentry Integration org slug = `jayden-kz`** — `docs/environments.md` 의 `jayden-k4` 와 불일치 (빌드 영향 없음, 문서 drift).
+
+### Backlog (다음 세션 후보)
+
+1. **Task A-4 (권장)**: Vercel AI SDK Data Stream Protocol 스트리밍 전환. 로컬 독립 진행 가능. 2~3시간.
+2. **Task A-5**: Dairect 사이트 4개 embed — Vercel prod 복구 완료라 진입 가능.
+3. **mini-task**:
+   - `phase-1-release-checklist.md` §1 현실화 (prod Supabase 이미 존재) + §6 "첫 Vercel 빌드 녹색" 을 Stage 1 Go/No-Go 선결 조건 추가 (10분)
+   - `docs/environments.md` Sentry org slug drift 수정 (`jayden-k4` → `jayden-kz`) (5분)
+   - `package-lock.json` 삭제 + `.gitignore` 처리 (10분)
+4. **Backlog 이월** (규모 있는 리팩토링/후속 Phase):
+   - code MEDIUM-2: `env.ts` `as ServerEnv` → `env.server.ts`/`env.client.ts` 분리 (~1h)
+   - sec LOW-2: 설치 스니펫 SRI (`integrity=`/`crossorigin=`) — Phase 3, ADR-009 Open Q #1 와 함께
+   - code LOW-2: widget-embed.spec.ts CSP strict DOM 보조 assertion
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-21 13:00 (KST)
+- 브랜치: `main` (HEAD = `08881d9`)
+- 차단 요소: 없음
+
+---
 
 ## 이번 세션(2026-04-21) — Phase 2 Epic A 진입 결정 체크리스트 + Backlog 2건 cleanup + Task A-1 ADR-009 + §7 결정 확정
 
