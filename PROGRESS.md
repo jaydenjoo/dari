@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 완결** (A-1~A-5a 100%) + **환경변수 분리** (env.ts → env.server/env.client) + **CI 현대화 A+B** (pnpm + coverage threshold) + **Epic B Task 분해 완료**. Epic B 진입 대기.
-- Epic: **Phase 2 Epic A (위젯 런타임) 완결** — 결정 7건 + ADR-009 + Playwright 20/20 + Vercel prod 정상 + AI SDK Data Stream + Jayden 포트폴리오 5개 prod 봇 + Supabase URL Config 복구 + Vercel env 등록. A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월.
-- 상태: **A-5a 완결 + 3 mini-task cleanup + env 분리 + CI 현대화 + Epic B 분해 = 이번 세션(2026-04-21 Ⅲ) 6 커밋 누적**. 다음 세션 후보: Epic B Task 분해 문서([`docs/epic-b-task-breakdown.md`](docs/epic-b-task-breakdown.md))의 **B-1 (보안 hardening — typed confirmation + rate limit 통합, ~2h)** 우선. 그 후 B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft delete) → B-4 (원가/차트) → B-5 (품질 sweep).
-- ⚠️ **차단**: 없음. Epic B 진입 시 각 Task 별 Plan→Approve→Build 엄격 준수.
+- Phase: **2 Epic A 완결 + Epic B 1/6 Task 완료** (A-1~A-5a + B-1). env 분리 + CI 현대화 + Epic B 분해 유지. Epic B 나머지 5 Task 진행 예정.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 진입** — Task B-1 (보안 hardening — 봇 삭제 UI + rate limit 통합) 완료. 다음: B-6 (Playwright E2E CI) → B-2 (audit log) → B-3 (soft delete) → B-4 (원가/차트) → B-5 (품질 sweep).
+- 상태: **B-1 완결 = 이번 세션(2026-04-21 Ⅳ) 2 커밋 예상** (코드 + 문서). vitest 491→500 (+9), build 14 routes, Playwright widget-embed 20/20 회귀 0, 독립 리뷰 2 병렬 Fix 6건 반영. A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월 유지.
+- ⚠️ **차단**: 없음. B-6 우선 (Supabase 테스트 환경 결정 필요) / 그 외 Task 별 Plan→Approve→Build 엄격 준수.
 
 ## 완료된 Epic
 
@@ -2135,9 +2135,104 @@ _수정_
 
 ---
 
+## 이번 세션(2026-04-21 Ⅳ) — Epic B Task B-1: 봇 영구 삭제 UI + rate limit 3곳 통합
+
+Jayden "a" (세션 시작 제안 승인) → Task B-1 Plan 제시 → 선결 체크에서 **중대 발견 2건** (봇 삭제 UI 자체 미구현 + Epic B 문서 API 경로 오기) → α 경로 (범위 확장) 재승인 → Build 7 Step → 독립 리뷰 2 병렬 (code + security) → Fix 6건 일괄 반영 → 전 파이프라인 clean. "승인" 경로 4회 (세션 시작 / Plan 수정 / α 재확정 / 자동 진행).
+
+### 흐름 (~3h)
+
+1. **Plan + 선결 체크 (~25분)** — Epic B 분해 문서 §2.B-1 기반 Plan 제시: (1) 봇 삭제 typed confirmation + (2) rate limit 통합. 선결 체크 Grep/Read:
+   - ✅ `src/components/ui/dialog.tsx` (base-ui/react 기반) 존재 — 재사용 OK
+   - ❌ `deleteBotAction` / 봇 삭제 UI — Grep 0건 (미구현) → "수정" 가정 불성립
+   - ❌ `DELETE /api/conversations/[id]` — 경로 부재. 실제 경로 = Server Action `deleteConversationAction` (`src/app/bots/[slug]/conversations/[conversationId]/actions.ts`). Epic B 문서 오기.
+   - ✅ rate limiter factory (`factory.ts`) — 재사용 완비
+   - ✅ `bot-source-remove-limiter.test.ts` 템플릿
+
+   3가지 재진입 경로 (α 범위 유지 / β 축소 / γ B-3 이관) 비교 → Jayden **α 승인** + UX 4결정 (위험 영역 위치 / /bots 리다이렉트 / hard delete + typed / 문구) 권장안 그대로.
+
+2. **Step 1 limiter 3개 + 테스트 9 (~20분)** —
+   - `bot-delete-limiter.ts`: 5 req/1h user.id (파괴적 작업 가장 엄격)
+   - `conversation-delete-limiter.ts`: 10 req/5m (bot-source-remove 와 일관)
+   - `conversation-export-limiter.ts`: 20 req/10m (읽기 전용, 느슨)
+   - 각 3 케이스 (dev skip / prod 성공 / prod 차단) — 기존 mock 구조 복제.
+
+3. **Step 2 deleteBotAction + 대화 rate limit 2곳 (~30분)** —
+   - `src/app/bots/[slug]/edit/actions.ts` 파일 끝에 `deleteBotAction` 섹션 추가 (104 lines): 5중 방어 (slug → 세션 → rate limit → typed 재검증 → RLS) + Storage cleanup → DB DELETE 순서 + FK cascade.
+   - `deleteConversationAction` 에 `checkConversationDeleteRatelimit` 추가.
+   - `export/route.ts` 에 `checkConversationExportRatelimit` 추가.
+
+4. **Step 3 DeleteBotDialog + 위험 영역 섹션 (~40분)** —
+   - base-ui `Dialog.Root` 는 `onOpenChange: (open, eventDetails) => void` 2인자 API 확인 (node_modules 타입 정의 Read).
+   - `delete-bot-dialog.tsx` (`'use client'`): `useActionState` + `useFormStatus` + typed confirmation (trim 후 exact match).
+   - `edit-bot-form.tsx`: SECTIONS 에 `danger-zone` 추가 + knowledge-file 뒤에 destructive 섹션 (border-red-200) 추가.
+
+5. **Step 5 E2E 3 케이스 (~25분)** — `bot-delete-typed-confirmation.spec.ts`:
+   - C1: 잘못된 이름 입력 시 버튼 비활성 (빈값 / 오입력 / 대소문자 3가지)
+   - C2: 올바른 이름 → 삭제 → /bots 리다이렉트 + admin() 채널로 DB 부재 확인
+   - C3: 취소 버튼 → 모달 닫힘 + 봇 보존
+
+6. **Step 6 검증 (~15분)** — typecheck ✅ / lint ✅ (기존 3 warnings) / prettier 3 파일 → write / vitest **491 → 500 (+9)** / build ✅ 14 routes / Playwright widget-embed 20/20 회귀 0.
+
+7. **Step 7 독립 리뷰 2 병렬 + Fix 6건 (~35분)** —
+   - **code-reviewer (Fix-then-ship)**: M-1 E2E console.error / M-2 Retry-After / M-3 STORAGE_CLEANUP_LIST_LIMIT 근거 / M-4 adminClient 해제 / L-1 rate limit 순서 / L-2 주석 / I-1~3 이월.
+   - **security-reviewer (Fix-then-ship)**: M-1 Retry-After (code M-2 동일) / **M-2 createBot name trim** (typed confirmation UX 버그) / L-1~4 이월.
+
+   **Fix 6건 반영**:
+   - sec M-2 + code L-2: `createBot` 4필드 `.trim()` (typed 정합성) + E2E 주석 정정
+   - code M-2 = sec M-1: export route **Retry-After 헤더** (`rl.reset` epoch ms 변환)
+   - code M-1: E2E `console.warn` + "cleanup" prefix
+   - code M-3: `STORAGE_CLEANUP_LIST_LIMIT=1000` 근거 주석 (10MB × 1000 = 10GB/봇 + Supabase list 상한)
+   - code M-4: E2E `test.afterAll(() => { adminClient = null; })`
+
+   **의식적 미반영 5건**: code L-1 (비용 효율) / I-1 = sec L-1 (Phase 2 ADR) / I-2 = sec L-2 (Phase 2 sweeper) / I-3 (silent success trade-off) / sec L-3 (gitleaks 운영 개선 별도) / sec L-4 (표준 패턴).
+
+### 신규 8 + 수정 5 + docs cleanup 2
+
+_신규_
+
+- `src/core/ratelimit/bot-delete-limiter.ts` + `.test.ts` (3 케이스)
+- `src/core/ratelimit/conversation-delete-limiter.ts` + `.test.ts` (3 케이스)
+- `src/core/ratelimit/conversation-export-limiter.ts` + `.test.ts` (3 케이스)
+- `src/app/bots/[slug]/edit/delete-bot-dialog.tsx` — base-ui Dialog + typed confirmation
+- `tests/e2e/bot-delete-typed-confirmation.spec.ts` — 3 케이스 (C1 비활성 / C2 삭제 성공 / C3 취소)
+
+_수정_
+
+- `src/app/bots/[slug]/edit/actions.ts` — `deleteBotAction` 신규 (104 lines) + Storage cleanup + FK cascade + import
+- `src/app/bots/[slug]/edit/edit-bot-form.tsx` — "위험 영역" 섹션 + DeleteBotDialog + SECTIONS 갱신
+- `src/app/bots/[slug]/conversations/[conversationId]/actions.ts` — rate limit 통합
+- `src/app/api/conversations/[conversationId]/export/route.ts` — rate limit + Retry-After 헤더
+- `src/app/bots/new/actions.ts` — 4필드 `.trim()` (typed confirmation 정합성)
+
+_Cleanup (drift)_
+
+- `docs/dairect-bot-configs.md` + `docs/epic-b-task-breakdown.md` — prettier 드리프트 (직전 세션 Ⅲ 누락분)
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **491 → 500 (+9)** / build ✅ (14 routes)
+- widget.js 18.1KB (변경 무관)
+- Playwright `widget-embed` 20/20 회귀 0 (5 projects × 4 tests)
+- 독립 리뷰 2 병렬 → Fix 6건 직접 반영 + 의식적 미반영 5건 명시
+- **Jayden local 검증 위임**: `pnpm test:e2e bot-delete-typed-confirmation` (Supabase 계정 의존)
+
+### 주요 결정 / 교훈 (learnings +2)
+
+1. **Plan "수정 X개" 전제 vs 실제 "신규 구현" 필요** — Epic B 분해 문서가 "봇 삭제 UI 에 typed confirmation 추가" 로 기술했으나 실제론 UI 자체 미구현 + API 경로 오기. Plan 내 파일 목록은 "해당 파일 존재 여부" 를 보장 안 함. 선결 체크(Step 0) 에 Grep/Read 존재 검증을 **고정 체크리스트** 로 포함 + Build 전 Plan 수정 기회 1회 명시. (learnings 후보)
+2. **typed confirmation UX 의 비교 기준값 정규화 일관성** — `createBot` 은 name trim 없음, `updateBot` 은 `str()` 헬퍼로 trim 적용. DB 에 공백 포함 이름이 들어가면 삭제 dialog 의 `confirmValue.trim() === name` 은 불일치 → owner 본인도 삭제 못 하는 UX 버그. 비교 기준값의 정규화 정책을 **모든 쓰기 경로 (생성/수정)** 에서 일관시켜야. schema 레벨 `.transform(s => s.trim())` 로 단일 출처 가능. (learnings 후보)
+
+### Backlog (다음 세션 후보)
+
+1. **Task B-6** Playwright E2E CI job (Task 3-C 이월, Supabase 테스트 환경 결정 필요)
+2. **Task B-2** audit log (0013 마이그레이션 + `src/core/audit/`)
+3. **Task B-5** 일부: `createBotSchema` 에 `.transform(s => s.trim())` 승격 (교훈 2 반영)
+4. 잔존: `bot-delete-typed-confirmation` E2E Jayden local 검증 / Phase 2 Storage orphan sweeper / fail-open ADR
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅲ (Task A-4 Vercel AI SDK Data Stream Protocol 완결, **Phase 2 Epic A 80% 진행**, 다음: Task A-5 Dairect 5개 embed)
+- 날짜: 2026-04-21 Ⅳ (Epic B Task B-1 완결 — 봇 영구 삭제 UI + rate limit 3곳 통합 + 리뷰 Fix 6건, **Phase 2 Epic B 1/6 진행**, 다음: Task B-6 Playwright CI)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
 - 커밋: `1ebe8c0` (A-3) · `b1e2776` (A-2)

@@ -1933,3 +1933,62 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **프로젝트 README / PRD 간 용어 일관성 관리** — "위젯" / "대시보드" / "관리자 페이지" 등 명확히 구분. 혼동 시 stale 감지 비용 증가.
 
 ---
+
+### 2026-04-21 계획서 "수정 X개" 전제 vs 실제 "신규 구현" 필요 — Build 전 파일 실존 검증 필수 (AI 방향 이탈 재발 방지)
+
+**증상**: Epic B Task B-1 Plan 단계에서 `docs/epic-b-task-breakdown.md` §2.B-1 의 기술 — "봇 삭제 UI 에 typed confirmation 추가" + "DELETE `/api/conversations/[id]` 에 rate limit 추가" — 을 읽고 "수정 3~5 파일" 로 Plan 을 작성. 선결 체크 Step 0 에서 Grep/ls 실행 결과:
+
+1. 봇 삭제 기능 자체가 **미구현** — `deleteBot` / `deleteBotAction` / "봇 삭제" 매칭 0건 (`src/app/api/chat/[botId]/route.ts` 의 `dete` FP 제외). "기존 삭제 버튼 교체" 는 실재하지 않는 가정.
+2. `DELETE /api/conversations/[conversationId]` 라우트 **부재** — 해당 디렉토리엔 `export/route.ts` 만. 실제 대화 삭제 = Server Action `deleteConversationAction` (`src/app/bots/[slug]/conversations/[conversationId]/actions.ts`).
+
+두 가정이 모두 틀린 상태로 Build 진입했다면 "수정" 이 아닌 "신규 UI + 신규 Server Action" 이 돼야 하므로 범위가 ~1h 이상 증가. Plan 수정 없이 강행하면 "기존 파일이 없으므로 새로 만들 수밖에 없음" 상황으로 자연스럽게 흐르지만 **사용자 UX 결정**(삭제 버튼 위치 / 리다이렉트 / 삭제 정책) 을 Build 중 즉흥 결정하게 됨 — 그 Task 의 **설계 결정이 승인 없이 기본값으로 굳는 위험**.
+
+**원인**:
+
+1. `epic-b-task-breakdown.md` 자체가 `phase-2-plan.md` §2 Epic B bullet 를 해석한 2차 문서였고, bullet 의 표현 ("작은 보안 hardening", "typed confirmation") 을 **실제 파일 구조 확인 없이** 전개했다. 문서 작성자가 같은 AI 라도 "추상 표현 → 구현 단계 Task" 로 옮기는 단계에서 코드 감사를 거치지 않았다.
+2. Plan 단계의 표준 선결 체크 항목이 **외부 서비스 계정/env/SDK 버전** 위주 (메모리 규칙: "외부 SDK/Integration 도입 전 Jayden 의 계정·프로젝트·권한·env·결제·권장 설치 순서 체크리스트"). 내부 코드 구조 (파일 존재 / 함수 시그니처 / API 경로) 는 체크리스트에 **부재**.
+3. 내가 Plan 작성 시 "추상 bullet 이 코드 구조와 일치할 것" 이라 가정. Grep 1~2회면 발견되는 gap 이었지만 경로 비교표 제시 속도가 우선시됐다.
+
+**해결**:
+
+1. 선결 체크 단계에서 4개 항목 Grep/ls 실행 → 2건 즉시 발견 → Jayden 에게 **3가지 재진입 경로 (α 범위 유지 확장 / β B-1 축소 / γ B-3 이관)** 비교 + 현황 감사 결과표 제시 → 선택 (α) 후 **Plan 수정본** (파일 목록 대체 + UX 4결정 권장안 + 검증 전략 재정리) → 재승인 받고 Build 진입.
+2. Build 완료 후에도 `epic-b-task-breakdown.md` §2.B-1 의 "DELETE /api/conversations/[id]" 경로 표기는 미정정 상태로 남김 — B-2 audit log / B-3 soft delete 에서 유사 오기가 있을 가능성이 있어 본 문서 작성 시 재검토 이월.
+
+**규칙** ⭐:
+
+- **Plan 내 "수정 X개" 를 쓰기 전에 각 대상 파일의 실존과 현 기능 상태를 Grep/Read 로 확인**. "계획 문서 = 코드 진실" 가정 금지. 실존 안 하는 "기존 UI" 를 기반 Plan 은 초안이지 확정 안 됨.
+- **선결 체크(Step 0) 고정 체크리스트에 "계획서에 언급된 파일/API 경로의 실존 검증" 항목 추가** — 기존 외부 SDK/env/결제 체크에 내부 코드 검증을 병행.
+- **Plan 수정 기회를 Build 진입 전에 항상 1회 확보** — 선결 체크 결과로 대안 경로 2~3개 제시 → Jayden 재승인 → Plan 문서화. Task template 화.
+- **Epic/Phase 분해 문서 작성 시점에 실제 파일 경로·함수 시그니처 인용** — 추상 bullet ("DELETE /api/...") 그대로 옮기지 말고, 작성 시점의 코드 구조를 Grep 으로 확인 후 기록. 분해 문서가 "가짜 앵커" 가 되지 않도록.
+- **Task 의 "범위 확장" 결정은 UX 설계 결정을 동반** — "신규 UI 구현" 이 Plan 변경 사유라면 UX (위치 / 플로우 / 문구) 는 Jayden 승인 대상. Build 중 즉흥 결정 금지.
+
+---
+
+### 2026-04-21 typed confirmation UX 의 비교 기준값 정규화 일관성 — 모든 쓰기 경로에 동일 규약 필수
+
+**증상**: Epic B Task B-1 에서 봇 영구 삭제 typed confirmation 구현 (사용자가 봇 이름 타이핑 → 일치 시 "영구 삭제" 버튼 활성). security 리뷰 M-2 에서 봇 이름 `.trim()` 비일관성 발견:
+
+- **생성 경로** (`src/app/bots/new/actions.ts:66`): `name: String(formData.get("name") ?? "")` — **trim 없음**. DB 에 공백 포함 이름 `"  내 봇  "` 저장 가능.
+- **수정 경로** (`src/app/bots/[slug]/edit/actions.ts`): `str()` 헬퍼 — `String(fd.get(k) ?? "").trim()` — trim 적용.
+- **삭제 dialog 클라이언트** (`delete-bot-dialog.tsx:56`): `confirmValue.trim() === name` — 양쪽 trim 후 exact match.
+- **삭제 서버** (`deleteBotAction:1093, 1150`): `String(formData.get("confirmName") ?? "").trim()` → `confirmName !== existing.name` — 입력은 trim, 기준은 raw DB 값.
+
+결과: 생성 시 공백 포함 이름이 저장된 봇은 소유자 본인이 삭제하려 해도 dialog 에서 input `"내 봇"` → `confirmValue.trim() === "내 봇"` vs `existing.name = "  내 봇  "` → false → 버튼 비활성. 공격 시나리오가 아니라 **소유자 본인의 정상 삭제가 실패하는 UX 버그**. 공격자가 유발할 수도 있지만 시나리오 제한적 (스스로 만든 봇을 본인이 못 지움).
+
+**원인**:
+
+1. Task B-1 설계 시 typed confirmation 기준값 = DB `bots.name` 으로 확정했지만, 비교 규약 (trim 적용 여부 / 대소문자 / 유니코드 정규화) 을 **쓰기 경로 양쪽** 에서 일관되게 적용하는지 검증하지 않음.
+2. 2개 action 이 서로 다른 패턴 사용 — 생성은 raw `String(...)`, 수정은 `str()` 헬퍼. 정규화 정책이 **단일 출처 아님**. 생성 경로가 의도적이라기보단 "초기 구현 시 trim 추가를 잊었고 이후 다른 필드도 없어서 드러나지 않음".
+3. Zod `createBotSchema` 가 `.min(1)` 만 체크하고 `.trim()` 등 transform 을 안 해서, 스키마 계층에서도 단일 출처 보장 없음.
+
+**해결**: `createBot` 의 4필드 (name / slug / welcomeMessage / systemPrompt) 에 `.trim()` 적용 + 주석에 "typed confirmation 정합성" 명시. 근본 해결은 `createBotSchema` Zod 에 `.transform(s => s.trim())` 또는 `z.string().trim()` 으로 승격 — B-5 백로그.
+
+**규칙** ⭐:
+
+- **exact-match 비교 UX (typed confirmation / slug 검증 / 이름 검색 등) 도입 시, 비교 기준값이 거쳐가는 모든 쓰기 경로 (생성/수정/import/migration) 의 정규화 정책을 동일 규약으로 통일**.
+- **schema 계층 정규화 우선** — Zod `z.string().trim()` 또는 `.transform(s => s.trim())` 로 스키마가 정규화하도록 승격. 각 action 에서 수동 `.trim()` 반복은 누락 위험. 단일 출처 = schema.
+- **UX 비교 로직 구현 시 "기준값이 이미 정규화된 상태로 저장돼 있는가?" 를 먼저 검증** — UI 측 `value.trim() === ref` 로 해결하려 하면 UX 는 방어되지만 DB 에 비정규 데이터가 축적되는 근본 문제는 남음.
+- **쓰기 경로 비대칭 발견 시 schema 승격 Task 자동 백로그** — "create 에 trim 없음 / update 엔 있음" 같은 불일치는 "단기 수동 fix + 중기 schema 승격" 두 단계로 처리. 단기 fix 만 하면 새 필드 추가 시 같은 실수 재발.
+- **Zod preprocess 대신 `.trim()` chain 선호** — Zod 4.x 의 `z.string().trim()` 은 transform 을 체인 가능하며 `.min(1)` 이 trim 후 길이 기준으로 동작해 공백만 입력 거부 가능. 두 가지 정규화 (빈값 + 공백) 가 한 줄에 해결.
+
+---
