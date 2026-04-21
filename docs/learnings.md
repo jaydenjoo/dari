@@ -32,6 +32,97 @@
 
 ## 기록
 
+### 2026-04-21 AI SDK `onFinish` 서버리스 Promise leak → Next 16 `after()` 로 인프라 레벨 보장 (설계 결정)
+
+**증상**: Task A-4 (Vercel AI SDK Data Stream Protocol 전환) 에서 `streamText({ ..., onFinish: async ({ text }) => { await admin.from("messages").insert(...) } })` 패턴을 먼저 구현. 로컬에서는 스트림 완료 후 assistant 메시지 저장 정상. 독립 리뷰 (code H-1 / sec M-2) 가 핵심 이슈 지적: **Vercel 서버리스는 응답 헤더 flush 시점에 함수를 종료할 권한이 있어서 `onFinish` 가 호출 전에 lifecycle 이 잘릴 수 있음**. 결과는 **간헐적 assistant 메시지 누락** — 로컬 재현 불가, prod 운영 중 무작위 대화 기록 불일치로 나타남.
+
+**원인**:
+
+1. Vercel 문서: `waitUntil()` 또는 equivalent 없이 응답 반환 후 실행되는 Promise 는 **실행 보장 없음**. AI SDK `onFinish` 는 stream consumer 종료 후 호출되므로 응답 반환 시점 이후 lifecycle.
+2. Node runtime (`runtime=nodejs`) 는 Edge 보다 관대하나, 서버리스 플랫폼이 flush 후 마이크로태스크를 강제 종료할 권한을 가짐.
+3. `streamText().toUIMessageStreamResponse()` 는 Response 객체를 **즉시** 반환 — 이때 함수가 "완료" 된 것처럼 보이는 race window.
+4. 로컬 dev (`next dev`) 는 프로세스가 계속 살아있어서 이 race 를 재현 못 함 → 검증 갭.
+
+**해결**: `onFinish` 제거 + Next 16 의 `after()` API 사용.
+
+```ts
+import { after } from "next/server";
+
+const result = streamText({ ... }); // onFinish 없음
+
+after(async () => {
+  try {
+    const finalText = await result.text;          // stream 완료 후 resolve, 에러 시 reject
+    const adminForAfter = createAdminClient();    // 응답 flush 이후 새 인스턴스 (기존 admin HTTP 연결 정리 race 방어)
+    const { error } = await adminForAfter.from("messages").insert({
+      conversation_id: conversationId,
+      role: "assistant",
+      content: finalText,
+    });
+    if (error) logger.error({ err: sanitizeLoggableError(error) }, "insert 실패 (after)");
+  } catch (err) {
+    logger.error({ err: sanitizeLoggableError(err), botId }, "after() 중 예외");
+  }
+});
+
+return result.toUIMessageStreamResponse({ headers, onError });
+```
+
+`after()` 는 Vercel 인프라 레벨에서 응답 flush **이후** 실행을 보장. Node/Edge 양쪽 지원. Next 16.2 에서 `unstable_` prefix 제거된 안정 API.
+
+**규칙** ⭐:
+
+- **서버리스 응답 이후 실행되는 Promise 는 절대 `onFinish` / `.then()` / fire-and-forget 에 의존 금지**. Next 15+ 에서는 `after()` 를, 구 Next 에서는 `waitUntil` (Vercel) 또는 플랫폼 equivalent.
+- **`streamText().text` / `.finishReason` / `.usage` 같은 Promise 는 `after()` 안에서 await** — stream 소비가 끝나야 resolve. 에러 시 reject 되므로 반드시 try/catch.
+- **`after()` 내부의 DB 클라이언트는 새 인스턴스** — 응답 flush 후 기존 클라이언트의 HTTP keep-alive/연결이 정리됐을 수 있어 reuse 시 500 가능성. cold-start 하나 더 vs 간헐적 실패, 전자가 압도적 이득.
+- **로컬 dev 에서 재현 불가능한 lifecycle 이슈 존재 인지** — 리뷰어가 지적하지 않으면 prod 에서만 터짐. AI SDK / 서버리스 관련 설계 결정은 **Vercel 공식 문서 lifecycle 섹션 재확인 필수**.
+- **Stream abort 시나리오는 별개 고려** — 클라가 중간에 abort 하면 AI SDK 는 서버 측 파이프를 (플랫폼에 따라) 유지하거나 끊음. `result.text` 가 partial 로 resolve 할 수도, reject 할 수도 있음. try/catch + partial 저장 정책 명시.
+
+---
+
+### 2026-04-21 브라우저 SSE 파서는 buffer/full 상한 필수 — 악성 프록시 MITM 방어 (설계 결정)
+
+**증상**: Task A-4 위젯 `stream-parser.ts` (UIMessageStream SSE pure fn) 초기 구현에선 `buffer += decoder.decode(...)` / `full += delta` 무상한 누적. 보안 리뷰 (sec M-1) 가 CWE-400 (Resource Exhaustion) 지적:
+
+1. **buffer 무상한**: 악성 프록시가 MITM 환경에서 응답 스트림에 `\n` 없는 256 KB chunk 를 반복 주입 → `buffer` 가 수십 MB 로 성장 → 브라우저 탭 크래시.
+2. **full 무상한**: 서버 `CHAT_MAX_OUTPUT_TOKENS=2048` 은 **정상 경로** 전제. 악성 서버가 수만 delta 를 보내면 전체 텍스트가 수십 MB 문자열로 누적.
+
+이 두 경로 모두 **서버 측 상한** (token clamp) 이 도와주지 않음. "프록시/중간자/악성 서버" 위협 모델에서 클라가 자기 방어해야 함.
+
+**원인**: 브라우저 SSE 소비자 대부분이 "서버 trust 가정" 으로 작성됨. 네트워크 계층 (TLS) 은 기밀성/무결성 만 담당하지 reader-side DoS 는 별개. 파서가 텍스트를 누적하는 모든 지점에서 상한이 필요.
+
+**해결**: 3 포인트 상한.
+
+```ts
+const MAX_BUFFER_BYTES = 64 * 1024; // 한 SSE 이벤트 라인 상한 (정상 이벤트는 < 1KB)
+const MAX_FULL_CHARS = 32 * 1024; // 전체 응답 상한 (서버 CHAT_MAX_OUTPUT_TOKENS ≈ 8K chars × 4 여유)
+const MAX_ERROR_TEXT_CHARS = 64; // error 이벤트 errorText 상한 (화이트리스트 최장 코드 < 32자)
+
+// 누적 직후 검사
+buffer += decoder.decode(value, { stream: true });
+if (buffer.length > MAX_BUFFER_BYTES) throw new StreamError("parse_error");
+
+// ... line 파싱 ...
+full += delta;
+if (full.length > MAX_FULL_CHARS) throw new StreamError("upstream_error");
+
+// error 이벤트
+const errorText = raw.slice(0, MAX_ERROR_TEXT_CHARS); // 화이트리스트 정규화 전 slice
+```
+
+상한 값은 **서버 상한 × 4 여유** 원칙. 정상 경로는 영향 없고 악성 경로만 차단.
+
+**규칙** ⭐:
+
+- **브라우저에서 스트리밍 소비 시 누적 변수는 상한 필수** — `buffer` / `full text` / `error payload` / 기타 append 지점 전수 점검.
+- **상한 값 = 서버 상한 × (3~5 여유)**. 너무 타이트하면 정상 큰 응답이 차단되고, 너무 헐거우면 방어 효과 낮음. 서버에 clamp 있다면 그 값 기반으로 derive.
+- **상한 초과는 화이트리스트 에러 코드로 normalize** — raw exception 노출 금지. 사용자에게는 `upstream_error` / `parse_error` 같은 일반 메시지.
+- **TLS 있어도 MITM 위협 유효** — 인증서 검증 우회 (사내 프록시, 로컬 디버거, 악성 확장) / 사내 CA rogue 발급 / 클라이언트 호스트 자체 손상 등. "TLS 끝점 외 trust 없음" 가정.
+- **파서 unit 테스트에 악성 페이로드 케이스 필수** — 64KB 단일 라인 / 거대 full text / 거대 errorText 각각 별도 테스트. 정상 케이스만 검증은 방어선 무력.
+- **서버 상한 + 클라 상한 = 방어선 2중** — 서버 측 `maxOutputTokens` clamp 가 정상 경로를 지키고, 클라 측 상한이 비정상 경로 (MITM / 악성 서버) 를 지킴. 둘 중 하나 빠지면 방어선 깨짐.
+
+---
+
 ### 2026-04-21 @sentry/core transitive 의존성 직접 import — 로컬 pnpm hoist 로 은폐된 Vercel strict 빌드 실패 = DEPLOYMENT_NOT_FOUND 실제 원인 (운영 지식 / 설계 결정)
 
 **증상**: Vercel 배포 접속 시 `DEPLOYMENT_NOT_FOUND` 응답. 프로젝트 존재 여부 / Dashboard 레벨 이슈 등 여러 가설을 세웠으나, Jayden 이 **실제 Vercel 빌드 로그 전문** 을 제공한 뒤에야 진짜 원인 확인:

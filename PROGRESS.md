@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 진행 (Task A-1·A-2·A-3 완료 + 리뷰 Fix-then-ship 반영 + Vercel 빌드 복구 + prod Playwright 스모크 10/10)** · Task A-4 (스트리밍 전환) 대기
-- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 γ 경로) + ADR-009 + Playwright cross-origin smoke 20/20 + 리뷰 반영 + **Vercel prod 배포 정상** + 실 URL Playwright 10/10
-- 상태: **Vercel 배포 복구 완결.** 원인 규명 = `src/core/observability/beforeSend.ts` 의 `@sentry/core` transitive import (Phase 0-E-3 부터 잠복, 로컬 pnpm hoist 로 은폐) → `@sentry/nextjs` 로 수정. 리뷰 Fix-then-ship 일괄 반영 (HIGH-1 설치 스니펫 `data-bot-id`/`async` + MEDIUM-1 loader.js origin 화이트리스트 + LOW-3 보안 헤더 3종 + LOW-1 learnings matcher drift 원칙). **실 URL Playwright MCP 스모크 10/10** 통과 (랜딩/보안 헤더/widget.js 1:1/IIFE 유효/login OAuth/auth redirect/health 200/404 정적 메시지/console errors 0).
-- ⚠️ **차단**: 없음. Task A-4 (스트리밍 로컬) 또는 A-5 (Dairect 사이트 embed) 양쪽 진입 가능.
+- Phase: **2 Epic A 진행 (Task A-1~A-4 완료 — 스트리밍 전환까지 구현 + 독립 리뷰 Fix 6건 반영)** · Task A-5 (Dairect 5개 embed) 대기
+- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 γ 경로) + ADR-009 + Playwright cross-origin smoke 20/20 + 리뷰 반영 + **Vercel prod 배포 정상** + 실 URL Playwright 10/10 + **Vercel AI SDK Data Stream Protocol 전환 완료**
+- 상태: **Task A-4 완결.** `@ai-sdk/anthropic` 3.0.71 + `ai` 6.0.168 도입 + `streamText()` + `toUIMessageStreamResponse()` 전환. 서버리스 lifecycle 보장은 **Next 16 `after()` API** 로 (리뷰 code H-1 / sec M-2 핵심 지적). 클라 `stream-parser.ts` 신규 (UIMessageStream SSE pure fn 파서 + DoS 상한 64KB/32K) + `widget.ts` 점진 렌더. 독립 리뷰 2 병렬 → code Fix-then-ship (H-1/M-2/L-2/L-3) + sec Ship as-is (M-1/M-2/L-1) = **Fix 6건 일괄 반영 / 의식적 미반영 3건 명시**. vitest 488 → 491 / widget.js 16.4KB → 18.0KB (gzip +1.6KB) / Playwright widget-embed 20/20 회귀 0.
+- ⚠️ **차단**: 없음. Task A-5 (Dairect 5개 embed + prod SSE smoke) 또는 Phase 1 잔존 backlog 진입 가능.
 
 ## 완료된 Epic
 
@@ -1924,9 +1924,71 @@ Jayden 정정 2회로 **Task A-1 결정 #1 재작성 (α→γ)** + **A-3 QA 방�
 
 ---
 
+## 이번 세션(2026-04-21 Ⅲ) — Task A-4 완결 · Vercel AI SDK Data Stream Protocol 스트리밍 전환
+
+Jayden "경로 A" 승인 → Task A-4 Plan 제시 → 승인 → Build 6 Step → 독립 리뷰 2 병렬 → Fix 6건 일괄 반영 → 전 파이프라인 clean → 커밋 `3718771`. "승인" 경로 2회 (경로 선택 A + Task Plan).
+
+### 흐름 (~3.5h)
+
+1. **Plan (~15분)** — 경로 비교 3개(α 풀 AI SDK 전환 / β Anthropic 직접 SSE / γ 단계 분할) + 선결 체크 8항목(ai@6 / @ai-sdk/anthropic@3 버전 / ANTHROPIC_API_KEY 재사용 / Node runtime / Supabase admin 호환 / CORS 헤더 / 에러 경로 / 기존 anthropic-client 병존). 권장 α (ADR-009 결정 #5 확정). 예상 3h.
+2. **Step 1 선결 (10분)** — `pnpm add ai@6.0.168 @ai-sdk/anthropic@3.0.71` / `src/core/ai/anthropic-provider.ts` 신규 (`createAnthropic` 싱글턴 + `server-only` guard).
+3. **Step 2 서버 (40분)** — `src/app/api/chat/[botId]/route.ts` 교체. 6중 보안 레이어 전단계 유지 + 기존 `callAnthropic` 제거. `streamText({ model, system, messages, maxOutputTokens, temperature })` + `toUIMessageStreamResponse({ headers: { ...corsHeaders, "x-conversation-id": conversationId, "Access-Control-Expose-Headers": "x-conversation-id" }, onError: () => "upstream_error" })`. `runtime=nodejs` + `maxDuration=30` 명시. **POST 반환 타입 `NextResponse` → `Response`** (AI SDK 의 `toUIMessageStreamResponse` 는 `Response` 반환).
+4. **Step 3 클라 (30분)** — `src/widget/stream-parser.ts` 신규 (UIMessageStream SSE pure fn). `text-delta` 화이트리스트 + `errorText` → `WidgetErrorCode` normalize + `[DONE]` 잔여 대응 + chunk 경계 buffer. `chat.ts` 에 `onChunk` 필드 추가 + 성공 경로를 `consumeUIMessageStream` 으로 교체. `x-conversation-id` 헤더 추출.
+5. **Step 4 UI (20분)** — `widget.ts` submit() 에 `onChunk` 연결. 첫 chunk 도착 시 pending 스타일 해제 + placeholder 제거, 이후 `pending.textContent += delta` 누적. 최종 `result.message` 로 한번 더 덮어써 drift 방어.
+6. **Step 5 테스트 (40분)** — `stream-parser.test.ts` 10 케이스 (text-delta / onChunk / 화이트리스트 외 스킵 / SSE 주석·빈줄 / [DONE] / chunk 경계 / invalid JSON / error 매핑 / 화이트리스트 외 error / 사전 abort). `chat.test.ts` 를 SSE fixture (`makeStreamResponse`) 로 전환 + onChunk·헤더누락·error 이벤트 케이스 추가 (9→12). vitest 476 → 488.
+7. **검증 1차 + E2E** — typecheck ✅ / lint ✅ (기존 3 warnings) / format:check ⚠️ → `prettier --write` / vitest 488 / build 14 routes / widget.js 17.9KB. **Playwright `widget-embed` 20/20 회귀 0** (Chromium + Firefox + WebKit + Mobile Chrome + Mobile Safari).
+8. **독립 리뷰 2 병렬** —
+   - **code-reviewer (Fix-then-ship)**: H-1 onFinish Promise leak (서버리스 lifecycle 탈출 — 간헐 assistant 저장 누락) + M-1 admin closure race + M-2 onChunk throw 전파 + L-1 Expose-Headers 병합 + L-2 사후 abort 테스트 누락 + L-3 sweep TODO 불명확 + I-1 중복 Set + I-2 헤더 채널 타당 + I-3 textContent 안전
+   - **security-reviewer (Ship as-is)**: M-1 buffer/full DoS 상한 + M-2 onFinish abort 시 DB 누락(code H-1 동일 맥락) + L-1 errorText slice + L-2 provider 키 로테이션 + I-1 Vary 상호작용 OK + I-2 AI SDK 버전 pin
+9. **Fix 6건 일괄 반영 (커밋 `3718771`)** —
+   - **code H-1 + sec M-2**: `onFinish` 제거 → Next 16 `after()` + `result.text` await + `createAdminClient()` 새 인스턴스 (서버리스 Promise leak 인프라 레벨 방어)
+   - **sec M-1**: stream-parser `MAX_BUFFER_BYTES=64KB` + `MAX_FULL_CHARS=32K` 상한 (누적 후 체크 → StreamError)
+   - **sec L-1**: `errorText.slice(0, MAX_ERROR_TEXT_CHARS=64)` 대형 문자열 메모리 방어
+   - **code M-2**: `onChunk` 호출에 try/catch — 외부 콜백 throw 가 StreamError 분기 우회해 parse_error 오정규화 차단
+   - **code L-2**: 사후 abort 회귀 테스트 + 상한 초과 2 케이스 추가 (stream-parser 10 → 13)
+   - **code L-3**: `anthropic-provider.ts` 에 `TODO(post-A-4 sweep)` 명시
+10. **의식적 미반영 3건** — code L-1 (buildCorsHeaders 가 Expose-Headers 반환 안 함 → 현재 충돌 없음) / sec L-2 (운영 프로세스, 코드 외) / code I-1 (Set 중복 추출 ROI 낮음, 현재 2곳 모두 8종 동일 유지)
+11. **검증 2차** — vitest **491** / build 14 routes / widget.js **18.0KB** (gzip +1.6KB, 목표 +2KB 내) / gitleaks pre-commit ✅.
+
+### 신규 3 + 수정 6
+
+_신규_
+
+- `src/core/ai/anthropic-provider.ts` — `createAnthropic` 싱글턴 + `server-only`
+- `src/widget/stream-parser.ts` — UIMessageStream SSE 파서 (pure fn, DOM 의존 0, StreamError class)
+- `src/widget/stream-parser.test.ts` — 13 케이스 (정상 / onChunk / 스킵 / 주석 / [DONE] / chunk 경계 / invalid / error 매핑·화이트리스트 외 / 사전 abort / 사후 abort / buffer 상한 / full 상한)
+
+_수정_
+
+- `src/app/api/chat/[botId]/route.ts` — streamText 전환 + after() + runtime/maxDuration 명시 + 반환 타입 `Response`
+- `src/widget/chat.ts` — onChunk 콜백 확장 + x-conversation-id 헤더 추출 + 에러 화이트리스트 유지
+- `src/widget/chat.test.ts` — SSE fixture 전환 (9 → 12 케이스)
+- `src/widget/widget.ts` — submit() 점진 렌더 + 첫 chunk pending 해제 + 최종 drift 방어 덮어쓰기
+- `package.json` + `pnpm-lock.yaml` — `ai@6.0.168` + `@ai-sdk/anthropic@3.0.71`
+
+### 검증
+
+- typecheck ✅ / lint ✅ (기존 3 warnings 무관) / prettier ✅ / vitest **488 → 491 (+3)** / build ✅ (14 routes)
+- widget.js 16.4KB → 18.0KB (gzip +1.6KB, 목표 내)
+- Playwright `widget-embed` 20/20 회귀 0 (5 projects × 4 tests)
+- 독립 리뷰 2 병렬 → Fix 6건 직접 반영 + 의식적 미반영 3건 명시
+
+### 주요 결정 / 교훈 (learnings +2)
+
+1. **AI SDK `onFinish` 서버리스 Promise leak → Next 16 `after()` 인프라 레벨 보장** — Vercel `waitUntil` 없는 Promise 는 응답 flush 후 실행 보장 안 됨. `result.text` await + `after()` 조합으로 assistant DB insert lifecycle 안정화. admin 클라이언트는 `after()` 안에서 새 인스턴스 (응답 flush 후 기존 HTTP 연결 정리 race 방어).
+2. **브라우저 SSE 파서 buffer/full 상한 필수** — 서버 `CHAT_MAX_OUTPUT_TOKENS` clamp 는 정상 경로 전제. MITM 프록시가 `\n` 없는 수 MB 페이로드 주입 시 탭 메모리 소진 가능. `MAX_BUFFER_BYTES=64KB` + `MAX_FULL_CHARS=32K` (서버 상한 ×4 여유) 2중 방어. 상한 초과는 `parse_error` / `upstream_error` 화이트리스트 코드로 normalize.
+
+### Backlog (다음 세션)
+
+1. **Task A-5** Dairect 5개 사이트 embed smoke — Config 5종 작성 + `NEXT_PUBLIC_WIDGET_CDN_URL` 환경변수 검증 + 각 봇 prod SSE smoke.
+2. **post-A-4 sweep** — `anthropic-client.ts` 잔여 호출처 식별 후 `anthropic-provider.ts` 로 단일화.
+3. Phase 1 잔존 — `storagePath` redact / orphan Storage 수거 / `formatRelative` shared util 승격.
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅱ (Task A-2 γ 경로 + Task A-3 Playwright smoke 완료, **Phase 2 Epic A 60% 진행**, 다음: Task A-4 스트리밍)
+- 날짜: 2026-04-21 Ⅲ (Task A-4 Vercel AI SDK Data Stream Protocol 완결, **Phase 2 Epic A 80% 진행**, 다음: Task A-5 Dairect 5개 embed)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
 - 커밋: `1ebe8c0` (A-3) · `b1e2776` (A-2)
