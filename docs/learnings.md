@@ -32,6 +32,42 @@
 
 ## 기록
 
+### 2026-04-21 Phase 전환 계획서의 "이미 구현된 것 vs 미구현" 구분은 코드 전수 감사로만 확정된다 — 문서 메모만 믿으면 범위가 과대 추정 (설계 결정 / AI 이탈)
+
+**증상**: Phase 2 Epic A (위젯 런타임) 진입 Task A-1 에서 현황 감사 전 `docs/phase-2-plan.md` §2 에 "`src/widget/widget.ts` (현재 42.59% 커버, 실질 빈 스텁) 실구현" 으로 서술. Epic A 예상 규모를 **2~3주 (4~5 Task)** 로 추정. 결정 체크리스트(§7-5 스트리밍, §7-6 세션)도 "쿠키 도입 / fetch-stream 신설" 같은 신규 구축 전제로 권장안 작성.
+
+실제 Task A-1 에서 Read 9 파일 병렬로 탐색해보니:
+
+- `widget/` 9 모듈 모두 production 수준 구현 완료 (Shadow DOM closed + 디자인 시스템 v2 CSS 이식 + 접근성 aria + 모바일 반응형 + AbortController + 제어문자 sanitize + brand 변수 주입 + 에러 바)
+- `/api/chat/[botId]` 6중 보안 + RAG + rate limit 완성
+- `/api/widget-config/[botId]` 화이트리스트 + 5분 CDN 캐싱 완성
+- `origin-check.ts` 와일드카드 / TLD 차단 / IDN punycode / trailing dot 정규화 — 프로덕션급
+- `build-widget.mjs` esbuild IIFE + gzip 15KB 목표 + sourcemap dev-only
+
+**원인**: Phase 1 이 7+ 세션에 걸쳐 점진 구현되면서 "위젯 Task 는 Epic 1-8 에 밀림" 식의 요약이 PROGRESS.md 에 기록되었으나, 실제 코드는 **Task 1-6-a/b/c/d 로 진행되어 거의 완성** 된 상태. Phase 2 계획서 작성 시점(2026-04-20)에 이 불일치를 감지 못 하고 "미구현 과제" 로 서술. 결정 권장안도 이 오인식 위에서 구성됨:
+
+- 결정 #5: "fetch-stream 신설 제안" 하지만 2026 표준은 Vercel AI SDK Data Stream Protocol — 외부 조사 없이 1차 권장안 도출.
+- 결정 #6: "HTTPOnly Partitioned 쿠키 추가 제안" 하지만 `origin-check.ts` 의 "credentials:true 금지" 주석이 이미 쿠키 도입 차단 논리를 담고 있었음 (현황 감사 전엔 이 주석을 몰랐음).
+
+**해결**:
+
+1. Task A-1 의 첫 단계로 **현황 감사를 명시 수행** — `src/widget/**/*.ts` + 관련 API route + 보안 유틸 전수 Read (병렬).
+2. `phase-2-plan.md` §2 Epic A 범위 재작성: "빈 스텁 실구현" → "배포 + smoke test + 스트리밍 전환" (3~5일).
+3. §5 Task 분해 5→5 유지하되 A-1 완료 / A-2 배포 중심 / A-4 스트리밍만 신규 / A-5 Dairect 사이트 embed 중심으로 재정의.
+4. 결정 #5 변경: Vercel AI SDK Data Stream Protocol 로 재권장 (외부 조사 후).
+5. 결정 #6 변경: "쿠키 도입 보류, localStorage + 서버 UUID 현행 유지" (`origin-check.ts` 주석의 `credentials:true 금지` 원칙이 `allowedDomains` allow-all 정책과 불가분 결합 확인 후).
+6. ADR-009 에 결정 근거 + 아키텍처 다이어그램 + 데이터 흐름 + 보안 모델 + Open Questions 5건 문서화.
+
+**규칙** ⭐:
+
+- **Phase 전환 계획서 작성 전에 해당 영역 코드 전수 감사 필수** — PROGRESS.md / learnings.md 의 메모만 믿지 말 것. Phase 2 계획서 §2 에 Epic 범위 서술 시 `src/<영역>/**/*` + 관련 API + 관련 util 을 **Read 병렬로 전수 확인** 후 "이미 구현된 것 vs 미구현" 명확 구분. "~42% 커버" 같은 coverage 수치는 **문서화 부족** 의미일 뿐 구현 부재 의미가 아님.
+- **결정 권장안 도출 시점에 외부 최신 정보 조사를 선행** — WebSearch + context7 (framework/SDK 공식 문서) 를 결정마다 1~2회 병렬 호출. 특히 스트리밍 / 쿠키 / 브라우저 표준 / AI SDK 같이 **2024~2026 급변 영역** 은 필수. 1차 권장안 도출 전에 최신 정보 수집 → 2차에서 권장안 보정이 드는 시간이 절약.
+- **기존 보안 주석 / 설계 주석은 "묵시적 결정 기록" — 무시하면 결정 번복 유발** — `origin-check.ts` 의 "credentials:true 금지" 긴 주석은 단순 경고가 아니라 **이미 정해진 설계 원칙**. 신규 결정이 이 원칙과 충돌하면 신규 결정이 틀린 것. 결정 체크리스트 구성 시 "관련 파일의 주석부터 전수 Read" 가 선결 단계.
+- **과대 추정은 Jayden 의 의욕 낭비** — "2~3주 Epic" 이라고 말했다가 실제로 "3~5일" 이면 Jayden 이 착수 결정 시 체감하는 무게가 다름. 계획서의 예상 규모는 **반드시 현황 감사 후** 확정. Phase 1 진행 중엔 대략 추정 OK 이지만 Phase 전환 문서는 정확도 요구 단계.
+- **"AI 방향 이탈" 유형** — 선행 조사 없이 "1차 권장안"을 제시하면 권장안이 Plan 에 묶여 변경 비용 발생. Auto mode 여도 **외부 조사 + 현황 감사가 Plan 수립 전 필수 단계** 임을 프롬프트에 명시. 본 세션에서는 Jayden 이 "최신 정보 학습해서 추천" 이라고 2차 지시를 내린 덕분에 재조사 기회가 생겼으나, 원래 첫 Plan 단계에 포함되었어야 함.
+
+---
+
 ### 2026-04-20 Playwright HTML 리포트가 ESLint 에 잡혀 "errors 190" 오탐 — artifact 폴더 ignore 누락 (운영 지식)
 
 **증상**: Task 1-8-a 검증 시 `pnpm lint` 가 `3021 problems (190 errors)` 출력. 에러 위치가 `column 17817 / 37960` 같은 비정상 숫자 — minified JS 특성. 직전 세션에는 "기존 3 warnings" 로 clean 이었음. 내 신규 파일(`conversations/*`)에는 한 건도 없음.

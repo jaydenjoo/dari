@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **1 완결 (출시 준비 단계)** · Phase 2 Epic 결정 대기
-- Epic: **Epic 1-8 완전 종결 + 후속 리팩 1-8-e ✅ + 출시 준비 문서 3건 ✅ + 로깅 sweep 17지점 ✅**
-- 상태: **Phase 1 MVP 코드 완결** — vitest **468 통과** (442 → 468 / +26), typecheck/lint/prettier/build clean (14 routes). 독립 리뷰 2 병렬 → Fix 7건 반영. Epic 1-8 이월 5건 전부 해소 + 17지점 Epic 1-8 로깅 규약 sweep (기능 변경 0).
-  - 출시 준비 3문서: **README 전면 재작성** (36 → 175줄) + `docs/phase-1-release-checklist.md` (Stage 1 진입 체크리스트) + `docs/phase-2-plan.md` (Phase 2 Epic 후보 4종 비교 + 권장 순서 A→B→D→C).
-  - Phase 2 결정 대기: **Jayden 의 Epic A (위젯 런타임) / B (운영 품질) / C (멀티테넌트) / D (카카오톡) 선택**. 권장: Epic A 진입.
+- Phase: **2 Epic A 진입 (Task A-1 완료)** · Task A-2 (`dari.kr` 배포) 대기
+- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 6건 확정 + ADR-009 작성 + 현황 감사 완료
+- 상태: **Task A-1 ADR-009 완결**. 현황 감사 결과 **위젯 런타임이 Phase 1 에 90% 이미 구현**된 것 확인 → Epic A 범위 **2~3주 → 3~5일 단축**. Phase 2 계획서 §2 / §5 / §7 전면 현실화.
+  - 결정 확정 6건: CDN 호스트 `dari.kr` / 격리 Shadow DOM / A→B 순차 / 빌드 esbuild / 스트리밍 **Vercel AI SDK Data Stream Protocol** (신규 결정, fetch-stream 에서 변경) / 세션 **localStorage + 서버 UUID** (쿠키 도입 보류 — credentials:true 금지 원칙과 충돌).
+  - 저위험 Backlog 3건 동 세션 완료: §7 결정 경로 비교표 / `tsconfig.json.backup.*` 정리 + gitignore / `shared/conversations/{csv,meta}.ts` server-only barrier (sec L-1 이월 해소).
 
 ## 완료된 Epic
 
@@ -80,6 +80,71 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-21) — Phase 2 Epic A 진입 결정 체크리스트 + Backlog 2건 cleanup + Task A-1 ADR-009 + §7 결정 확정
+
+Jayden 지시 "A→B→C 순서대로 모두 진행" + "최신 정보 학습해서 추천" + Task A-1 진입 승인으로 **한 세션 내 4 Task 완결 + 커밋 4건**. auto mode + 문서 중심이라 리스크 낮음. 핵심은 **"현황 감사로 Phase 2 범위 현실화"**.
+
+### 흐름 (~3h)
+
+1. **Task #1 (A) — 결정 체크리스트 경로 비교** (30분)
+   - `docs/phase-2-plan.md` §7 을 "질문 나열" → "2~3 경로 비교표 + 장단점 + 권장안 + 체크박스" 형식으로 확장 (121 insertions).
+   - 메타 결정(§7-0) + 6건 세부(§7-1~6) + 요약표(§7-7).
+   - 커밋: `docs: Epic A 진입 결정 체크리스트 — 6건 경로 비교 + 권장안` (0dfd63b).
+
+2. **Task #2 (B) — tsconfig.json.backup.\* 정리** (15분)
+   - `git rm tsconfig.json.backup.1776399098` (34줄 제거) + `.gitignore` 에 `tsconfig.json.backup.*` 패턴 추가.
+   - `git check-ignore` 로 패턴 매칭 검증.
+   - 커밋: `chore: remove tsconfig.json.backup + gitignore pattern` (e4f1ca9).
+
+3. **Task #3 (C) — server-only barrier (리뷰 sec L-1 이월)** (20분)
+   - `shared/conversations/{csv,meta}.ts` 상단에 `import "server-only"` 추가 (JSDoc 에 근거 명시).
+   - 전제 검증: 프로젝트에 이미 **22곳 server-only 적용** + `vitest.config.mts` 의 stub alias (`vitest.stubs/server-only.ts`) 발견 → Plan 전제 흔들림 없음.
+   - 검증: vitest **468/468 유지** / typecheck 0 / build 14 routes / prettier clean.
+   - 커밋: `chore(shared): add server-only barrier to conversations/csv,meta` (6237456).
+
+4. **Task #4 (A-1) — ADR-009 + §7 결정 최신 정보 재검토 + Phase 1 구현 현황 감사** (~1.5h)
+   - **최신 정보 조사 (WebSearch + context7 병렬 6건)**: CHIPS Safari 18.4 지원 / AI SDK 6 Data Stream Protocol / Shadow DOM 2026 성숙 / Cloudflare vs Vercel Edge / esbuild IIFE 패턴 / Anthropic SDK `messages.stream()`.
+   - **현황 감사 (Read 7 파일 병렬)**: `widget.ts` / `chat.ts` / `ui.ts` / `config.ts` / `widget-config-client.ts` / `index.ts` / `api/chat/[botId]/route.ts` / `api/widget-config/[botId]/route.ts` / `origin-check.ts` / `build-widget.mjs`.
+   - **중대 발견**: Phase 2 계획서 §2 "widget.ts 42.59% 커버 실질 빈 스텁 실구현" 서술이 **사실과 다름**. Phase 1 에서 이미:
+     - widget/ 9 모듈 (Shadow DOM closed + CSS 디자인 시스템 v2 + 접근성 aria + 모바일 반응형 + AbortController + 제어문자 sanitize + 에러 바)
+     - `/api/chat/[botId]` 6중 보안 (bot 조회 / Origin / rate limit / 소유권 / masking / enumeration 방지) + RAG 통합
+     - `/api/widget-config/[botId]` 화이트리스트 응답 + 5분 CDN 캐싱
+     - `origin-check.ts` 프로덕션급 (와일드카드 / TLD 단독 차단 / IP-style 차단 / IDN punycode / trailing dot 정규화)
+     - `build-widget.mjs` esbuild IIFE es2020 minify + gzip 15KB 목표 + sourcemap dev-only (sec H-2)
+   - **결정 재평가**:
+     - #5 스트리밍: 원래 "fetch-stream" → **Vercel AI SDK Data Stream Protocol** 변경. 이유: 2026 표준 + POST body + SSE 포맷 혼합 + 미래 `@dari/react` + `useChat` 호환성 + Tool call 확장성.
+     - #6 세션: 원래 "localStorage + Partitioned 쿠키" → **localStorage + 서버 UUID 현행 유지**. 이유: `origin-check.ts` 의 "credentials:true 금지" 원칙이 `allowedDomains` allow-all 정책과 불가분 결합. 쿠키 도입 시 이 보안 계층 깨짐. conversationId 는 random UUID + 소유권 재검증으로 XSS 탈취도 무해.
+     - #1~4: 권장안 유지 (dari.kr / Shadow DOM / 순차 / esbuild).
+   - **ADR-009 신규 작성 (272줄)**: Context / 결정 6건 / 아키텍처 다이어그램 / 데이터 흐름 10단계 / 보안 모델 (XSS 4중 / CORS / Origin 검증 / Rate limit / Prompt Injection / DoS) / Build & Deploy / Trade-offs / Open Questions 5건 (Task A-2~A-5 이월) / 관련 ADR 6개.
+   - **phase-2-plan.md 현실화**: §2 Epic A 범위 재작성 (빈 스텁 삭제, 현 구현 상태 명시, 예상 규모 **2~3주 → 3~5일**), §5 Task 분해 재작성 (5 Task — A-1 완료 / A-2 배포 / A-3 smoke / A-4 스트리밍 / A-5 Dairect 4개), §7-5/§7-6 재작성, §7-7 요약표 확정.
+   - **ADR-004 (Preact, Planned) → Superseded by ADR-009** 로 표시. Phase 1 실구현은 Vanilla JS 로 진행되어 Preact 채택 없음을 명시.
+   - 커밋: `docs(adr): ADR-009 위젯 아키텍처 + phase-2-plan §7 결정 확정` (f7e202f). 3 files changed, +383/-84.
+
+### 검증 (누적)
+
+- typecheck 0 / lint 3 baseline warnings 유지 / prettier clean / build 14 routes ✅
+- vitest 468/468 유지 (기능 변경 0) ✅
+- gitleaks pre-commit 4회 통과 (no leaks) ✅
+
+### 주요 결정 / 교훈 (learnings +1)
+
+1. **Phase 전환 계획서의 "이미 구현된 것 vs 미구현" 구분은 코드 전수 감사로만 확정** — `phase-2-plan.md` 작성 시점(2026-04-20)에 현황 감사 없이 "widget.ts 실질 빈 스텁" 으로 서술해 Epic A 범위가 과대 추정됨 (2~3주). Task A-1 의 현황 감사(Read 9 파일 병렬)에서 90% 구현 완료 확인 후 3~5일로 대폭 축소. 교훈: Phase 전환 계획서는 **해당 영역 `src/` 전수 Grep + Read 감사** 를 선행 절차로 추가.
+
+### Backlog (다음 세션 후보)
+
+1. **Task A-2: `dari.kr` 배포 + 설치 스니펫 갱신** (0.5~1일, 권장) — DNS (Jayden 수동) + Vercel 도메인 연결 + `public/widget.js` 프로덕션 검증 + `/bots/[slug]` 스니펫 URL 갱신 + Cache-Control 전략 결정 (ADR-009 Open Q #1).
+2. Task A-3: Dairect smoke test (dairect.kr 1개).
+3. Task A-4: 스트리밍 전환 (`@ai-sdk/anthropic` + `ai` 의존성 + `streamText()` + widget SSE 파싱).
+4. Task A-5: Dairect 4개 추가 (Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom).
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-21 (KST)
+- 브랜치: `main`
+- 차단 요소: 없음. Task A-2 진입 대기. DNS + Vercel 도메인 연결이 Jayden 수동 작업이라 선결 조건 확인 필요.
+
+---
 
 ## 이번 세션(2026-04-20 Ⅸ) — Phase 1 출시 준비 3연속 Task (README + Phase 1 체크리스트 + Epic 1-8 로깅 sweep + Phase 2 계획)
 
