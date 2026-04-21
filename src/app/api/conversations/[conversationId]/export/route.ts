@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { AUDIT_EVENTS, logAuditEvent } from "@/core/audit";
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
 import { checkConversationExportRatelimit } from "@/core/ratelimit/conversation-export-limiter";
@@ -185,6 +186,21 @@ export async function GET(
     headers["X-Truncated"] = "true";
     headers["X-Truncated-Limit"] = String(CSV_MESSAGE_LIMIT);
   }
+
+  // 감사 로그 — Epic B Task B-2. 응답 직전, CSV 빌드 성공 확정 후.
+  // throw 금지 계약 → 기록 실패해도 응답 정상 반환.
+  await logAuditEvent(supabase, {
+    eventType: AUDIT_EVENTS.CONVERSATION_EXPORT,
+    entityType: "conversation",
+    entityId: conv.id,
+    actorId: user.id,
+    metadata: {
+      botId: conv.bot_id,
+      format: "csv",
+      messageCount: messages.length,
+      truncated,
+    },
+  });
 
   return new NextResponse(csv, { status: 200, headers });
 }

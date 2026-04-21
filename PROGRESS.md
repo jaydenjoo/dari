@@ -2230,9 +2230,91 @@ _Cleanup (drift)_
 
 ---
 
+## 이번 세션 (2026-04-21 Ⅴ) — Task B-2: Audit Log 도입
+
+Epic B 2/6 Task. `audit_logs` 테이블 + RLS (SELECT/INSERT 만 = immutable) + `core/audit` 모듈 + 5 지점 통합. 독립 리뷰 2 병렬 → 둘 다 Ship + Fix 4건 반영.
+
+### 흐름
+
+1. **Plan (경로 β 선택)** — B-6 Supabase CI 환경 결정을 별도 세션으로 미루고 B-2 선행. 4 결정 포인트 비교표:
+   - 조회 UI: MVP 스킵 (DB 기록만) · 이벤트 5개 (BOT CRUD + 대화 delete/export) · 타이밍 `await` 인라인 (learning #3 서버리스 lifecycle 반영) · metadata 최소 (변경 전/후 값은 Phase 3 `bot_versions` 이월)
+
+2. **DB + types (30분)** —
+   - `supabase/migrations/0013_create_audit_logs.sql`: 테이블 + RLS 2정책 (`audit_logs_select_own` / `audit_logs_insert_own`) + CHECK 2 (`audit_event_type_fmt` 패턴 + `audit_entity_type_valid` 화이트리스트) + 인덱스 2 (`(actor_id, created_at DESC)` + `(entity_type, entity_id)`) + `actor_id FK auth.users(id) ON DELETE RESTRICT` + 롤백 SQL
+   - Supabase MCP `apply_migration` → prod 반영 ✅
+   - `generate_typescript_types` → 수동 유지 정책 따라 `src/core/db/types.ts` 에 `audit_logs` 블록만 삽입 (DariConfig 정확도 보존). `__InternalSupabase` + `Relationships: []` 슬롯 관례 유지. `entity_type`/`event_type` 은 string (core/audit 순환 import 회피 + 앱 레이어 `AuditEventType` / `AuditEntityType` 이중 방어)
+
+3. **core/audit 모듈 + 테스트 (45분)** —
+   - `types.ts`: `AUDIT_EVENTS` const + `AuditEventType` / `AuditEntityType` / `AuditEventInput`
+   - `log.ts`: `logAuditEvent` — **throw 금지 계약** + `redactDeep` 2차 방어 + `server-only` 경계 주석
+   - `index.ts`: barrel
+   - `log.test.ts`: 7 케이스 — 정상 snake_case 매핑 / metadata 미제공 기본값 `{}` / 민감 필드(`email`·`phone`) `[Redacted]` 마스킹 / DB error `ok:false` + `logger.error` / throw 예외 catch / `AUDIT_EVENTS` 상수가 DB CHECK 패턴 `^[a-z_]+\.[a-z_]+$` 일치 / 순환참조 label 보존 + cycle 차단
+
+4. **5 지점 통합 (30분)** —
+   - `src/app/bots/new/actions.ts` — `createBot` 에 `.select("id").single()` 추가 + `BOT_CREATE` (metadata: `{slug,name}`)
+   - `src/app/bots/[slug]/edit/actions.ts` — `updateBot` `BOT_UPDATE` (metadata: `{slug,knowledgeChanged}`) + `deleteBotAction` `BOT_DELETE` (metadata: `{slug,deleteMode:"permanent"}`). **지식 소스 CRUD (addUrl/addFile/removeSource) 3지점은 Plan 밖 → 이월**.
+   - `src/app/bots/[slug]/conversations/[conversationId]/actions.ts` — `deleteConversationAction` `CONVERSATION_DELETE` (metadata: `{botId}`)
+   - `src/app/api/conversations/[conversationId]/export/route.ts` — `CONVERSATION_EXPORT` (metadata: `{botId,format:"csv",messageCount,truncated}`)
+
+5. **검증** —
+   - typecheck 0 / prettier ✅ / eslint ✅ (기존 3 warn 무관) / **vitest 500 → 507 (+7)** / **build 14 routes** 유지
+   - **Supabase RLS 시뮬레이션 10/10 PASS** (execute_sql + `set local role authenticated` + `request.jwt.claims`):
+     (1) 본인 INSERT 성공 / (2) 본인 SELECT 2행 / (3) 타 owner SELECT 0 / (4) anon SELECT 0 / (5) 본인 세션 타 actor_id INSERT 차단 (`WITH CHECK`) / (6) UPDATE 0행 (정책 부재) / (7) DELETE 0행 (정책 부재) / (8a) event_type 대문자 CHECK 거부 / (8b) event_type dot 없음 거부 / (9) entity_type `'message'` 화이트리스트 밖 거부 / (10) actor_id NULL NOT NULL 거부
+
+6. **독립 리뷰 2 병렬 (code + security) — 둘 다 Ship 권고, CRITICAL·HIGH 0** —
+   - **code-reviewer MEDIUM/LOW 4건 중 3건 반영**:
+     - MEDIUM-2: `log.ts` 로그 키명 `actorId` → `userId` (기존 logger 패턴 일관성)
+     - LOW-1: 순환참조 테스트 보강 (`cycle.label` 보존 + `[Redacted]` 포함 검증)
+     - LOW-2: `import "server-only"` 이유 주석 추가
+     - MEDIUM-1 미반영: `Update: Record<string, never>` → postgrest-js 런타임 호환성 검증 전 유보 (Backlog)
+   - **security-reviewer MEDIUM 4건 중 1건 반영**:
+     - MEDIUM-2: `deleteBotAction` BOT_DELETE 감사 로그 주석 강화 — **dangling entity_id 주의** (B-3 soft delete 복구 UI 에서 audit.entity_id 를 봇 복구 키로 쓰지 말 것)
+     - 나머지 3건 (Sentry 멤버 접근 제어 / GDPR anonymize 스크립트 / retention sweeper 조건) 운영 문서화 이월 (Phase 2)
+
+### 신규 5 + 수정 6
+
+_신규_
+
+- `supabase/migrations/0013_create_audit_logs.sql` — 테이블 + RLS 2정책 + CHECK 2 + 인덱스 2 + FK RESTRICT + 롤백 SQL
+- `src/core/audit/types.ts` / `log.ts` / `index.ts` / `log.test.ts`
+
+_수정_
+
+- `src/core/db/types.ts` — `audit_logs` 블록 추가 (수동 유지 정책)
+- `src/app/bots/new/actions.ts` — `BOT_CREATE` + `.select("id").single()`
+- `src/app/bots/[slug]/edit/actions.ts` — `BOT_UPDATE` (updateBot) + `BOT_DELETE` (deleteBotAction, dangling entity_id 주석)
+- `src/app/bots/[slug]/conversations/[conversationId]/actions.ts` — `CONVERSATION_DELETE`
+- `src/app/api/conversations/[conversationId]/export/route.ts` — `CONVERSATION_EXPORT`
+- `PROGRESS.md` — 본 섹션
+
+### 검증 (최종)
+
+- typecheck ✅ / lint ✅ / prettier ✅ / vitest **500 → 507 (+7)** / build ✅ (14 routes)
+- RLS 시뮬레이션 10/10 PASS
+- 독립 리뷰 2 병렬 → Ship · CRITICAL·HIGH 0 · Fix 4건 반영
+
+### 주요 결정 / 교훈
+
+1. **Plan 엄격 준수 — 지식 소스 CRUD 3지점 감사 제외** — 실제 구현 중 `addUrl/addFile/removeSource` 도 `config.knowledge.sources` 를 변경하는 봇 수정이지만 Plan 승인 범위 (`updateBot` 만) 엄격 유지. 스코프 크리프 방지 우선. 필요 시 B-2-후속 Plan 재승인 후 확장. (메모리 규칙 "각 Task 진입 전 별도 Plan" 실천)
+2. **audit_logs.entity_id FK 의도적 부재** — bots/conversations row 삭제 후에도 감사 로그가 남아야 함. FK `ON DELETE CASCADE` 시 감사 증거 자동 삭제 → immutable 계약 깨짐. actor_id 만 `auth.users(id) ON DELETE RESTRICT` 로 참조 무결성 유지 + 사용자 탈퇴 시 명시적 anonymize 스크립트 요구 (Phase 2 ADR).
+3. **Next 16 `after()` 대신 `await` 선택 근거** — learnings #3 (onFinish Promise leak) 에 따라 serverless lifecycle 보장 최우선. `after()` 는 응답 빠르지만 user supabase client 재인스턴스 + RLS actor_id 전달 복잡성. MVP 는 `await` 인라인 + `ok:false` 시 logger.error (주 작업 차단 회피). 성능 이슈 발견 시 Phase 2 재평가.
+
+### Backlog (B-2 이월 / 다음 세션 후보)
+
+1. **audit 조회 UI** (`/bots/[slug]/audit`) — B-2-후속 또는 관리자 대시보드 Phase 3
+2. **`audit_logs.Update` 타입** `Record<string, never>` 호환성 검증 후 교체 (code MEDIUM-1)
+3. **지식 소스 CRUD 3지점 감사** — addUrl/addFile/removeSource → BOT_UPDATE metadata 확장
+4. **GDPR anonymize 스크립트 / ADR** — 사용자 탈퇴 플로우 도입 전 선결 (sec MEDIUM)
+5. **Phase 2 retention sweeper** — 90일 이상 DELETE, dry-run + service_role 최소 권한 RPC 분리 (sec MEDIUM)
+6. **Sentry 프로젝트 멤버 접근 제어 문서화** (sec MEDIUM)
+7. **변경 전·후 값 감사** — Phase 3 `bot_versions` 별도 테이블
+8. **Task B-6** Playwright E2E CI (Supabase 테스트 환경 결정) → **Task B-3** soft delete → **B-4** 원가/차트 → **B-5** 품질 sweep
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅳ (Epic B Task B-1 완결 — 봇 영구 삭제 UI + rate limit 3곳 통합 + 리뷰 Fix 6건, **Phase 2 Epic B 1/6 진행**, 다음: Task B-6 Playwright CI)
+- 날짜: 2026-04-21 Ⅴ (Epic B Task B-2 완결 — `audit_logs` 테이블 + core/audit 모듈 + 5 지점 통합 + RLS 10/10 + 리뷰 Fix 4건, **Phase 2 Epic B 2/6 진행**, 다음: B-6 Playwright CI 또는 B-3 soft delete)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 커밋: `1ebe8c0` (A-3) · `b1e2776` (A-2)
+- 커밋: `09ea01d` (B-1 save) · `bd38558` (B-1 feat) · `6c71599` (Epic B 분해 doc)

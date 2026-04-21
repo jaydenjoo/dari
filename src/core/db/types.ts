@@ -228,6 +228,41 @@ export type Database = {
         };
         Relationships: [];
       };
+      // Epic B Task B-2: immutable 감사 로그 테이블.
+      //   - event_type: DB CHECK `^[a-z_]+\.[a-z_]+$` + 앱 레이어 `AuditEventType` 이중 방어.
+      //     여기서는 string 으로 두어 types.ts ↔ core/audit 순환 import 회피.
+      //   - entity_type: DB CHECK `in ('bot','conversation')` + 앱 레이어 `AuditEntityType`.
+      //   - UPDATE/DELETE 정책 부재 → 사실상 Row 의 UPDATE/DELETE 경로 미사용 (service_role 전용 sweeper).
+      audit_logs: {
+        Row: {
+          id: string;
+          event_type: string;
+          entity_type: string;
+          entity_id: string;
+          actor_id: string;
+          metadata: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_type: string;
+          entity_type: string;
+          entity_id: string;
+          actor_id: string;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          event_type?: string;
+          entity_type?: string;
+          entity_id?: string;
+          actor_id?: string;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

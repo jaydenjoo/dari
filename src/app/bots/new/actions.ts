@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { AUDIT_EVENTS, logAuditEvent } from "@/core/audit";
 import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
@@ -130,7 +131,11 @@ export async function createBot(
     config,
   };
 
-  const { error: insertError } = await supabase.from("bots").insert(payload);
+  const { data: inserted, error: insertError } = await supabase
+    .from("bots")
+    .insert(payload)
+    .select("id")
+    .single();
 
   if (insertError) {
     // PostgreSQL 23505 = unique_violation (slug 중복).
@@ -155,6 +160,15 @@ export async function createBot(
       error: "봇 생성에 실패했어요. 잠시 후 다시 시도해 주세요.",
     };
   }
+
+  // 감사 로그 — Epic B Task B-2. throw 금지 계약 → 기록 실패해도 생성 성공 유지.
+  await logAuditEvent(supabase, {
+    eventType: AUDIT_EVENTS.BOT_CREATE,
+    entityType: "bot",
+    entityId: inserted.id,
+    actorId: user.id,
+    metadata: { slug, name },
+  });
 
   redirect("/bots");
 }

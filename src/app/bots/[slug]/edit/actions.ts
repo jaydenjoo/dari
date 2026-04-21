@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { AUDIT_EVENTS, logAuditEvent } from "@/core/audit";
 import {
   dariConfigSchema,
   fileSourceSchema,
@@ -313,6 +314,15 @@ export async function updateBot(
     // 위 select 단계에서 이미 잡히지만 race condition 안전망.
     return { error: "봇을 수정할 권한이 없어요." };
   }
+
+  // 감사 로그 — Epic B Task B-2. throw 금지 계약.
+  await logAuditEvent(supabase, {
+    eventType: AUDIT_EVENTS.BOT_UPDATE,
+    entityType: "bot",
+    entityId: existing.id,
+    actorId: user.id,
+    metadata: { slug, knowledgeChanged },
+  });
 
   redirect(`/bots/${slug}`);
 }
@@ -1239,6 +1249,20 @@ export async function deleteBotAction(
     },
     "봇 영구 삭제 완료",
   );
+
+  // 감사 로그 — Epic B Task B-2. DB row 삭제 후 기록.
+  //   - entity_id(=existing.id) 는 UUID 값 자체로는 유효하지만 bots row 가 이미 삭제됨 →
+  //     **dangling 참조**. B-3 soft delete 복구 UI 에서 audit_logs.entity_id 로 봇을 재조회
+  //     할 경우 null 반환. 복구 키는 별도 bots_tombstone 또는 soft delete 테이블로 격리 필요
+  //     (security review MEDIUM, 2026-04-21).
+  //   - throw 금지 계약 → 기록 실패해도 삭제 완료 상태 유지.
+  await logAuditEvent(supabase, {
+    eventType: AUDIT_EVENTS.BOT_DELETE,
+    entityType: "bot",
+    entityId: existing.id,
+    actorId: user.id,
+    metadata: { slug, deleteMode: "permanent" },
+  });
 
   // 9. 캐시 갱신 + 리다이렉트 (서버 고정 경로 — open redirect 방어).
   revalidatePath("/bots");

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { AUDIT_EVENTS, logAuditEvent } from "@/core/audit";
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
 import { checkConversationDeleteRatelimit } from "@/core/ratelimit/conversation-delete-limiter";
@@ -121,6 +122,15 @@ export async function deleteConversationAction(
     { conversationId, botId: bot.id, userId: user.id },
     "conversation 삭제 완료",
   );
+
+  // 감사 로그 — Epic B Task B-2. DB row 삭제 후 기록 (entity_id FK 없음).
+  await logAuditEvent(supabase, {
+    eventType: AUDIT_EVENTS.CONVERSATION_DELETE,
+    entityType: "conversation",
+    entityId: conversationId,
+    actorId: user.id,
+    metadata: { botId: bot.id },
+  });
 
   // 목록 페이지 stale cache 무효화 + 리다이렉트 (서버 고정 경로 — open redirect 방어).
   revalidatePath(`/bots/${slug}/conversations`);
