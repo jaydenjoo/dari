@@ -24,6 +24,7 @@ import {
   sanitizeKnowledgeText,
 } from "@/core/knowledge";
 import { logger } from "@/core/logging";
+import { checkBotDeleteRatelimit } from "@/core/ratelimit/bot-delete-limiter";
 import { checkBotFileIngestRatelimit } from "@/core/ratelimit/bot-file-ingest-limiter";
 import { checkBotSourceRemoveRatelimit } from "@/core/ratelimit/bot-source-remove-limiter";
 import { checkBotUrlIngestRatelimit } from "@/core/ratelimit/bot-url-ingest-limiter";
@@ -1032,4 +1033,214 @@ export async function removeSourceAction(
       hadStorageFailures: removeResult.failedFiles.length > 0,
     },
   };
+}
+
+// ─── Task B-1 (Epic B): 봇 영구 삭제 ─────────────────────────────────────────
+
+export type DeleteBotFormState = {
+  error?: string;
+};
+
+// Storage list 한 번당 상한.
+// 근거:
+//   - 파일 크기 상한 10MB (0010 `knowledge-files.file_size_limit`) × 1000건 = 10GB/봇.
+//     MVP 단계에서 한 봇이 10GB 분량 지식을 쌓는 케이스는 없음 가정 (상위 outlier 이하).
+//   - Supabase storage.list 기본 limit 은 100, 단일 호출 최대 1000 — 이 값이 실용 상한.
+//   - 초과 시 pagination 구현 대신 Phase 2 sweeper 에 위임 (`bot_id` 디렉토리 정리).
+// 초과 시 동작: 상위 1000개만 제거, 나머지는 orphan 으로 잔존 (DB row 는 이미 삭제).
+// orphan 파일은 `knowledge_files_select_owner` RLS 가 `bots.owner_id = auth.uid()` 를
+// 요구하므로 외부 노출 위험 없음 (bots row 가 사라지면 select 도 0-row → 접근 불가).
+const STORAGE_CLEANUP_LIST_LIMIT = 1000;
+
+/**
+ * 봇 영구 삭제 Server Action (Epic B Task B-1).
+ *
+ * UX: "위험 영역" 카드 → DeleteBotDialog (typed confirmation) → 이 action 호출.
+ *
+ * 방어 (4중):
+ *   1. slug 형식 정규식 (DB 왕복 전).
+ *   2. 세션 `getUser()` — proxy 에 이은 재확인.
+ *   3. `checkBotDeleteRatelimit(user.id)` — 5 req/1h, 반복 스크립트 차단.
+ *   4. **typed confirmation 서버측 재검증** — `confirmName === bot.name` 체크
+ *      (클라이언트 활성 상태만 믿으면 우회 가능).
+ *   + RLS `bots_delete_owner` 가 DB 레벨 owner 격리 (5중 방어).
+ *
+ * 삭제 순서 (중요):
+ *   - Storage cleanup → DB DELETE 순.
+ *   - 이유: DB row 가 먼저 사라지면 `knowledge_files_*_owner` RLS 의 `bots` 참조가
+ *     0-row 가 되어 Storage 삭제가 RLS 거부됨. 반드시 DB 존재하는 상태에서
+ *     Storage 먼저 정리.
+ *
+ * Cascade (DB 레벨 자동):
+ *   - bots → conversations (0003 ON DELETE CASCADE)
+ *   - bots → knowledge_chunks (0005 ON DELETE CASCADE)
+ *   - conversations → messages (0003 ON DELETE CASCADE)
+ *   → 앱에선 `DELETE FROM bots` 한 번이면 연관 테이블 전부 정리됨.
+ *
+ * Storage cleanup 은 best-effort:
+ *   - list/remove 실패 시 `logger.warn` 남기고 DB 삭제 진행.
+ *   - orphan 파일은 Phase 2 주기 sweeper 로 정리 (경로 {bot_id}/* 인데 bots row
+ *     가 이미 없으면 고아).
+ *   - DB 삭제 성공 = 사용자에겐 "삭제됨". Storage 잔존은 비가시적 정리 부채.
+ *
+ * 에러 메시지는 정적 — enumeration / 내부 구조 유출 방어.
+ * 성공 시 revalidatePath("/bots") + redirect("/bots").
+ */
+export async function deleteBotAction(
+  slug: string,
+  _prev: DeleteBotFormState,
+  formData: FormData,
+): Promise<DeleteBotFormState> {
+  // 1. slug 형식 검증.
+  if (!isValidSlug(slug)) {
+    return { error: "잘못된 봇 주소예요." };
+  }
+
+  // 2. 확인 입력값 수신 (typed confirmation).
+  const confirmName = String(formData.get("confirmName") ?? "").trim();
+  if (confirmName.length === 0) {
+    return { error: "봇 이름을 입력해 주세요." };
+  }
+  // 입력 길이 상한 — 과도한 문자열 방어. DB name 컬럼 실제 상한과 무관하게 1024 충분.
+  if (confirmName.length > 1024) {
+    return { error: "입력값이 너무 길어요." };
+  }
+
+  // 3. 세션.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
+  }
+
+  // 4. Rate limit — 파괴적 작업 엄격 (5 req/1h).
+  const rl = await checkBotDeleteRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error:
+        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (1시간 안에 5회 제한)",
+    };
+  }
+
+  // 5. 봇 조회 (id + name 만 필요).
+  //    RLS bots_select_owner 가 owner 자동 필터 → 타인 봇/미존재 = null.
+  const { data: existing, error: selectErr } = await supabase
+    .from("bots")
+    .select("id, name")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (selectErr) {
+    logger.error(
+      {
+        errCode: selectErr.code,
+        errMsg: selectErr.message,
+        slug,
+        userId: user.id,
+      },
+      "봇 조회 실패 — 삭제 action",
+    );
+    return {
+      error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  if (!existing) {
+    // 타인 봇/미존재 — enumeration 방어.
+    return { error: "봇을 찾을 수 없어요." };
+  }
+
+  // 6. typed confirmation 서버측 재검증.
+  //    - client 의 활성 버튼 상태만 믿으면 curl/devtools 우회 가능.
+  //    - 정확한 이름 일치로 "실수 삭제" 와 "의도적 삭제" 를 구분.
+  if (confirmName !== existing.name) {
+    return { error: "봇 이름이 일치하지 않아요." };
+  }
+
+  // 7. Storage cleanup — best-effort, DB 삭제 전에 수행 (RLS 참조 유효 상태).
+  try {
+    const { data: files, error: listErr } = await supabase.storage
+      .from("knowledge-files")
+      .list(existing.id, { limit: STORAGE_CLEANUP_LIST_LIMIT });
+
+    if (listErr) {
+      logger.warn(
+        {
+          errMsg: listErr.message,
+          botId: existing.id,
+          userId: user.id,
+        },
+        "Storage list 실패 — DB 삭제는 진행, orphan 잔존 가능",
+      );
+    } else if (files && files.length > 0) {
+      const paths = files.map((f) => `${existing.id}/${f.name}`);
+      const { error: rmErr } = await supabase.storage
+        .from("knowledge-files")
+        .remove(paths);
+      if (rmErr) {
+        logger.warn(
+          {
+            errMsg: rmErr.message,
+            botId: existing.id,
+            userId: user.id,
+            count: paths.length,
+          },
+          "Storage remove 실패 — orphan 잔존 가능, Phase 2 sweeper 대상",
+        );
+      }
+    }
+  } catch (err) {
+    // list/remove 가 throw 하는 경로 (네트워크 단절 등) — 로깅 후 DB 삭제 진행.
+    logger.warn(
+      {
+        err,
+        botId: existing.id,
+        userId: user.id,
+      },
+      "Storage cleanup 예외 — DB 삭제는 진행",
+    );
+  }
+
+  // 8. DELETE FROM bots — FK cascade 가 conversations/messages/knowledge_chunks 자동 정리.
+  //    .select('id') 로 영향받은 row 확인 → 0 이면 RLS 거부 또는 race.
+  const { data: deleted, error: delErr } = await supabase
+    .from("bots")
+    .delete()
+    .eq("slug", slug)
+    .select("id");
+
+  if (delErr) {
+    logger.error(
+      {
+        errCode: delErr.code,
+        errMsg: delErr.message,
+        slug,
+        botId: existing.id,
+        userId: user.id,
+      },
+      "봇 DELETE 실패",
+    );
+    return {
+      error: "봇 삭제에 실패했어요. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  if (!deleted || deleted.length === 0) {
+    // RLS 거부 또는 race condition — 위 select 로 이미 owner 검증 통과했으므로
+    // 여기 도달 = 동시성 이슈 (다른 탭/세션에서 이미 삭제) 가능.
+    return { error: "봇을 삭제할 권한이 없거나 이미 삭제되었어요." };
+  }
+
+  logger.info(
+    {
+      botId: existing.id,
+      slug,
+      userId: user.id,
+    },
+    "봇 영구 삭제 완료",
+  );
+
+  // 9. 캐시 갱신 + 리다이렉트 (서버 고정 경로 — open redirect 방어).
+  revalidatePath("/bots");
+  redirect("/bots");
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
+import { checkConversationExportRatelimit } from "@/core/ratelimit/conversation-export-limiter";
 import {
   buildConversationCsv,
   type CsvMessageRow,
@@ -51,6 +52,24 @@ export async function GET(
   } = await supabase.auth.getUser();
   if (!user) {
     return jsonError("unauthorized", 401);
+  }
+
+  // Rate limit (Epic B Task B-1) — CSV 대량 다운로드 스크립트 방어. 20 req / 10 min user.id.
+  const rl = await checkConversationExportRatelimit(user.id);
+  if (!rl.ok) {
+    // RFC 6585 표준 Retry-After 헤더 — 클라이언트 재시도 UX 개선 (code M-2 / sec M-1 반영).
+    // `rl.reset` 은 epoch ms. 이미 지난 시점(음수) 대비 최소 1초 보장.
+    const retryAfterSec = Math.max(
+      1,
+      Math.ceil((rl.reset - Date.now()) / 1000),
+    );
+    return new NextResponse(JSON.stringify({ error: "too_many_requests" }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": String(retryAfterSec),
+      },
+    });
   }
 
   const { data: conv, error: convErr } = await supabase

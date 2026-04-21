@@ -14,13 +14,13 @@
 
 ### 1-1. A-5a (이번 세션, 대부분 완료)
 
-| 항목 | 상태 |
-|------|------|
-| dari prod `bots` 테이블 5행 확보 | ✅ **완료** (2026-04-21 05:27~05:31 Jayden UI 생성) |
-| Jayden Google OAuth 세션 (prod) | ✅ **완료** (Supabase URL Configuration 수정 후) |
-| Supabase `Site URL` / `Redirect URLs` | ✅ **완료** (Jayden 수동 등록) |
-| `NEXT_PUBLIC_WIDGET_CDN_URL` Vercel 명시 등록 | ⏳ **남음** (§3 참조) |
-| Config 정교화 (systemPrompt / color / mode) | ⏸️ **A-5b 로 이월** — 사이트 개발 완료 후 도메인/컬러 확정 시 일괄 편집이 효율적 |
+| 항목                                          | 상태                                                                             |
+| --------------------------------------------- | -------------------------------------------------------------------------------- |
+| dari prod `bots` 테이블 5행 확보              | ✅ **완료** (2026-04-21 05:27~05:31 Jayden UI 생성)                              |
+| Jayden Google OAuth 세션 (prod)               | ✅ **완료** (Supabase URL Configuration 수정 후)                                 |
+| Supabase `Site URL` / `Redirect URLs`         | ✅ **완료** (Jayden 수동 등록)                                                   |
+| `NEXT_PUBLIC_WIDGET_CDN_URL` Vercel 명시 등록 | ⏳ **남음** (§3 참조)                                                            |
+| Config 정교화 (systemPrompt / color / mode)   | ⏸️ **A-5b 로 이월** — 사이트 개발 완료 후 도메인/컬러 확정 시 일괄 편집이 효율적 |
 
 ### 1-2. A-5b (이월, 각 사이트 개발 완료 후)
 
@@ -37,12 +37,12 @@
 
 ### 공통 원칙
 
-| 원칙 | 값 |
-|------|-----|
-| language | `ko` (모든 봇) |
-| AI model | `claude-sonnet-4-6` (default, 90% 구현 비용/성능 균형) |
-| ragEnabled | `true` (Knowledge 소스 연결 시 자동 활용) |
-| collectEmail | `false` (A-5b 진입 시 lead 수집 정책 별도 결정) |
+| 원칙         | 값                                                     |
+| ------------ | ------------------------------------------------------ |
+| language     | `ko` (모든 봇)                                         |
+| AI model     | `claude-sonnet-4-6` (default, 90% 구현 비용/성능 균형) |
+| ragEnabled   | `true` (Knowledge 소스 연결 시 자동 활용)              |
+| collectEmail | `false` (A-5b 진입 시 lead 수집 정책 별도 결정)        |
 
 ### 2-1. Prompt Injection 방어 공통 블록 (모든 systemPrompt 끝에 포함)
 
@@ -58,16 +58,16 @@
 
 #### ① `chatsio` (현재 slug 유지)
 
-| 필드 | 값 |
-|------|-----|
-| **현재 상태** | name: `chatsio`, systemPrompt: `"당신은 chatio의 상담 ai입니다."` — ⚠️ **"chatio" 오타** 수정 필요 |
-| **브랜드** | Chatsio — Jayden 의 팀 협업 채팅 SaaS (🟢 일반) |
-| **mode 권장** | `support` (현재 설정 유지) |
-| **primaryColor 권장** | `#0891b2` (cyan, design-system.md 지정 브랜드 컬러) |
-| **fontFamily** | `Pretendard` (default) |
-| **welcomeMessage** | `Chatsio 사용 중 궁금한 게 있으신가요? 설정부터 요금제까지 무엇이든 물어보세요.` |
-| **systemPrompt 확장** | 아래 블록 |
-| **allowedDomains** | A-5b: `chatsio.kr`, `*.chatsio.kr` (Jayden 확정 후) |
+| 필드                  | 값                                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| **현재 상태**         | name: `chatsio`, systemPrompt: `"당신은 chatio의 상담 ai입니다."` — ⚠️ **"chatio" 오타** 수정 필요 |
+| **브랜드**            | Chatsio — Jayden 의 팀 협업 채팅 SaaS (🟢 일반)                                                    |
+| **mode 권장**         | `support` (현재 설정 유지)                                                                         |
+| **primaryColor 권장** | `#0891b2` (cyan, design-system.md 지정 브랜드 컬러)                                                |
+| **fontFamily**        | `Pretendard` (default)                                                                             |
+| **welcomeMessage**    | `Chatsio 사용 중 궁금한 게 있으신가요? 설정부터 요금제까지 무엇이든 물어보세요.`                   |
+| **systemPrompt 확장** | 아래 블록                                                                                          |
+| **allowedDomains**    | A-5b: `chatsio.kr`, `*.chatsio.kr` (Jayden 확정 후)                                                |
 
 **systemPrompt 전체 (복붙용)**:
 
@@ -98,15 +98,15 @@
 
 #### ② `findably`
 
-| 필드 | 값 |
-|------|-----|
-| **현재 상태** | name: `findably`, systemPrompt: `"당신은 findably 챗봇입니다."` — 확장 필요 |
-| **브랜드** | Findably — Jayden 의 콘텐츠/분석 프로젝트 (🟢 일반) |
-| **mode 권장** | `support` (현재 유지) 또는 `faq` (콘텐츠 검색 도우미라면) — Jayden 결정 |
-| **primaryColor 권장** | `#2b7cff` (default 유지) 또는 브랜드 결정 시 교체 |
-| **welcomeMessage** | `Findably 에서 무엇을 찾고 계신가요? 검색·분석·활용 방법을 도와드려요.` |
-| **systemPrompt 확장** | 아래 블록 |
-| **allowedDomains** | A-5b: `findably.kr` 또는 Jayden 확정 도메인 |
+| 필드                  | 값                                                                          |
+| --------------------- | --------------------------------------------------------------------------- |
+| **현재 상태**         | name: `findably`, systemPrompt: `"당신은 findably 챗봇입니다."` — 확장 필요 |
+| **브랜드**            | Findably — Jayden 의 콘텐츠/분석 프로젝트 (🟢 일반)                         |
+| **mode 권장**         | `support` (현재 유지) 또는 `faq` (콘텐츠 검색 도우미라면) — Jayden 결정     |
+| **primaryColor 권장** | `#2b7cff` (default 유지) 또는 브랜드 결정 시 교체                           |
+| **welcomeMessage**    | `Findably 에서 무엇을 찾고 계신가요? 검색·분석·활용 방법을 도와드려요.`     |
+| **systemPrompt 확장** | 아래 블록                                                                   |
+| **allowedDomains**    | A-5b: `findably.kr` 또는 Jayden 확정 도메인                                 |
 
 **systemPrompt 전체** (Findably 정확한 제품 정의를 Jayden 이 확정 후 세부 조정 필요):
 
@@ -135,15 +135,15 @@
 
 #### ③ `dairect`
 
-| 필드 | 값 |
-|------|-----|
-| **현재 상태** | name: `dairect`, systemPrompt: `"당신은 dairect 서비스의 ai 챗봇입니다."` — 확장 필요 |
-| **브랜드** | Dairect — Jayden 의 포트폴리오 허브 도메인 (`dairect.kr`) — 자기소개/Agency 성격 |
-| **mode 권장** | `support` 또는 `faq` |
-| **primaryColor 권장** | TBD (Jayden 브랜드 결정) |
-| **welcomeMessage** | `Dairect 포트폴리오 / 의뢰 관련 궁금한 점 있으신가요? 편하게 물어보세요.` |
-| **systemPrompt 확장** | 아래 블록 |
-| **allowedDomains** | A-5b: `dairect.kr`, `*.dairect.kr` |
+| 필드                  | 값                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| **현재 상태**         | name: `dairect`, systemPrompt: `"당신은 dairect 서비스의 ai 챗봇입니다."` — 확장 필요 |
+| **브랜드**            | Dairect — Jayden 의 포트폴리오 허브 도메인 (`dairect.kr`) — 자기소개/Agency 성격      |
+| **mode 권장**         | `support` 또는 `faq`                                                                  |
+| **primaryColor 권장** | TBD (Jayden 브랜드 결정)                                                              |
+| **welcomeMessage**    | `Dairect 포트폴리오 / 의뢰 관련 궁금한 점 있으신가요? 편하게 물어보세요.`             |
+| **systemPrompt 확장** | 아래 블록                                                                             |
+| **allowedDomains**    | A-5b: `dairect.kr`, `*.dairect.kr`                                                    |
 
 **systemPrompt 전체**:
 
@@ -174,15 +174,15 @@
 
 #### ④ `interviewgenie`
 
-| 필드 | 값 |
-|------|-----|
-| **현재 상태** | name: `InterviewGenie`, mode: `support`, systemPrompt: `"당신은 InterviewGenie  ai 챗봇입니다."` — ⚠️ 이중 공백 + mode 권장값 불일치 |
-| **브랜드** | InterviewGenie — AI 면접 연습 도구 |
-| **mode 권장** | `coaching` ← 현재 `support`. edit 에서 변경 |
-| **primaryColor 권장** | `#d97706` (warm orange — 격려형 코치 브랜드감) |
-| **welcomeMessage** | `면접 준비 중이신가요? 지원 직무를 알려주시면 질문을 내드리고 답변에 피드백을 드릴게요.` |
-| **systemPrompt 확장** | 아래 블록 |
-| **allowedDomains** | A-5b: `interviewgenie.kr`, `*.interviewgenie.kr` |
+| 필드                  | 값                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **현재 상태**         | name: `InterviewGenie`, mode: `support`, systemPrompt: `"당신은 InterviewGenie  ai 챗봇입니다."` — ⚠️ 이중 공백 + mode 권장값 불일치 |
+| **브랜드**            | InterviewGenie — AI 면접 연습 도구                                                                                                   |
+| **mode 권장**         | `coaching` ← 현재 `support`. edit 에서 변경                                                                                          |
+| **primaryColor 권장** | `#d97706` (warm orange — 격려형 코치 브랜드감)                                                                                       |
+| **welcomeMessage**    | `면접 준비 중이신가요? 지원 직무를 알려주시면 질문을 내드리고 답변에 피드백을 드릴게요.`                                             |
+| **systemPrompt 확장** | 아래 블록                                                                                                                            |
+| **allowedDomains**    | A-5b: `interviewgenie.kr`, `*.interviewgenie.kr`                                                                                     |
 
 **systemPrompt 전체**:
 
@@ -216,15 +216,15 @@
 
 #### ⑤ `dari`
 
-| 필드 | 값 |
-|------|-----|
-| **현재 상태** | name: `dari`, systemPrompt: `"당신은 dari 의 고객상담 ai챗봇입니다."` — 확장 필요 |
-| **브랜드** | Dari — **이 제품 자체** (self-reference) |
-| **mode 권장** | `faq` (Dari 제품 문의 기반) |
-| **primaryColor 권장** | `#2b7cff` (Dari 기본 브랜드 블루, design-system.md 기본 —brand) |
-| **welcomeMessage** | `Dari 가 궁금하신가요? 도입·기능·요금·설치 관련 무엇이든 물어보세요.` |
-| **systemPrompt 확장** | 아래 블록 |
-| **allowedDomains** | A-5b: `dari-theta.vercel.app`, 나중에 `dari.kr` 도메인 확보 시 추가 |
+| 필드                  | 값                                                                                |
+| --------------------- | --------------------------------------------------------------------------------- |
+| **현재 상태**         | name: `dari`, systemPrompt: `"당신은 dari 의 고객상담 ai챗봇입니다."` — 확장 필요 |
+| **브랜드**            | Dari — **이 제품 자체** (self-reference)                                          |
+| **mode 권장**         | `faq` (Dari 제품 문의 기반)                                                       |
+| **primaryColor 권장** | `#2b7cff` (Dari 기본 브랜드 블루, design-system.md 기본 —brand)                   |
+| **welcomeMessage**    | `Dari 가 궁금하신가요? 도입·기능·요금·설치 관련 무엇이든 물어보세요.`             |
+| **systemPrompt 확장** | 아래 블록                                                                         |
+| **allowedDomains**    | A-5b: `dari-theta.vercel.app`, 나중에 `dari.kr` 도메인 확보 시 추가               |
 
 **systemPrompt 전체**:
 
@@ -292,6 +292,7 @@
 ### 5-1. 봇별 편집 (본 문서 §2 참조)
 
 Jayden 이 `/bots/<slug>/edit` 진입 → 5섹션 입력:
+
 - **Identity**: welcomeMessage 재작성 (§2 값 복붙)
 - **AI**: systemPrompt 확장 (§2 공통 블록 + 봇별 블록) — 현재 20~30자 → 200~500자
 - **Appearance**: primaryColor 브랜드별 변경
@@ -318,9 +319,9 @@ Jayden 이 `/bots/<slug>/edit` 진입 → 5섹션 입력:
 
 ## 6. 변경 이력
 
-| 날짜 | 내용 |
-|------|------|
-| 2026-04-21 초안 | 가상 Dairect 브랜드(OnboardKit/SellKit/PayLoom) 기반 작성 |
+| 날짜                       | 내용                                                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 2026-04-21 초안            | 가상 Dairect 브랜드(OnboardKit/SellKit/PayLoom) 기반 작성                                                               |
 | 2026-04-21 **전면 재작성** | Jayden 실제 포트폴리오(chatsio/findably/dairect/interviewgenie/dari) 기준으로 재작성. A-5a 완료 / A-5b 이월 범위 명확화 |
 
 ---

@@ -62,11 +62,15 @@ export async function createBot(
   _prev: CreateBotFormState,
   formData: FormData,
 ): Promise<CreateBotFormState> {
+  // 모든 필드 trim — `updateBot` 의 `str()` 헬퍼 정책과 일치.
+  // 특히 `name` 의 trim 은 Epic B Task B-1 의 typed confirmation 정합성에 필수:
+  // 저장 시 공백 포함 이름이 허용되면 삭제 확인 시 `"내 봇" !== "  내 봇  "` 로
+  // UI/서버 검증이 실패하는 UX 버그 발생 (sec review M-2, 2026-04-21).
   const parsed = createBotSchema.safeParse({
-    name: String(formData.get("name") ?? ""),
-    slug: String(formData.get("slug") ?? ""),
-    welcomeMessage: String(formData.get("welcomeMessage") ?? ""),
-    systemPrompt: String(formData.get("systemPrompt") ?? ""),
+    name: String(formData.get("name") ?? "").trim(),
+    slug: String(formData.get("slug") ?? "").trim(),
+    welcomeMessage: String(formData.get("welcomeMessage") ?? "").trim(),
+    systemPrompt: String(formData.get("systemPrompt") ?? "").trim(),
   });
 
   if (!parsed.success) {

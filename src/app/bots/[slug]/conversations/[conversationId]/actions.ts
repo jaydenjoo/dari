@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
+import { checkConversationDeleteRatelimit } from "@/core/ratelimit/conversation-delete-limiter";
 import { isValidUuid } from "@/shared/conversations/meta";
 
 import { isValidSlug } from "../../../new/slug-util";
@@ -42,6 +43,15 @@ export async function deleteConversationAction(
   } = await supabase.auth.getUser();
   if (!user) {
     return { error: "로그인이 필요합니다." };
+  }
+
+  // Rate limit (Epic B Task B-1) — 자동화 대량 삭제 방어. 10 req / 5 min user.id.
+  const rl = await checkConversationDeleteRatelimit(user.id);
+  if (!rl.ok) {
+    return {
+      error:
+        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (5분 안에 10회 제한)",
+    };
   }
 
   const { data: bot, error: botErr } = await supabase

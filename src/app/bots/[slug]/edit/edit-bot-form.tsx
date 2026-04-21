@@ -10,6 +10,7 @@ import { AiSection } from "./ai-section";
 import { AnalyticsSection } from "./analytics-section";
 import { AppearanceSection } from "./appearance-section";
 import { BehaviorSection } from "./behavior-section";
+import DeleteBotDialog from "./delete-bot-dialog";
 import { IdentitySection } from "./identity-section";
 import {
   KnowledgeFileSection,
@@ -30,6 +31,7 @@ const SECTIONS = [
   { id: "knowledge", label: "지식 · 텍스트" },
   { id: "knowledge-url", label: "지식 · URL" },
   { id: "knowledge-file", label: "지식 · 파일" },
+  { id: "danger-zone", label: "위험 영역" },
 ] as const;
 
 export default function EditBotForm({
@@ -157,6 +159,37 @@ export default function EditBotForm({
       >
         <KnowledgeFileSection slug={slug} initial={config.knowledge} />
       </SectionCard>
+
+      {/*
+        Task B-1 (Epic B): 위험 영역 — 봇 영구 삭제.
+        - 별도 section (SectionCard 미사용) — destructive UI 를 기본 카드와 의도적 구분.
+        - 삭제는 메인 편집 form 밖 독립 form (DeleteBotDialog 내부 <form>).
+        - typed confirmation → 서버 재검증 → FK cascade (conversations/knowledge_chunks/messages).
+      */}
+      <section
+        id="danger-zone"
+        className="scroll-mt-20 space-y-5 rounded-2xl border border-red-200 bg-red-50/30 p-8 shadow-[0_1px_2px_rgba(220,53,69,0.04),0_1px_4px_rgba(220,53,69,0.03)]"
+      >
+        <header>
+          <h2 className="text-lg font-bold tracking-[-0.01em] text-red-900">
+            위험 영역
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-red-700/80">
+            봇을 영구 삭제하면 되돌릴 수 없어요. 신중히 결정해 주세요.
+          </p>
+        </header>
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-red-200 bg-white px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900">
+              이 봇 영구 삭제
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              대화 · 지식 · 업로드한 파일 모두 함께 삭제됩니다.
+            </p>
+          </div>
+          <DeleteBotDialog slug={slug} name={config.identity.name} />
+        </div>
+      </section>
     </div>
   );
 }

@@ -16,14 +16,14 @@
 B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft delete) → B-4 (KPI 확장) → B-5 (품질 sweep)
 ```
 
-| Task | 주제 | 규모 | 선결 | 우선순위 |
-|------|------|------|------|---------|
-| **B-1** | 작은 보안 hardening (typed confirmation + rate limit 통합) | ~2h | 없음 | 🔴 즉시 |
-| **B-6** | Playwright E2E CI job (Task 3-C 이월) | ~1.5h | Supabase 테스트 환경 | 🟡 출시 품질 |
-| **B-2** | audit log (감사 로그 테이블 + 이벤트 기록) | ~3h | B-1 완료 | 🟡 RGPD/DPIA |
-| **B-3** | soft delete (tombstone + 복구 + cron) | ~2h | B-2 선행 (audit 이벤트 기록) | 🟡 데이터 보호 |
-| **B-4** | 원가 환산 + 일별 차트 (bot_stats 확장) | ~2h | 없음 | 🟢 UX |
-| **B-5** | 코드 품질 sweep (shared barrel / server-only 재검토) | ~1.5h | 없음 | 🟢 기술 부채 |
+| Task    | 주제                                                       | 규모  | 선결                         | 우선순위       |
+| ------- | ---------------------------------------------------------- | ----- | ---------------------------- | -------------- |
+| **B-1** | 작은 보안 hardening (typed confirmation + rate limit 통합) | ~2h   | 없음                         | 🔴 즉시        |
+| **B-6** | Playwright E2E CI job (Task 3-C 이월)                      | ~1.5h | Supabase 테스트 환경         | 🟡 출시 품질   |
+| **B-2** | audit log (감사 로그 테이블 + 이벤트 기록)                 | ~3h   | B-1 완료                     | 🟡 RGPD/DPIA   |
+| **B-3** | soft delete (tombstone + 복구 + cron)                      | ~2h   | B-2 선행 (audit 이벤트 기록) | 🟡 데이터 보호 |
+| **B-4** | 원가 환산 + 일별 차트 (bot_stats 확장)                     | ~2h   | 없음                         | 🟢 UX          |
+| **B-5** | 코드 품질 sweep (shared barrel / server-only 재검토)       | ~1.5h | 없음                         | 🟢 기술 부채   |
 
 **Epic B 예상 총 소요**: **5~6 세션 (1~2주)** — 각 Task 독립 진행 가능.
 
@@ -34,16 +34,19 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-1. 작은 보안 hardening
 
 **범위**:
+
 - `봇 삭제 UI` 에 typed confirmation (봇 이름 입력 → 일치하면 삭제 버튼 활성화). 리뷰 code MEDIUM 이월 (Task 1-8-d).
 - `DELETE /api/conversations/[id]` + `/api/conversations/[id]/export/route.ts` + bot 삭제 Server Action 에 **rate limit 통합** (기존 `factory.ts` 패턴 재사용). 리뷰 sec MEDIUM 이월 (Task 1-8-d).
 
 **선결 조건**: 없음
 
 **파일**:
+
 - 신규 2: `src/core/ratelimit/bot-delete-limiter.ts` + `bot-export-limiter.ts` (factory pattern)
 - 수정 3~5: 봇 삭제 버튼 컴포넌트 + actions.ts + 관련 테스트
 
 **검증**:
+
 - vitest 신규 테스트 (rate limit factory pattern 기존 test 재사용)
 - Playwright E2E typed confirmation 시나리오 추가 (optional)
 
@@ -54,6 +57,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-6. Playwright E2E CI job (Task 3-C 이월)
 
 **범위**:
+
 - `.github/workflows/ci.yml` 에 `e2e` job 추가 (별도 job, verify 와 병렬 또는 direct 후속)
 - Supabase 테스트 환경 설계: 전용 프로젝트 (`dari-ci`) 또는 `dari-dev` 공유 + CI 전용 test user
 - CI secrets: `SUPABASE_CI_URL` / `SUPABASE_CI_ANON_KEY` / `SUPABASE_CI_SERVICE_ROLE` / `SUPABASE_CI_TEST_USER_EMAIL` 등
@@ -64,11 +68,13 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 **선결 조건**: Supabase 테스트 환경 결정 (새 프로젝트 vs 공유)
 
 **파일**:
+
 - `.github/workflows/ci.yml` (e2e job 섹션 추가)
 - `tests/e2e/support/auth-helpers.ts` 조정 (CI 에서만 CI test user 사용)
 - `testing-accounts.md` 업데이트
 
 **검증**:
+
 - CI 에서 E2E 25+ 테스트 통과
 - 로컬 `pnpm test:e2e` 여전히 동작
 
@@ -81,6 +87,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-2. audit log
 
 **범위**:
+
 - `audit_logs` 테이블 마이그레이션 (0013): `id uuid PK`, `event_type text`, `entity_type text`, `entity_id uuid`, `actor_id uuid FK auth.users`, `metadata jsonb`, `created_at timestamptz`
 - RLS: owner 본인 읽기만 (`SELECT` = `actor_id = auth.uid()`, `INSERT` = `to authenticated` with actor_id match)
 - Server Action / API 에서 중요 이벤트 기록: 봇 생성/수정/삭제, 대화 삭제, export
@@ -89,6 +96,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 **선결 조건**: B-1 (rate limit 통합 후 진입 = 로그 증폭 방지)
 
 **파일**:
+
 - 신규 1: `supabase/migrations/0013_create_audit_logs.sql`
 - 신규 2: `src/core/audit/{log,types}.ts` + 테스트
 - 수정 ~5: 관련 Server Action/API 에 `logAuditEvent()` 추가
@@ -104,6 +112,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-3. soft delete
 
 **범위**:
+
 - `bots` + `conversations` 테이블에 `deleted_at timestamptz` 컬럼 추가 (0014)
 - 삭제 Server Action 수정: `DELETE` → `UPDATE deleted_at = now()`
 - RLS 업데이트: `deleted_at IS NULL` 필터 (기본 숨김)
@@ -113,6 +122,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 **선결 조건**: B-2 (audit 이벤트 기록 선행 → 실제 삭제 시점 추적)
 
 **파일**:
+
 - 신규 1: `supabase/migrations/0014_add_deleted_at.sql`
 - 수정 ~10: 삭제 Server Action + RLS 정책 업데이트 + 쿼리 필터
 
@@ -125,6 +135,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-4. 원가 환산 + 일별 차트
 
 **범위**:
+
 - `bot_stats` RPC 확장: `usd_cents bigint` 필드 추가 (Claude 토큰 × 단가)
 - `getBotDailyStats(botId, range)` 신규 RPC: 일별 메시지수/토큰/원가
 - `/bots/[slug]` KPI 섹션에 14일 차트 (Chart.js 또는 Recharts)
@@ -133,6 +144,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 **선결 조건**: 없음 — 독립
 
 **파일**:
+
 - 신규 1: `supabase/migrations/0015_add_usd_cents_to_bot_stats.sql`
 - 신규 1: `src/components/bots/DailyChart.tsx`
 - 수정 2: `src/app/bots/[slug]/stats-section.tsx` + `stats-util.ts`
@@ -146,6 +158,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 ### B-5. 코드 품질 sweep
 
 **범위**:
+
 - **shared barrel `index.ts`**: `src/shared/{bots,conversations,time}/index.ts` 로 barrel re-export. import 경로 간소화. 리뷰 code MEDIUM (Task 1-8-e) 이월.
 - **server-only 경계 재검토**: `src/shared/` 하위 중 서버 전용 헬퍼에 `"server-only"` import 추가. Task 1-8-e 에서 `conversations/csv,meta` 는 완료, 나머지 점검.
 - 리뷰 이월된 소소한 code quality (type re-export / LOW dead code 정리)
@@ -153,6 +166,7 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 **선결 조건**: 없음 — 독립
 
 **파일**:
+
 - 신규 ~4: `src/shared/{bots,conversations,time,config}/index.ts` (barrel)
 - 수정 ~15: import 경로 간소화 (consumer 측)
 
@@ -177,17 +191,17 @@ B-1 (보안 hardening) → B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft
 
 Epic B 완결 시점에 아래 조건 평가 → 다음 Epic 결정:
 
-| 조건 | Epic C (멀티테넌트) | Epic D (카카오톡) |
-|------|---------------------|-------------------|
-| 실사용자 10명+ | 🟡 보류 (5명) | 🔴 즉시 (카카오 채널 신청) |
-| SI 계약 3건+ | 🔴 즉시 (워크스페이스 필수) | 🟡 대기 |
-| 카카오 비즈니스 채널 승인 완료 | 🟡 대기 | 🔴 즉시 |
-| SaaS 수익 모델 확정 | 🔴 즉시 (가격 정책 + 멀티테넌트) | 🟡 대기 |
+| 조건                           | Epic C (멀티테넌트)              | Epic D (카카오톡)          |
+| ------------------------------ | -------------------------------- | -------------------------- |
+| 실사용자 10명+                 | 🟡 보류 (5명)                    | 🔴 즉시 (카카오 채널 신청) |
+| SI 계약 3건+                   | 🔴 즉시 (워크스페이스 필수)      | 🟡 대기                    |
+| 카카오 비즈니스 채널 승인 완료 | 🟡 대기                          | 🔴 즉시                    |
+| SaaS 수익 모델 확정            | 🔴 즉시 (가격 정책 + 멀티테넌트) | 🟡 대기                    |
 
 ---
 
 ## 5. 변경 이력
 
-| 날짜 | 내용 |
-|------|------|
+| 날짜         | 내용                                |
+| ------------ | ----------------------------------- |
 | 2026-04-21 Ⅲ | Epic B Task 분해 초안 작성 (6 Task) |
