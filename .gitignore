@@ -50,6 +50,7 @@ docs/design-references/*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+tsconfig.json.backup.*
 
 # widget bundle (scripts/build-widget.mjs 산출물)
 /public/widget.js
