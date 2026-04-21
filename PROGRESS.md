@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 진행 (Task A-1~A-4 완료 + A-5a 거의 완료 — Vercel env 등록만 남음)** · Task A-5b (각 사이트 embed) 는 사이트 개발 완료 후 이월
-- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 + 포트폴리오 봇 레코드)** — 결정 7건 확정 + ADR-009 + Playwright cross-origin smoke 20/20 + Vercel prod 배포 정상 + **Vercel AI SDK Data Stream Protocol 전환 완료** + **Jayden 포트폴리오 5개 prod 봇 생성**
-- 상태: **Task A-5a 진행 중.** Supabase `Site URL` / `Redirect URLs` 등록 (Jayden 수동, prod OAuth 복구) + dari prod `bots` 테이블 5행 확보 (chatsio / findably / dairect / interviewgenie / dari — Jayden 실제 포트폴리오). 초기 가상 Dairect 브랜드(OnboardKit/SellKit/PayLoom) 가정은 폐기. `dairect-bot-configs.md` 실제 포트폴리오 기준으로 전면 재작성. 남은 건 `NEXT_PUBLIC_WIDGET_CDN_URL` Vercel 명시 등록 (Jayden 수동). Config 정교화(systemPrompt/color/mode/allowedDomains)는 A-5b 로 의식적 이월.
-- ⚠️ **차단**: 없음. A-5a 마무리(Vercel env) 후 Phase 1 backlog cleanup 또는 다른 Task 진입 가능.
+- Phase: **2 Epic A 완결** (A-1~A-5a 100%) + **환경변수 분리** (env.ts → env.server/env.client) + **CI 현대화 A+B** (pnpm + coverage threshold) + **Epic B Task 분해 완료**. Epic B 진입 대기.
+- Epic: **Phase 2 Epic A (위젯 런타임) 완결** — 결정 7건 + ADR-009 + Playwright 20/20 + Vercel prod 정상 + AI SDK Data Stream + Jayden 포트폴리오 5개 prod 봇 + Supabase URL Config 복구 + Vercel env 등록. A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월.
+- 상태: **A-5a 완결 + 3 mini-task cleanup + env 분리 + CI 현대화 + Epic B 분해 = 이번 세션(2026-04-21 Ⅲ) 6 커밋 누적**. 다음 세션 후보: Epic B Task 분해 문서([`docs/epic-b-task-breakdown.md`](docs/epic-b-task-breakdown.md))의 **B-1 (보안 hardening — typed confirmation + rate limit 통합, ~2h)** 우선. 그 후 B-6 (Playwright CI) → B-2 (audit log) → B-3 (soft delete) → B-4 (원가/차트) → B-5 (품질 sweep).
+- ⚠️ **차단**: 없음. Epic B 진입 시 각 Task 별 Plan→Approve→Build 엄격 준수.
 
 ## 완료된 Epic
 
@@ -174,11 +174,58 @@ Jayden 의 "a" 선택(경로 A Task A-5 진입) 으로 세션 시작. 진행 중
 2. **code MEDIUM-2**: `env.ts` → `env.server.ts` / `env.client.ts` 분리 (~1h, 이전 세션 이월)
 3. **Task A-5b**: 각 사이트 개발 완료 후 — 편집 + embed + smoke (사이트별 독립 진입)
 
+### 추가 진행 — 3 mini-task cleanup + env 분리 + CI 현대화 + Epic B 분해 (Jayden "순서대로 모두 진행" 2회 지시)
+
+**mini-task 3건** (커밋 `37d04fa`, +84/-44):
+
+- `src/app/page.tsx`: "Phase 1" 메시지 제거 + `/bots` (primary) + `/bots/new` (secondary) CTA 쌍 추가 (design-system v2, "로그인됨" + `data-testid="logout-button"` 유지로 E2E 영향 0)
+- `phase-1-release-checklist.md`: §1 스냅샷 현실화 + **§4-5-1 🔴 Authentication URL Configuration 신규** (교훈 2026-04-21 Ⅲ 반영) + §6 Go/No-Go 에 "Vercel 첫 빌드 녹색" + "prod Google OAuth 실 로그인 성공" 추가
+- `environments.md`: §2 로드맵 현실화 + Sentry org slug `jayden-k4` → `jayden-kz` 3곳 교정
+
+**Task 2: env.ts → env.server.ts + env.client.ts 분리** (커밋 `9393fa9`, 22 files +193/-154):
+
+- `env.server.ts` 신규: `"server-only"` + serverSchema + env (ServerEnv) — Client Component 에서 import 시 Next.js 빌드 에러로 원천 차단
+- `env.client.ts` 신규: clientSchema + env (ClientEnv). `isServer` 분기로 서버 import 시 schema default fallback
+- `env.ts` 삭제: `as ServerEnv` 런타임 캐스팅 구멍 제거
+- 11 consumer + 7 ratelimit test mock + env.test.ts import 경로 교체
+- **효과**: ANTHROPIC_API_KEY / SUPABASE_SERVICE_ROLE_KEY 등 민감 env 의 클라 번들 누출 경로를 타입/빌드 레벨에서 차단 (기존 `as` 캐스팅 구멍 제거)
+- 검증: typecheck 0 / vitest 491/491 / build 14 routes
+
+**Task 3 A+B: CI 현대화** (커밋 `c74306f`, 5 files +28/-15473):
+
+- `.github/workflows/ci.yml`: pnpm/action-setup@v4 도입, `npm ci` → `pnpm install --frozen-lockfile`, cache `"pnpm"`. build env 에 FIRECRAWL_API_KEY placeholder 추가 (env.server 필수 검증 대응)
+- `package.json`: `"packageManager": "pnpm@10.28.2"` 추가 + check 스크립트 pnpm 전환
+- `vitest.config.mts`: coverage thresholds 추가 — `{ lines: 50, statements: 50, branches: 50, functions: 55 }` (현재 baseline 53.29% 직하로 고정)
+- `package-lock.json` 삭제 + `.gitignore` 등록 (pnpm 단일화)
+- **이월 (B-6)**: Playwright E2E CI job — Supabase 테스트 환경 + CI secret/artifact 보안 별도 설계 필요
+
+**Task 4: Epic B Task 분해** (이번 커밋 예정):
+
+- `docs/epic-b-task-breakdown.md` 신규 (~240줄) — Epic B 의 6 Task 로 분해
+- 권장 순서: **B-1** (보안 hardening, 🔴 즉시 / ~2h) → **B-6** (Playwright CI, 🟡 / ~1.5h) → **B-2** (audit log, 🟡 / ~3h) → **B-3** (soft delete, 🟡 / ~2h) → **B-4** (원가 + 차트, 🟢 / ~2h) → **B-5** (품질 sweep, 🟢 / ~1.5h)
+- Epic B 예상 총 소요: 5~6 세션 (1~2주)
+
+### 검증 (세션 누적)
+
+- typecheck 0 / lint 3 baseline / prettier clean
+- vitest **491/491** passed + coverage threshold 통과 (exit 0)
+- build 14 routes 녹색
+- gitleaks pre-commit 4회 통과 (A-5a, mini-task, env 분리, CI 현대화)
+- E2E 영향 0 (`/` 홈 수정 시 `"로그인됨"` + `data-testid="logout-button"` 유지)
+
+### 세션 커밋 요약 (5건)
+
+1. `dc1d61a` — Task A-5a Jayden 포트폴리오 5개 prod 봇 + Supabase URL Config 복구 + 교훈 +2 (4 files, +511/-13)
+2. `37d04fa` — mini-task 3건 (`/` 홈 CTA + phase-1-checklist 현실화 + environments Sentry slug) (3 files, +84/-44)
+3. `9393fa9` — env.ts → env.server/client 분리 (22 files, +193/-154)
+4. `c74306f` — CI 현대화 A+B (pnpm + coverage threshold + package-lock.json 삭제) (5 files, +28/-15473)
+5. (예정) Epic B Task 분해 문서 + PROGRESS.md 최종 반영
+
 ### 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅲ (KST, Task A-5a 완결 + 계획서 브랜드 가정 교정)
+- 날짜: 2026-04-21 Ⅲ (KST, 종합 세션 — 5 커밋 누적)
 - 브랜치: `main`
-- 차단 요소: 없음. A-5b 는 사이트 개발 완료가 외부 조건
+- 차단 요소: 없음. 다음 세션 후보: **Epic B B-1 (보안 hardening)**. 각 Task 별 Plan→Approve→Build 엄격 준수
 
 ---
 
