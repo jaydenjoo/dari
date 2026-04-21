@@ -4,11 +4,12 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 진입 (Task A-1 완료)** · Task A-2 (`dari.kr` 배포) 대기
-- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 6건 확정 + ADR-009 작성 + 현황 감사 완료
-- 상태: **Task A-1 ADR-009 완결**. 현황 감사 결과 **위젯 런타임이 Phase 1 에 90% 이미 구현**된 것 확인 → Epic A 범위 **2~3주 → 3~5일 단축**. Phase 2 계획서 §2 / §5 / §7 전면 현실화.
-  - 결정 확정 6건: CDN 호스트 `dari.kr` / 격리 Shadow DOM / A→B 순차 / 빌드 esbuild / 스트리밍 **Vercel AI SDK Data Stream Protocol** (신규 결정, fetch-stream 에서 변경) / 세션 **localStorage + 서버 UUID** (쿠키 도입 보류 — credentials:true 금지 원칙과 충돌).
-  - 저위험 Backlog 3건 동 세션 완료: §7 결정 경로 비교표 / `tsconfig.json.backup.*` 정리 + gitignore / `shared/conversations/{csv,meta}.ts` server-only barrier (sec L-1 이월 해소).
+- Phase: **2 Epic A 진행 (Task A-1·A-2·A-3 완료)** · Task A-4 (스트리밍 전환) 대기
+- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 재작성 γ 경로) + ADR-009 갱신 + Playwright cross-origin smoke 20/20
+- 상태: **Task A-3 Playwright smoke 완결**. Jayden 정정(`dairect.kr` 별개 프로젝트 + Vercel 실배포 `DEPLOYMENT_NOT_FOUND`)으로 **로컬 cross-origin 목업 + Playwright 자동 QA** 로 전환. **Phase 1 잔존 proxy matcher 버그 수정** (widget.js 가 /login 리다이렉트 당하던 cross-origin embed 차단 해소).
+  - 결정 재확정: #1 CDN 호스트 **`dari.kr` → `NEXT_PUBLIC_WIDGET_CDN_URL` env + 기본 `dari-theta.vercel.app`** (γ 경로 2026-04-21 재작성). Jayden 미보유 `dari.kr` 대신 env 추상화 + 10곳 테스트 후 `dairect.kr` 스위치.
+  - Task A-3 실측 결과 ADR-009 Open Q #3/#4 반영: CSP strict 차단 / permissive 허용 / 고객사 권장 CSP 명시. iOS 실기기는 Task A-5 이월.
+- ⚠️ **차단**: Vercel 실배포 `DEPLOYMENT_NOT_FOUND` — Jayden Vercel Dashboard 수동 복구 필요 (Redeploy 또는 빌드 로그 공유). A-4 (로컬 구현) 는 독립 진행 가능, A-5 (Dairect 배포) 는 복구 필수.
 
 ## 완료된 Epic
 
@@ -1554,28 +1555,35 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 ### 🎯 경로 선택
 
-**경로 A (권장): Task 1-8-b — 대화 상세 페이지**
+**경로 α (권장): Task A-4 — 스트리밍 전환 (Vercel AI SDK Data Stream Protocol)**
 
-- `/bots/[slug]/conversations/[id]` — 메시지 스레드 (role 별 말풍선) + `messages.sources` 출처 표시 (chunk_id + score)
-- RLS 재사용: `messages_select_owner` 2-hop EXISTS. owner 검증 패턴 Task 1-8-a 동일 복사.
-- 정확 fetch — 대화 1건만 조회이므로 `.limit()` 가드 불필요. pagination 없이 messages 전체 시계열.
-- 소요: Plan 15m + 구현 60~90m
+- `@ai-sdk/anthropic` + `ai` 의존성 추가
+- `/api/chat/[botId]` → `streamText()` + `.toUIMessageStreamResponse()` (내부 Anthropic `messages.stream()`)
+- `widget/chat.ts` → vanilla `fetch` + `ReadableStream` + `TransformStream` 으로 SSE 포맷 수동 파싱 (useChat 훅은 React 전용)
+- 응답 헤더: `Content-Type: text/event-stream` + `x-vercel-ai-ui-message-stream: v1`
+- **Vercel 복구 독립** — 로컬 검증 + 커밋. 복구 후 자동 배포 반영.
+- 소요: 1~2일 (의존성 도입 + 서버·위젯 양쪽 전환 + 회귀 테스트)
 
-**경로 B: Task 1-8-c — KPI 카드**
+**경로 β: Jayden Vercel 복구 → Task A-5 Dairect 5개 배포**
 
-- /bots/[slug] 상세 상단 또는 /bots 목록 카드에 "7일 대화 수 / 답변 불가율 / 지식 검색율" 집계
-- `count()` 쿼리 3종 + 사이드 위젯 UI
-- 소요: 60~90m
+- 선결: Vercel Dashboard → 최신 Deployment 상태 확인 + Redeploy (또는 빌드 로그 공유)
+- Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom Config 작성 + embed smoke
+- 소요: Vercel 복구 + 0.5~1일 (Config 5종)
 
-**경로 C: Task 1-7 잔존 백로그 청소**
+**경로 γ (보조): Phase 1 잔존 백로그 청소**
 
-- `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — sensitiveFields 확장 or log truncate
+- `storagePath` 로그 redact 통합 (1-7-d sec LOW-2)
 - orphan Storage 수거 스크립트 (1-7-c sec MEDIUM-3)
-- 소요: 90~120m
+- `formatRelative` shared util 승격 / conversations-list.tsx animate cap 상수화 (1-8-a 후속)
+- 소요: 60~120m
+
+**경로 권장 이유**: α 는 Vercel 복구와 독립 + Epic A 의 기술 깊이 최대(AI SDK 도입). α → Vercel 복구(병렬) → β 순서가 총 소요 최소.
 
 ### 그 외 대기
 
-- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월)
+- **🔴 Vercel 실배포 복구** (Jayden 수동) — `dari-theta.vercel.app` 현재 `DEPLOYMENT_NOT_FOUND`. Dashboard → Deployments → Redeploy 트리거 또는 빌드 로그 공유. A-5 진입 필수 선결.
+- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월) + `NEXT_PUBLIC_WIDGET_CDN_URL` Preview/Production (A-2 권장, default fallback 있어 optional)
+- **iOS 실기기 virtual keyboard smoke** (Task A-5 동반) — device emulation 에서 재현 불가. ADR-009 Open Q #3 실기기 이월.
 - **chat API `origin_not_allowed` → 404 통일** (widget-config enumeration 일관성)
 - **OPTIONS preflight DB 이중 호출 리팩터** (chat + widget-config 동시)
 - **env.ts code M-1** `as ServerEnv` 타입 단언 개선 (ε-backlog)
@@ -1795,8 +1803,52 @@ _수정_
 2. **Task 1-8-c** KPI 카드 (7일 대화 수 / 답변 불가율 / 지식 검색율).
 3. 1-7 잔존 백로그 (storagePath redact / orphan Storage 수거 / E2E fixture γ).
 
+---
+
+## 이번 세션(2026-04-21 Ⅱ) — Task A-2 γ 경로 + Task A-3 Playwright smoke + proxy 버그 수정
+
+Jayden 정정 2회로 **Task A-1 결정 #1 재작성 (α→γ)** + **A-3 QA 방식 전환(실사이트 수동 → 로컬 cross-origin Playwright)** 이 핵심 흐름. 진행 중 **Phase 1 잔존 proxy.ts matcher 버그** 발견·수정. 독립 리뷰 2라운드 총 Fix 11건 일괄 반영.
+
+### Task A-2 (커밋 b1e2776, 11 파일 +269/-107)
+
+- **원인 제공**: ADR-009 결정 #1 "CDN 호스트 `dari.kr`" 확정 후 Jayden 이 "미보유 + `dari-theta.vercel.app` 사용 + `dairect.kr` 보유(10곳 테스트 후 연결)" 정정 → 현황 감사 결과 **3중 URL 드리프트 발견** (`dari.kr` / `dairect.kr` / `dari-theta.vercel.app`).
+- **γ 경로 확정**: `NEXT_PUBLIC_WIDGET_CDN_URL` env 추상화 + Zod default `https://dari-theta.vercel.app/widget.js`. 10곳 테스트 후 env 1줄 교체로 `dairect.kr` 스위치.
+- **코드 수정 4**: env.ts (Zod + `.refine(https://)`) / page.tsx (env 참조) / bot-detail.spec.ts (부분 매칭) / widget/config.ts (JSDoc)
+- **문서 수정 5**: ADR-009 제목/Context/§9-1/다이어그램/Deploy/Open Q #6 / phase-2-plan §2·§5·§7-1·§7-7 / env-template (신규 env 항목·표 2곳) / environments.md (prod·체크리스트) / learnings (+1)
+- **독립 리뷰 Fix 6건**: sec CRIT C-1 (https 강제) + sec MED M-1 (E2E 강화) + sec MED M-2 (env.test +8 케이스) + code LOW-1 (widget/index.ts JSDoc) + sec LOW-3 (ADR Open Q 충돌 경고) + code INFO-1 (environments.md §3 매트릭스)
+- **검증**: vitest 468 → 476 (+8) / build 14 routes / 전 파이프라인 clean
+
+### Task A-3 (커밋 1ebe8c0, 12 파일 +594/-19)
+
+- **Jayden 정정**: `dairect.kr` 는 별개 프로젝트 (`jaydenjoo/dairect`) + QA 는 Playwright 자동화 → **cross-origin 로컬 목업 + 5 projects × 4 tests** 로 재설계
+- **Phase 1 잔존 버그 발견·수정**: `src/proxy.ts` matcher 에 `.js`/`.css`/`.map`/폰트 확장자 제외 누락 → `widget.js` 가 `/login` 307 redirect → cross-origin embed 전 차단. matcher 포괄 확장 (`js|css|map|woff|woff2|ttf|eot` 추가). **기존 E2E 회귀 0**.
+- **신규 6 파일**:
+  - `tests/e2e/widget-embed.spec.ts` — 4 tests (A 로드·mount / B Shadow DOM 격리 / CSP strict 차단 / CSP permissive 허용)
+  - `tests/e2e/widget-embed/host.html` — 공격적 CSS (Comic Sans + hotpink) 로 격리 검증
+  - `tests/e2e/widget-embed/host-strict-csp.html` + `host-permissive-csp.html` — CSP 매트릭스
+  - `tests/e2e/widget-embed/loader.js` — external loader (inline 차단과 외부 스크립트 차단 분리)
+  - `tests/e2e/widget-embed/serve.mjs` — 4001 port 정적 서버 (node:http, path traversal 화이트리스트)
+- **수정 3**: `playwright.config.ts` (projects 5종 + webServer 배열 2종) / `tests/e2e/global-setup.ts` (`execSync("pnpm build:widget")` 추가) / `src/proxy.ts` (matcher 확장 + `public/` 전용 가정 주석)
+- **ADR-009 Open Q #3/#4 실측 반영**: #3 iOS device emulation 통과 / #4 CSP strict 차단 + permissive 허용 + 고객사 권장 CSP (`script-src 'self' <host>; style-src 'self' 'unsafe-inline'`) 명시
+- **독립 리뷰 Fix 5건**: code HIGH-1 (`test.describe.configure({ mode: "serial" })` — fullyParallel 좀비 봇 방지) + code/sec MED (serve.mjs 500 응답 정적화) + code MED-1 (readMainUserId 에러 메시지 강화) + code MED-3 (host-strict-csp 주석-CSP 불일치 해소) + code/sec LOW (proxy.ts public/ 가정 주석)
+- **검증**: Playwright 20/20 (5 projects × 4 tests, 9.1s) + 기존 E2E 회귀 8/8 + typecheck/lint/prettier/vitest 476 clean + build 14 routes
+
+### 주요 교훈 (learnings +2)
+
+1. **ADR 확정 전 외부 리소스(도메인/계정/청구 권한) 소유 체크 + 기존 코드 주석 전수 Grep 필수** — 3중 드리프트 고착 사례. "구입 가능" vs "구입 결심" 별개. 환경변수 추상화로 단일 진실 포인트.
+2. **Next.js proxy/middleware matcher 정적 자산 제외는 "모든 공개 확장자" 포괄 형태** — same-origin E2E 만으로는 cross-origin embed 버그 발견 불가. 별도 origin mock host + Playwright 회귀 필수. 정적 자산 로드 실패 진단 1순위는 `curl -sI` 로 HTTP 상태 확인.
+
+### Backlog (다음 세션)
+
+1. **Task A-4** 스트리밍 전환 — Vercel AI SDK Data Stream Protocol (권장, Vercel 독립)
+2. **Jayden Vercel 복구** + Task A-5 Dairect 5개 배포 (Config 작성 + embed smoke)
+3. **Phase 1 잔존**: storagePath redact / orphan Storage 수거 / formatRelative shared util 승격
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-20 Ⅵ (Task 1-8-a 완료, **Epic 1-8 진입**, 다음: Task 1-8-b 대화 상세 페이지)
+- 날짜: 2026-04-21 Ⅱ (Task A-2 γ 경로 + Task A-3 Playwright smoke 완료, **Phase 2 Epic A 60% 진행**, 다음: Task A-4 스트리밍)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
+- 커밋: `1ebe8c0` (A-3) · `b1e2776` (A-2)
