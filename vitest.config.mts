@@ -30,6 +30,17 @@ export default defineConfig({
         "src/**/*.d.ts",
         "src/**/index.ts",
       ],
+      // Regression 방어 — 현재(2026-04-21) baseline 의 바로 아래를 하한으로 고정.
+      // statements/lines 52.01% / branches 51.79% / functions 58.7% (phase-1-release-checklist §2).
+      // widget(Phase 2 배포) + 외부 의존 클라이언트(firecrawl/login-limiter) 때문에 전체 수치가 낮게 pulling.
+      // 점진 상승 전략: 새 모듈 추가 시 해당 영역 커버리지 90%+ 강제, baseline 은 분기별로 +5pp 상향.
+      // 실행: `pnpm test:coverage` (CI 와 로컬 동일 게이트).
+      thresholds: {
+        lines: 50,
+        statements: 50,
+        branches: 50,
+        functions: 55,
+      },
     },
   },
 });

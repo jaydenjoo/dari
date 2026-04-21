@@ -55,3 +55,4 @@ tsconfig.json.backup.*
 # widget bundle (scripts/build-widget.mjs 산출물)
 /public/widget.js
 /public/widget.js.map
+package-lock.json

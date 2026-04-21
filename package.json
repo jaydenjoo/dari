@@ -17,9 +17,10 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "prepare": "husky"
   },
+  "packageManager": "pnpm@10.28.2",
   "dependencies": {
     "@ai-sdk/anthropic": "3.0.71",
     "@anthropic-ai/sdk": "^0.90.0",
