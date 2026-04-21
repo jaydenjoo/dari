@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 진행 (Task A-1~A-4 완료 — 스트리밍 전환까지 구현 + 독립 리뷰 Fix 6건 반영)** · Task A-5 (Dairect 5개 embed) 대기
-- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 전환)** — 결정 7건 확정(#1 γ 경로) + ADR-009 + Playwright cross-origin smoke 20/20 + 리뷰 반영 + **Vercel prod 배포 정상** + 실 URL Playwright 10/10 + **Vercel AI SDK Data Stream Protocol 전환 완료**
-- 상태: **Task A-4 완결.** `@ai-sdk/anthropic` 3.0.71 + `ai` 6.0.168 도입 + `streamText()` + `toUIMessageStreamResponse()` 전환. 서버리스 lifecycle 보장은 **Next 16 `after()` API** 로 (리뷰 code H-1 / sec M-2 핵심 지적). 클라 `stream-parser.ts` 신규 (UIMessageStream SSE pure fn 파서 + DoS 상한 64KB/32K) + `widget.ts` 점진 렌더. 독립 리뷰 2 병렬 → code Fix-then-ship (H-1/M-2/L-2/L-3) + sec Ship as-is (M-1/M-2/L-1) = **Fix 6건 일괄 반영 / 의식적 미반영 3건 명시**. vitest 488 → 491 / widget.js 16.4KB → 18.0KB (gzip +1.6KB) / Playwright widget-embed 20/20 회귀 0.
-- ⚠️ **차단**: 없음. Task A-5 (Dairect 5개 embed + prod SSE smoke) 또는 Phase 1 잔존 backlog 진입 가능.
+- Phase: **2 Epic A 진행 (Task A-1~A-4 완료 + A-5a 거의 완료 — Vercel env 등록만 남음)** · Task A-5b (각 사이트 embed) 는 사이트 개발 완료 후 이월
+- Epic: **Phase 2 Epic A (위젯 런타임 — 배포 + 스트리밍 + 포트폴리오 봇 레코드)** — 결정 7건 확정 + ADR-009 + Playwright cross-origin smoke 20/20 + Vercel prod 배포 정상 + **Vercel AI SDK Data Stream Protocol 전환 완료** + **Jayden 포트폴리오 5개 prod 봇 생성**
+- 상태: **Task A-5a 진행 중.** Supabase `Site URL` / `Redirect URLs` 등록 (Jayden 수동, prod OAuth 복구) + dari prod `bots` 테이블 5행 확보 (chatsio / findably / dairect / interviewgenie / dari — Jayden 실제 포트폴리오). 초기 가상 Dairect 브랜드(OnboardKit/SellKit/PayLoom) 가정은 폐기. `dairect-bot-configs.md` 실제 포트폴리오 기준으로 전면 재작성. 남은 건 `NEXT_PUBLIC_WIDGET_CDN_URL` Vercel 명시 등록 (Jayden 수동). Config 정교화(systemPrompt/color/mode/allowedDomains)는 A-5b 로 의식적 이월.
+- ⚠️ **차단**: 없음. A-5a 마무리(Vercel env) 후 Phase 1 backlog cleanup 또는 다른 Task 진입 가능.
 
 ## 완료된 Epic
 
@@ -79,6 +79,108 @@
     - code H-1+M-1 `KnowledgeSourceType` ↔ `KnowledgeSource.type` 매핑 주석 (types.ts + 0008.sql)
     - code M-3 `tooLong` dead code 제거 (maxLength 가 브라우저 차단)
   - 검증: vitest 212 → 243 (+31 / chunking 11 + embedding 6 + ingest 6 + sanitize 8) / typecheck+lint+prettier+build clean
+
+## 이번 세션(2026-04-21 Ⅲ) — Task A-5a: Jayden 포트폴리오 5개 prod 봇 + Supabase URL Config 복구 + 계획서 브랜드 가정 교정
+
+Jayden 의 "a" 선택(경로 A Task A-5 진입) 으로 세션 시작. 진행 중 **2건의 연속 블로커** 를 실시간 해결하면서 계획서 가정(가상 Dairect 5개 브랜드) 이 Jayden 실 의도(본인 포트폴리오) 와 불일치함을 발견, 문서 전면 재작성. Auto 모드로 블로커 진단/해결 + 문서 재작성 + 커밋까지 일관 진행.
+
+### 흐름 (~2h)
+
+1. **Plan + 선결 조건 자동 체크 (15분)**
+   - Supabase MCP 로 dari prod 확인: 프로젝트 ACTIVE_HEALTHY (pxdopzlaffjcxqfrqidq, ap-northeast-2), Jayden user_id `99612f9e-252e-4308-b208-45b2a062b4b7`, **bots 테이블 0행** (5개 봇 생성 필요 = Task A-5a 숨겨진 선결 스텝)
+   - Jayden 답변 수집: 경로 α (UI 수동 생성) / `NEXT_PUBLIC_WIDGET_CDN_URL` 미등록 / 5개 Dairect 사이트 **개발 진행 중** → 실 embed 이월 / iOS 실기기 없음 → 이월
+   - **Task A-5 → A-5a + A-5b 분할**: A-5a = DB 5행 확보 + Vercel env / A-5b = 사이트 embed + smoke (사이트 개발 완료 후)
+
+2. **블로커 #1: prod Google OAuth redirect 엉뚱한 URL (25분)**
+   - Jayden 증상 제보: `http://localhost:3000/?code=bfdc1629-...` 로 redirect (포트 3000 ≠ Dari 4000, path `/` ≠ `/auth/callback`)
+   - 코드 감사 (src/app/login/actions.ts + src/app/auth/callback/route.ts): 로컬 코드는 정상. `redirectTo` 에 `${origin}/auth/callback` 올바르게 전달. 문제는 **Supabase 설정 계층**.
+   - 진단: Supabase OAuth 가 앱의 `redirectTo` 를 Redirect URLs 화이트리스트와 매칭 → 매칭 실패 → **Site URL(`localhost:3000`, Supabase 기본값) 로 fallback**. 즉 Phase 0-D Auth 완결 시 **prod Supabase URL Configuration 미설정** 잠복 (로컬 E2E 통과는 Mock/로컬 기반이라 prod 검증 갭).
+   - 해결 가이드: Supabase Dashboard → `dari` → Authentication → URL Configuration → Site URL = `https://dari-theta.vercel.app` + Redirect URLs 2줄(`<prod>/auth/callback`, `http://localhost:4000/auth/callback`) 등록 권고
+   - Jayden 수동 설정 완료 → 스크린샷 공유 → `dari-theta.vercel.app` 에서 Google 로그인 성공 (`hidream72@gmail.com` 세션 획득 확인)
+
+3. **블로커 #2: `/` 홈페이지 UX 드리프트 발견 (10분)**
+   - 로그인 후 페이지(스크린샷 2026-04-21 오후 2.24.39) = `src/app/page.tsx` 의 "로그인됨 + 봇 목록·대화는 다음 단계에서 만나실 수 있어요. (Phase 1)" 카드. Phase 1 Task 1-5 (`/bots` 대시보드) 완료 후에도 홈 페이지 미갱신 — **`/bots` 진입 CTA 없음** = 로그인 후 막다른 길
+   - 경로 α (즉시 우회: `/bots` 직접 이동) vs β (미니 Task 로 `/` 페이지 수정 후 진행) 비교. A-5a 주 목표 속도 우선 → α 선택, β 는 Backlog 이월
+
+4. **Task A-5a Step 2 진행 — Jayden UI 5개 봇 생성 (~20분, Jayden 수동)**
+   - Jayden 이 `/bots/new` 5회 반복해 5개 봇 생성: `chatsio` / `findably` / `dairect` / `interviewgenie` / `dari`
+   - **계획서 가정과 불일치 발견** — phase-2-plan §5 에 있던 "Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom" 중 **3개(OnboardKit / SellKit / PayLoom) 는 가상 브랜드**. Jayden 실제 의도는 본인 포트폴리오 5개 (chatsio + findably + dairect + interviewgenie + dari self-reference).
+   - Jayden 질문: "등록된 테스트봇으로 진행 가능? or 문서 기반 재생성?"
+   - 내 판단: **현 5개 = Jayden 실 포트폴리오 = 더 정확한 자산 반영**. 내 초안 Config 문서가 가상 브랜드 기반이라 부적합. 3가지 시나리오 비교 (A. 현 상태 + A-5b 정교화 / B. 지금 정교화 / C. 삭제 + 재생성) → **A 권장 + 실행**.
+
+5. **Config 문서 전면 재작성 (30분)**
+   - `docs/dairect-bot-configs.md` 380줄 재작성 (실 포트폴리오 5개 기반)
+     - 파일명 유지 (내부 링크 보존), 서두에 "파일명은 초기 기획 잔재 — 내용은 Jayden 포트폴리오 기준" 명시
+     - §1 A-5a (완료) / A-5b (이월) 범위 재정의
+     - §2 공통 원칙 + Prompt Injection 방어 공통 블록 + 5개 봇 개별 Config (welcomeMessage / systemPrompt / primaryColor / mode / allowedDomains placeholder)
+       - chatsio: #0891b2 cyan, support (systemPrompt "chatio" 오타 수정 필요 — Jayden 편집 이월)
+       - findably: #2b7cff default, support 또는 faq (Jayden 제품 정의 확인 필요)
+       - dairect: TBD color, support/faq (포트폴리오 허브 성격)
+       - interviewgenie: #d97706 orange, coaching (현재 support — Jayden 편집 필요)
+       - dari: #2b7cff default, faq (self-reference: Dari 제품 FAQ 봇)
+     - §3 Vercel env 등록 가이드
+     - §5 A-5b 편집 로드맵 (5섹션 × 5봇 + 사이트 embed + iOS smoke)
+
+6. **phase-2-plan.md §5 Task A-5 분할 반영 (10분)**
+   - `Task A-5 (0.5~1일)` → `Task A-5a (~1~2h 이번 세션)` + `Task A-5b (이월, 사이트 개발 완료 후)` 분할
+   - A-5a 완료 항목 명시 (5행 + URL Config + Config 문서 재작성)
+   - A-5b 이월 항목 명시 (편집 5섹션 / embed 5사이트 / iOS)
+
+7. **검증 (10분)**
+   - SQL 쿼리 재확인: 5행 / 5 slug / 5 owner 매칭 ✅
+   - 공개 API 검증 시도: `/api/widget-config/<slug>` 5개 모두 404. 원인 분석 → **allowedDomains=[] 이라 Origin 검증 실패 → 의도적 404 위장** (sec H-1 설계, enumeration 방지). A-5b 에서 allowedDomains 추가 후 해소. A-5a 완료 조건에 영향 없음.
+   - `/api/widget-config` route 코드 확인 (src/app/api/widget-config/[botId]/route.ts) — 파라미터 이름 `botId` 지만 실제는 slug 받음 (line 81 `loadActiveBot(botSlug)` + line 87 `.eq("slug", botSlug)`). 초기 UUID 추측은 틀림.
+
+8. **Vercel env 등록 (Jayden 수동, 5분)**
+   - Jayden 이 Vercel Dashboard → dari 프로젝트 → Environment Variables → `NEXT_PUBLIC_WIDGET_CDN_URL = https://dari-theta.vercel.app/widget.js` 추가 (Production + Preview 둘 다)
+   - "등록 완료" 답변 확인 → ADR-009 §9-1 γ 경로 실 이행
+
+### 검증 (누적)
+
+- dari prod `bots` 테이블 5행 확보 ✅
+- Jayden prod Google OAuth 로그인 성공 (Supabase URL Config 수정 후) ✅
+- `NEXT_PUBLIC_WIDGET_CDN_URL` Vercel Production + Preview 명시 등록 ✅
+- Config 문서 전면 재작성 (실 포트폴리오 기반) ✅
+- phase-2-plan §5 Task A-5 분할 반영 ✅
+- 기존 검증 유지: typecheck 0 / vitest 491 / build 14 routes / Playwright widget-embed 20/20 (코드 변경 0건)
+
+### 주요 결정 / 교훈 (learnings.md +2)
+
+1. **Supabase prod URL Configuration 누락 → OAuth redirect localhost:3000 fallback** (운영 지식 / Phase 0-D 완결 기준 보강):
+   - Supabase OAuth 는 `redirectTo` 가 Redirect URLs 화이트리스트 매칭 실패 시 Site URL 로 fallback. Supabase 기본 Site URL = `localhost:3000` (Next.js 기본 포트). Dari=4000 프로젝트는 반드시 명시 수정.
+   - **Phase 0-D Auth 완결 판정 기준 보강**: 로컬 Playwright E2E + **prod 실 Google OAuth end-to-end 로그인 성공** 양축. `phase-1-release-checklist.md` §1 에 URL Configuration + prod OAuth 검증 추가 필요.
+   - 진단 순서 고정: (1) Supabase Dashboard URL Configuration (가장 흔함) → (2) 앱 `redirectTo` 코드 → (3) Google Cloud Console OAuth 클라이언트 승인 URI.
+
+2. **Phase 전환 계획서 브랜드 가정 ≠ Jayden 실 의도 — Config 작성 전 실 자산 감사 필수** (방향 이탈 교정):
+   - phase-2-plan §5 "Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom" 가정이 틀림. 실제는 chatsio / findably / dairect / interviewgenie / dari (Jayden 실 포트폴리오 + self-reference).
+   - **"외부 서비스 선결 조건 사전 체크" 규칙을 봇 컨텐츠 계획까지 확장**: SDK/API 뿐 아니라 봇이 운영될 사이트도 외부 자산. 이름/도메인/개발 상태 Task 진입 전 체크.
+   - 계획서 가정 ≠ 현실 확인 시 즉시 재작성. 잘못된 가정 유지하면 후속 Task 수정 공수 폭증.
+   - Jayden "아무거나 만들었어" literally 해석 금지 — 바이브코딩 방식 화법. 실제 생성물 확인 후 의도 역추정.
+
+### 발견된 mini-issues (A-5b 또는 Backlog 이월)
+
+1. **`/` 홈페이지 Phase 1 완결 후 미갱신** (`src/app/page.tsx:39` "봇 목록·대화는 다음 단계에서 만나실 수 있어요. (Phase 1)") + `/bots` 진입 CTA 부재 → mini-task 15~30분
+2. **`chatsio` 봇 systemPrompt 오타 (`chatio`)** → Jayden 편집 (A-5b 편집 시점)
+3. **`interviewgenie` mode = `support`** 권장 `coaching` → Jayden 편집 (A-5b)
+4. **5개 봇 모두 systemPrompt 최소값 (20~30자, Prompt Injection 방어 없음)** → A-5b 편집 가이드는 `dairect-bot-configs.md` §2
+5. **5개 봇 모두 allowedDomains=[]** → 공개 위젯 API 404 (의도된 보안 설계). A-5b 에서 실사이트 도메인 추가 시 해소
+
+### Backlog (다음 세션 후보)
+
+1. **mini-task 3건 묶음** (30~45분):
+   - `/` 홈페이지 `/bots` CTA 추가 + Phase 1 메시지 제거 (15~30분)
+   - `docs/phase-1-release-checklist.md` §1 에 Supabase URL Configuration 체크리스트 + prod OAuth 검증 스텝 추가 (10분, 이번 교훈 반영)
+   - `docs/environments.md` Sentry org slug drift (jayden-k4 → jayden-kz) + prod Supabase 이미 존재 현실화 (10분)
+2. **code MEDIUM-2**: `env.ts` → `env.server.ts` / `env.client.ts` 분리 (~1h, 이전 세션 이월)
+3. **Task A-5b**: 각 사이트 개발 완료 후 — 편집 + embed + smoke (사이트별 독립 진입)
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-21 Ⅲ (KST, Task A-5a 완결 + 계획서 브랜드 가정 교정)
+- 브랜치: `main`
+- 차단 요소: 없음. A-5b 는 사이트 개발 완료가 외부 조건
+
+---
 
 ## 이번 세션(2026-04-21 Ⅱ) — 리뷰 Fix-then-ship (2 에이전트) + Vercel 빌드 실제 원인 규명·복구 + Playwright MCP prod 스모크 10/10
 

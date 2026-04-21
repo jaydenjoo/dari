@@ -197,15 +197,21 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
   - 에러 코드 white-list 유지 (stream 중간 drop / parse_error)
   - 회귀 테스트 (network_error / 중간 disconnect / invalid JSON chunk)
 
-- **Task A-5: Dairect 4개 추가 배포** (0.5~1일)
-  - Chatsio 고객 지원 봇 — Config 작성 (support 모드, URL 지식 소스)
-  - OnboardKit FAQ 봇 — Config 작성 (faq 모드, file 지식 소스)
-  - SellKit 상품 안내 — Config 작성 (sales 모드)
-  - InterviewGenie 코칭 테스트 — Config 작성 (coaching 모드)
-  - PayLoom 개발자 문서 — Config 작성 (faq 모드)
-  - 각 봇 smoke test + PRD Task 1-6 완결
+- **Task A-5a: Jayden 포트폴리오 5개 봇 prod 레코드 + Vercel env** (~1~2h, 이번 세션 진행)
+  - ✅ dari prod `bots` 테이블 5행 확보 (Jayden UI `/bots/new` 수동 생성, 2026-04-21)
+    - `chatsio` / `findably` / `dairect` / `interviewgenie` / `dari` — **Jayden 실제 포트폴리오** (초기 가상 Dairect 브랜드 가정은 폐기)
+  - ✅ Supabase `Site URL` / `Redirect URLs` 등록 (prod OAuth 로그인 성공 확인)
+  - ⏳ `NEXT_PUBLIC_WIDGET_CDN_URL = https://dari-theta.vercel.app/widget.js` Vercel Production + Preview 명시 등록 (ADR-009 §9-1 γ 이행)
+  - 의식적 이월: 5개 봇 Config 정교화 (systemPrompt 확장 / primaryColor / mode / allowedDomains) — 사이트 개발 완료 후 일괄 편집이 효율적. 상세 가이드 → [`dairect-bot-configs.md`](./dairect-bot-configs.md)
 
-**Epic A 예상 총 소요**: **3~5일** (Task A-1 완료 기준 잔여 추정).
+- **Task A-5b: 각 사이트 embed + prod smoke** (이월, 사이트 개발 완료 후 진입)
+  - 각 봇 `/bots/<slug>/edit` 에서 Config 정교화 (dairect-bot-configs.md §2 가이드)
+  - 5개 사이트 `<head>` 에 위젯 스니펫 삽입
+  - Playwright MCP 로 각 사이트 prod SSE smoke (5/5 목표)
+  - iOS 실기기 smoke (iPhone 확보 후 또는 ADR-009 Open Q #3 영구 이월)
+  - PRD Task 1-6 완결
+
+**Epic A 예상 총 소요**: **3~5일** (A-5a 까지 포함 ~3일 예상, A-5b 는 사이트 개발과 병렬).
 
 ---
 

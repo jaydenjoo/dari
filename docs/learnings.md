@@ -32,6 +32,63 @@
 
 ## 기록
 
+### 2026-04-21 Supabase prod URL Configuration 누락 → OAuth redirect localhost:3000 fallback (운영 지식 / Phase 0-D 완결 기준 보강)
+
+**증상**: Task A-5a Step 2 (Jayden UI 봇 생성) 진입 직전, Jayden 이 prod (`https://dari-theta.vercel.app/login`) 에서 "Google 로 계속하기" 클릭 → `http://localhost:3000/?code=bfdc1629-...` 로 redirect. 포트 3000 ≠ Dari 4000, path `/` ≠ `/auth/callback` — **2중 불일치**. 로그인 불능 = Task A-5a Step 2 완전 블로킹.
+
+**원인**:
+
+1. Supabase 프로젝트 (`dari`, pxdopzlaffjcxqfrqidq) 의 `Authentication → URL Configuration` 에서 `Site URL` 이 Supabase 기본값 `http://localhost:3000` 그대로 방치.
+2. `Redirect URLs` 화이트리스트에 Dari 의 `redirectTo` (`https://dari-theta.vercel.app/auth/callback`, `http://localhost:4000/auth/callback`) 미등록.
+3. Supabase OAuth 동작: 앱이 `signInWithOAuth({ redirectTo })` 전달 → **Redirect URLs 화이트리스트 매칭 확인** → 매칭 시 그 URL 로 redirect / 매칭 실패 시 **Site URL 로 fallback**. 현재 케이스는 매칭 실패 → Site URL(`localhost:3000`) fallback.
+4. **Phase 0-D Auth 완결 판정 시점의 갭**: 로컬 Playwright E2E 9/9 통과 = 로컬 Supabase 인스턴스 또는 Mock 기반. **prod Supabase 의 URL Configuration 실 검증이 포함 안 됐음**. PROGRESS.md "Phase 0-D 완료" 기록은 기술 완료를 증명하지만 **prod end-to-end 로그인 가능성** 은 보장 안 함.
+5. Jayden 의 다른 프로젝트(chatsio=3000, teamzero=3100) 와 Next.js 기본 포트 3000 이 겹침 — Supabase 기본값(localhost:3000) 이 Dari(4000) 에는 절대 안 맞음.
+
+**해결**:
+
+1. Supabase Dashboard → `dari` → Authentication → URL Configuration 접속 (Jayden 수동).
+2. Site URL = `https://dari-theta.vercel.app` (prod 우선).
+3. Redirect URLs 에 2줄 추가: `https://dari-theta.vercel.app/auth/callback`, `http://localhost:4000/auth/callback`.
+4. Save → Jayden 재접속 → "Google 로 계속하기" → `/auth/callback?code=...` 정상 redirect → 세션 획득.
+5. 이후 Task A-5a 진입 가능.
+
+**규칙** ⭐:
+
+- **prod Supabase 프로젝트 생성 직후 Authentication URL Configuration 설정은 필수 체크리스트 항목**. `phase-1-release-checklist.md` §1 (Vercel 환경 구성) 에 추가: (a) Site URL 설정 (b) Redirect URLs 화이트리스트 (c) prod 실 Google OAuth 로그인 성공 확인.
+- **Phase 0-D Auth 완결 판정 기준 보강** — 로컬 Playwright E2E 통과 + **prod 실 Google OAuth end-to-end 로그인 성공** 이 완결의 별도 축. 전자는 코드 정합성, 후자는 외부 설정(Supabase Dashboard) 정합성. Phase 완결은 두 축 모두 녹색.
+- **Supabase 기본 Site URL = `localhost:3000`** — Next.js 기본 포트 3000 가정. 다른 포트 사용 프로젝트 (Dari=4000) 는 **반드시 명시 수정**. 포트 기억 만으로 부족, Redirect URLs 화이트리스트까지 함께 등록.
+- **OAuth redirect 엉뚱한 URL 로 가는 증상 = 진단 순서 고정**: (1) Supabase Dashboard URL Configuration 확인 (가장 흔함) → (2) 앱 `redirectTo` 코드 확인 → (3) Google Cloud Console OAuth 클라이언트 승인 URI 확인. Dashboard 가 첫 의심 지점.
+- **외부 서비스 설정 변경은 코드 검증 불가** — Supabase URL Configuration 은 코드/테스트로 검증 못 함. 운영 체크리스트 + 수동 확인 + prod 실증이 유일한 검증 경로.
+
+---
+
+### 2026-04-21 Phase 전환 계획서 브랜드 가정 ≠ Jayden 실 의도 — Config 작성 전 "실 자산" 감사 필수 (방향 이탈 교정)
+
+**증상**: Task A-5 = "Dairect 5개 embed" 를 시작할 때 PROGRESS.md / phase-2-plan.md 가 가상 Dairect 브랜드 목록(Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom) 을 가정. 이를 기반으로 `docs/dairect-bot-configs.md` (가상 5개 브랜드별 systemPrompt / color / mode) 를 400줄 작성. Jayden 이 UI 에서 실제로 생성한 5개는 **본인 실제 포트폴리오**(chatsio / findably / dairect / interviewgenie / dari) — 계획서 가정의 3개(OnboardKit / SellKit / PayLoom) 은 Jayden 이 보유/개발하지 않는 **가상 제품** 이었고, 누락된 2개(Findably / Dari self-reference) 는 실제 자산.
+
+**원인**:
+
+1. 이전 세션의 phase-2-plan §5 Task A-5 서술("Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom") 이 PRD Task 1-6 "Dairect 5개 배포" 를 기계적 해석하여 **가상 브랜드 목록** 으로 확정. PRD 원문은 Jayden 포트폴리오 허브 컨셉이었을 가능성이 높음.
+2. Task A-5a 진입 시 내가 Config 문서를 **Jayden 실 자산 확인 없이** 가정 기반으로 400줄 작성. "외부 서비스 선결 조건 사전 체크" 메모리 규칙이 SDK/API 뿐 아니라 **봇 컨텐츠 계획** 에도 적용돼야 했음.
+3. Jayden 이 UI 생성 후 "아무거나 5개 만들었어" 라는 말은 실제로는 "**내 실제 포트폴리오 5개**" 라는 의미. 내 가정이 틀렸음을 Jayden 본인도 auto mode 맥락에서 즉시 인지하지 못함.
+4. **PROGRESS.md / phase-2-plan §5 가 계획 권위를 가짐** — Phase 전환 계획서가 틀린 가정을 담으면 후속 Task 가 전부 그 가정 위에서 진행.
+
+**해결**:
+
+1. Jayden UI 생성 결과 확인 즉시 Config 문서 **전면 재작성** (실 5개 포트폴리오 기반 ~380줄). 가상 브랜드 삭제, 누락된 2개(findably / dari self-reference) 추가.
+2. phase-2-plan §5 Task A-5 → **A-5a (완료 / 포트폴리오 레코드) + A-5b (이월 / 사이트 embed)** 분할.
+3. Task A-5a "완료 기준" 을 "사이트 embed 완료" 에서 "DB 5행 확보 + Vercel env 등록" 으로 재정의 (사이트 개발 완료 전까지 진입 불가능한 부분 이월).
+
+**규칙** ⭐:
+
+- **Phase 전환 계획서의 브랜드 이름/외부 자산 목록이 등장하면 Jayden 실 보유·개발 상태 감사 먼저** — "Chatsio / OnboardKit / ..." 같은 구체 목록은 계획서 작성자의 추정일 수 있음. Jayden 확인 전까지 Task 세부 구현 금지.
+- **"외부 서비스 선결 조건 사전 체크" 규칙을 봇 컨텐츠/포트폴리오 계획까지 확장** — SDK/API 만이 외부 자산이 아니라, 봇이 운영될 **사이트 5개** 도 외부 자산. 이름·도메인·개발 상태·embed 권한을 Task 진입 전 체크리스트로 확인.
+- **계획서 가정 ≠ 현실 확인되면 즉시 재작성** — 진행 중 발견 시 "이 Task 는 보류" 가 아닌 "계획서 수정 + 현실 기반 재계획". 잘못된 가정 유지한 채 진행하면 후속 Task 수정 공수 폭증.
+- **Jayden "아무거나 만들었어" 는 literally 해석 금지** — Jayden 은 바이브코딩 방식이라 엄밀한 용어를 쓰지 않음. 실제 생성물 확인 후 의도 역추정. "아무거나 = 내가 바로 생각난 5개 = 내 실 포트폴리오" 일 가능성 높음.
+- **PROGRESS.md 기록 신뢰도 가중치** — PROGRESS.md 의 완료 기록은 "그 당시 작성자 인식" 이므로 Phase 전환 시 핵심 가정(특히 외부 자산 목록) 은 Jayden 재확인 거쳐야 함.
+
+---
+
 ### 2026-04-21 AI SDK `onFinish` 서버리스 Promise leak → Next 16 `after()` 로 인프라 레벨 보장 (설계 결정)
 
 **증상**: Task A-4 (Vercel AI SDK Data Stream Protocol 전환) 에서 `streamText({ ..., onFinish: async ({ text }) => { await admin.from("messages").insert(...) } })` 패턴을 먼저 구현. 로컬에서는 스트림 완료 후 assistant 메시지 저장 정상. 독립 리뷰 (code H-1 / sec M-2) 가 핵심 이슈 지적: **Vercel 서버리스는 응답 헤더 flush 시점에 함수를 종료할 권한이 있어서 `onFinish` 가 호출 전에 lifecycle 이 잘릴 수 있음**. 결과는 **간헐적 assistant 메시지 누락** — 로컬 재현 불가, prod 운영 중 무작위 대화 기록 불일치로 나타남.
