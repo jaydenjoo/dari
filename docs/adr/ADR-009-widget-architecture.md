@@ -277,9 +277,12 @@ pnpm build
 
 2. **스트리밍 구현 선택 (Task A-4)**: `@ai-sdk/anthropic` provider + `streamText` vs Anthropic 네이티브 `messages.stream()` 직접? Data Stream Protocol 준수는 양쪽 모두 가능하나 전자가 AI SDK 표준 활용. Tool call 필요 시점에 재검토.
 
-3. **iOS Safari virtual keyboard (Task A-3)**: 모바일 키보드 열릴 때 패널 `height: calc(100vh - 100px)` 동작. VirtualKeyboard API 또는 `visualViewport` 이벤트 수용 여부 실측.
+3. **iOS Safari virtual keyboard (Task A-3, 부분 실측 2026-04-21)**: Playwright mobile-safari (`iPhone 13` device) 스위트 4/4 통과 — 위젯 로드 / Shadow DOM mount / CSP 매트릭스 정상. **단, virtual keyboard 상호작용 (패널 높이 대응)은 device emulation 에서 재현 불가** — 실기기 수동 QA 로 Task A-5 (Dairect 5개 배포 시 iOS 실기기 1건 smoke) 이월. VirtualKeyboard API / `visualViewport` 전환 여부는 실기기 관찰 후 결정.
 
-4. **CSP 호환성 (Task A-3)**: 호스트 사이트의 엄격한 CSP (`style-src 'self'`) 적용 시 CSS variable 주입 차단 가능. `nonce` 전파 또는 `CSSStyleSheet.replaceSync` 기반 처리 비교 — 실측 후 결정.
+4. **CSP 호환성 (Task A-3, 실측 완료 2026-04-21)**: Playwright 5 projects (Chromium/Firefox/WebKit + Mobile Chrome/Mobile Safari) CSP 매트릭스 2 케이스 실측:
+   - **Strict** `script-src 'self'` → 외부 origin widget.js 로드 **차단** (모든 브라우저 확인). 메시지: Chromium/Firefox `Loading the script ... violates CSP directive: script-src 'self'` / WebKit `Refused to load ... because it does not appear in the script-src directive`.
+   - **Permissive** `script-src 'self' <widget-host>; style-src 'self' 'unsafe-inline'; connect-src 'self' <widget-host>` → 위젯 정상 로드 + mount.
+   - **고객사 권장 CSP (위젯 허용)**: `script-src 'self' https://dari-theta.vercel.app; connect-src 'self' https://dari-theta.vercel.app; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;` — 위젯이 Shadow DOM 내부에서 inline style 사용하므로 `style-src 'unsafe-inline'` 필요. `nonce`/`CSSStyleSheet.replaceSync` 전환은 Phase 3 (SaaS + 고보안 고객) 재평가.
 
 5. **설치 스니펫 UX 개선 (Task A-2)**: 현재 `/bots/[slug]` 상세에 베타 뱃지 + JS 스니펫 표시. 실 배포 후 베타 뱃지 제거 + "복사" 버튼 + "검증" 링크(위젯 실동작 확인 페이지) 추가 여지.
 

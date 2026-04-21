@@ -32,6 +32,33 @@
 
 ## 기록
 
+### 2026-04-21 Next.js proxy/middleware matcher 에 정적 자산 확장자 제외 누락 — widget.js 가 /login 리다이렉트 당하는 cross-origin embed 차단 (운영 지식)
+
+**증상**: Task A-3 Playwright widget-embed smoke 4/4 실패. 모두 `#dari-widget-host` 15초 타임아웃. curl 진단 결과 `http://localhost:4000/widget.js` → **`307 /login?next=%2Fwidget.js`** 리다이렉트. 즉 proxy(auth) 가 widget.js 를 보호 라우트로 판정하고 비로그인 방문자를 로그인 페이지로 튕김. 외부 사이트가 embed 스크립트를 로드하려 하면 로그인 HTML 을 받게 되어 IIFE 실행 실패 → cross-origin 위젯 전체 무력화.
+
+**원인**:
+
+1. `src/proxy.ts:74` matcher 부정 lookahead 에 **이미지 확장자만** (`png|jpg|jpeg|gif|svg|webp|ico`) 제외. `.js`/`.css`/`.map`/폰트 누락.
+2. Task 1-6-b (widget scaffolding) 시점에 `public/widget.js` 가 이 매처에 걸리지 않도록 확장자 제외를 추가 안 함. widget.js 는 Next dev/prod 가 `public/` 정적 자산으로 서빙하지만 proxy 가 **먼저** 가로채 redirect 응답.
+3. 기존 E2E 는 **same-origin** (localhost:4000) 에서만 실행 → 로그인 된 세션으로 `/widget.js` 요청해도 redirect 없음 → 문제 은폐. **cross-origin embed 시나리오 (익명 방문자)** 를 실측한 적이 없어 Phase 1 내내 잠복.
+4. Vercel 배포가 `DEPLOYMENT_NOT_FOUND` 로 접근 불가 상태라 외부 실증 루트도 막혀 있었음.
+
+**해결**:
+
+1. matcher 부정 lookahead 확장 — `js|css|map|woff|woff2|ttf|eot` 추가 + 주석에 "Phase 1 잔존 버그" 이력 기록.
+2. `curl -sI localhost:4000/widget.js` → `HTTP/1.1 200 + Content-Type: application/javascript` 확인.
+3. Playwright widget-embed 5 projects × 4 tests 20/20 통과.
+4. 기존 E2E 회귀 zero (smoke + bot-create 3 + bot-detail 4 = 8/8 통과) → matcher 확장이 보호 라우트 동작에 영향 없음.
+
+**규칙** ⭐:
+
+- **proxy/middleware matcher 정적 자산 제외는 "모든 공개 확장자" 포괄 형태로 처음부터 구성** — 새 자산 추가 시마다 회귀 재발 방지. 기본 템플릿: `png|jpg|jpeg|gif|svg|webp|ico|js|css|map|woff|woff2|ttf|eot|mp4|webm|pdf`. `/_next/static/*` 외에 `public/` 하위가 모두 URL 매핑된다는 점 기억.
+- **cross-origin embed 자산(widget/SDK/plugin)은 same-origin E2E 로는 검증 안 됨** — 로그인 세션이 있는 E2E 는 redirect 경로를 타지 않아 문제 은폐. **별도 origin 에서 서빙하는 mock host + Playwright** 로 회귀 테스트 필수. 이번 세션의 `tests/e2e/widget-embed/` 패턴을 SDK 성격 코드 투입 시 항상 따르기.
+- **"정적 자산 로드 실패" 진단 1순위**: `curl -sI` 로 HTTP 상태/헤더 확인. **307/302 redirect** 면 거의 proxy/middleware matcher 문제. 404 면 파일 부재 또는 라우팅 문제. **증상 관찰 전에 HTTP 상태만 보면 80% 정확한 원인 추정**. 브라우저 DevTools Network 탭도 동일 판독.
+- **"보호 기본 + 공개 예외" 매처는 공개 예외를 포괄적으로** — Dari 는 "비로그인 → /login" 정책 + 공개 경로는 `isPublicPath` + matcher 예외. matcher 가 **request level** 에서 거르는 최후의 방어선이라 여기서 누락되면 앱 전체 경로에 영향. positive-match 가 아니라 negative-lookahead 를 쓰기 때문에 "공개할 것" 을 명시적으로 확장자 기준 추가해야 함.
+
+---
+
 ### 2026-04-21 ADR 확정 전 외부 리소스(도메인/계정/청구 권한) 소유 체크 + 기존 코드 주석 전수 Grep 필수 — 3중 URL 드리프트 고착 사례 (설계 결정 / AI 이탈)
 
 **증상**: Task A-1 에서 ADR-009 결정 #1 "CDN 호스트 `dari.kr`" 를 확정 + 272줄 ADR 작성 + 커밋까지 완료 (세션 종료). 같은 세션 직후 Task A-2 진입 시 Jayden 이 "`dari.kr` 미보유 + 현재 `dari-theta.vercel.app` 사용" 알림 → 결정 #1 전면 재작성 필요. 코드 전수 Grep 결과 **호스트 3개가 서로 다른 위치에 공존** 확인:

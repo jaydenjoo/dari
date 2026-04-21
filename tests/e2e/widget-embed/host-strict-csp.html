@@ -1,0 +1,42 @@
+<!--
+  Dari 위젯 CSP 매트릭스 — ADR-009 Open Q #4 실측 (script-src 차단 케이스).
+
+  이 파일은 **script-src 엄격 + style-src 완화** 조합으로 "외부 스크립트 차단" 을 검증한다.
+    - `script-src 'self'` → 외부 origin widget.js 차단 **기대**
+    - `style-src 'self' 'unsafe-inline'` 은 **완화 유지** — 위젯이 Shadow DOM 내부에서 CSS
+      variable 을 inline style 로 주입하므로 style-src 를 엄격 적용하면 위젯 렌더 자체가
+      깨져 "script 차단" 검증이 불가능해진다. style-src 엄격 케이스는 ADR-009 Open Q #4
+      의 TODO 로 별도 Task (nonce/CSSStyleSheet.replaceSync 전환 검토).
+    - `connect-src 'self' http://localhost:4000` — 테스트 편의 허용. 실제 "script 차단" 여부만
+      핵심 관찰 대상.
+
+  Playwright spec 이 이 파일을 `?bot=<slug>` 쿼리와 함께 방문하고 widget.js 가
+  실제로 차단되는지 (`#dari-widget-host` 미생성) 확인한다.
+-->
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:4000"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dari Widget CSP Strict Host</title>
+  </head>
+  <body>
+    <main data-testid="csp-strict-content">
+      <h1 data-testid="csp-strict-heading">
+        CSP Strict Host (script-src 'self')
+      </h1>
+      <p data-testid="csp-strict-description">
+        위젯 스크립트가 외부 origin (localhost:4000) 에서 로드되려 시도하나 CSP
+        로 차단되어야 정상입니다.
+      </p>
+    </main>
+
+    <!-- external loader: `script-src 'self'` 하에서 self origin 이라 실행 OK.
+         그 후 widget.js (외부 origin) 삽입 시도 → CSP 로 로드 차단 기대. -->
+    <script src="loader.js"></script>
+  </body>
+</html>

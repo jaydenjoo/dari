@@ -181,11 +181,14 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
   - Cache-Control 전략 결정 (immutable hash vs latest short-TTL) — ADR-009 Open Q #1
   - **미포함** (별도 Task, 10곳 테스트 완료 후 트리거): `dairect.kr` Vercel 커스텀 도메인 연결 + DNS 설정 + env 값 교체
 
-- **Task A-3: Dairect smoke test (dairect.kr 1개 사이트)** (0.5일)
-  - `dairect.kr` 에 스크립트 삽입 (Task A-2 의 실증)
-  - 데스크톱 (Chrome / Safari / Firefox) + 모바일 (iOS Safari / Android Chrome) QA
-  - 발견 버그 수정 + 회귀 테스트 추가
-  - CSP 호환성 실측 (ADR-009 Open Q #4)
+- **Task A-3: Playwright cross-origin smoke + CSP 매트릭스** (0.5일) ✅ **완료** (2026-04-21)
+  - Jayden 정정 반영: `dairect.kr` 는 **별개 프로젝트** (`jaydenjoo/dairect`) — Dari smoke 는 로컬 cross-origin 목업으로 재현
+  - **Playwright 5 projects × 4 tests = 20 passed**: Chromium + Firefox + WebKit (데스크톱 3) + Mobile Chrome (Pixel 5) + Mobile Safari (iPhone 13)
+  - 시나리오: (A) widget.js 로드·Shadow DOM host 생성 (B) Shadow DOM 격리 (host 공격적 CSS 무영향) (C) CSP strict 차단 (D) CSP permissive 허용
+  - **Phase 1 잔존 버그 발견·수정**: `src/proxy.ts` matcher 에 `.js/.css/.map/폰트` 확장자 제외 누락 → `widget.js` 가 `/login` 리다이렉트되어 cross-origin embed 무력화. 확장자 제외 규칙 포괄화.
+  - CSP 호환성 실측 결과 ADR-009 Open Q #4 에 기록 (Strict `script-src 'self'` → 차단 / Permissive `script-src 'self' <widget-host>` → 허용)
+  - iOS virtual keyboard 상호작용 (Open Q #3) 은 device emulation 한계로 Task A-5 실기기 smoke 로 이월
+  - **의식적 범위 밖**: Vercel 실배포 smoke (`dari-theta.vercel.app`) — 현재 `DEPLOYMENT_NOT_FOUND` 상태, Jayden Vercel Dashboard 수동 복구 필요
 
 - **Task A-4: 스트리밍 전환 (Vercel AI SDK Data Stream Protocol)** (1~2일)
   - `@ai-sdk/anthropic` + `ai` 의존성 추가

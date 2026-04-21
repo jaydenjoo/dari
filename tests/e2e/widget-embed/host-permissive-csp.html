@@ -1,0 +1,30 @@
+<!--
+  Dari 위젯 CSP 매트릭스 — 허용형 CSP (실 고객사 다수 채택하는 현실적 정책).
+
+  - `script-src 'self' http://localhost:4000` — 위젯 호스트를 명시 허용
+  - `style-src 'self' 'unsafe-inline'` — 위젯이 Shadow DOM 내 inline style 사용하므로
+  - `connect-src 'self' http://localhost:4000` — fetch 호출 허용
+
+  이 케이스는 **로드 성공 + 작동** 기대.
+-->
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' http://localhost:4000; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:4000; connect-src 'self' http://localhost:4000"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dari Widget CSP Permissive Host</title>
+  </head>
+  <body>
+    <main data-testid="csp-permissive-content">
+      <h1 data-testid="csp-permissive-heading">CSP Permissive Host</h1>
+      <p>위젯 호스트 origin 을 명시 허용 — 정상 로드 기대.</p>
+    </main>
+
+    <!-- external loader: self + localhost:4000 둘 다 허용 → loader + widget 모두 실행. -->
+    <script src="loader.js"></script>
+  </body>
+</html>

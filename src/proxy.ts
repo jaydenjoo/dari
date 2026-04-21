@@ -71,6 +71,20 @@ export const config = {
   matcher: [
     // 정적 자산·API·Next 내부 경로 제외.
     // API 는 각 핸들러가 자체 auth — proxy 가 세션 refresh 하지 않아도 OK.
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)",
+    //
+    // 확장자 제외 (Task A-3 추가 2026-04-21):
+    //   - 이미지: png/jpg/jpeg/gif/svg/webp/ico
+    //   - 스크립트/스타일: **js/css/map** (원래 누락 — `public/widget.js` 가 `/login` 으로
+    //     리다이렉트되어 cross-origin embed 가 작동 안 하던 Phase 1 잔존 버그)
+    //   - 폰트: woff/woff2/ttf/eot (pretendard 등 public 정적 자산)
+    //
+    // `/_next/static/*` 은 이미 제외되므로 Next 번들은 중복 제외. 사용자 업로드 `.js`
+    // 는 없는 구조이므로 `.js$` 포괄 제외가 안전.
+    //
+    // ⚠️ **public/ 전용 가정** (code/sec LOW 2026-04-21): 위 확장자 제외는 `public/`
+    // 하위가 "인증 없이 공개 가능" 이라는 전제 위에 성립. `public/` 에 민감 정보 포함
+    // `.js`/`.css`/`.map` 을 두지 말 것. 향후 동적 `.js` 라우트(예: `/config.js`)
+    // 를 보호 경로로 추가할 일이 생기면 이 제외 규칙을 먼저 재검토 (예외 pattern 추가).
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|js|css|map|woff|woff2|ttf|eot)$).*)",
   ],
 };
