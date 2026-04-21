@@ -8,7 +8,7 @@ import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
 import { BOT_STATUS_CLASS, BOT_STATUS_LABEL } from "@/shared/bots/status";
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 import { isValidSlug } from "../new/slug-util";
 import CopySnippet from "./copy-snippet";

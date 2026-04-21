@@ -12,7 +12,7 @@ const loggerMock = vi.hoisted(() => ({
   trace: vi.fn(),
 }));
 
-vi.mock("@/shared/config/env", () => ({
+vi.mock("@/shared/config/env.server", () => ({
   env: envMock,
 }));
 

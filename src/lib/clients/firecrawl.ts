@@ -2,7 +2,7 @@ import "server-only";
 
 import Firecrawl from "@mendable/firecrawl-js";
 
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 /**
  * Firecrawl Cloud SDK 싱글턴 래퍼 (Task 1-7-b).

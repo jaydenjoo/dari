@@ -11,7 +11,7 @@ const loggerMock = vi.hoisted(() => ({
 }));
 const limitSpy = vi.hoisted(() => vi.fn());
 
-vi.mock("@/shared/config/env", () => ({
+vi.mock("@/shared/config/env.server", () => ({
   env: envMock,
 }));
 

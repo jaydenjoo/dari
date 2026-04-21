@@ -3,7 +3,7 @@ import "server-only";
 import { Ratelimit } from "@upstash/ratelimit";
 
 import { logger } from "@/core/logging";
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 import { getRedisClient } from "./redis-client";
 

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 /**
  * Vercel AI SDK Anthropic Provider 싱글턴.

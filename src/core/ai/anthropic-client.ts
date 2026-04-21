@@ -2,7 +2,7 @@ import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 // Anthropic SDK 싱글턴.
 // serverless cold-start 마다 새 HTTP client 를 만들지 않도록 모듈 스코프 캐시.

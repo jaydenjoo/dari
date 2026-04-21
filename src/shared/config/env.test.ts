@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-// env.ts 는 모듈 로드 시 즉시 `parseEnv()` 를 호출하므로, import 전에 필수 env 주입.
+// env.server.ts / env.client.ts 는 모듈 로드 시 즉시 parse 호출하므로, import 전에 필수 env 주입.
 // vi.hoisted 는 모든 import 보다 먼저 실행되도록 hoist 된다. `??=` 로 기존 값 보존.
 vi.hoisted(() => {
   // NODE_ENV 는 vitest 가 "test" 로 자동 주입 (readonly literal union).
@@ -18,7 +18,8 @@ vi.hoisted(() => {
     "fake-supabase-anon-test-placeholder";
 });
 
-import { clientSchema, serverSchema } from "./env";
+import { clientSchema } from "./env.client";
+import { serverSchema } from "./env.server";
 
 const baseClient = {
   NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",

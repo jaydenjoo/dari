@@ -2,7 +2,7 @@ import "server-only";
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 
 /**
  * Gemini text-embedding-004 임베딩 래퍼.

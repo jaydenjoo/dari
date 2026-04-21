@@ -23,7 +23,7 @@
 import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
-import { env } from "@/shared/config/env";
+import { env } from "@/shared/config/env.server";
 import type { Database } from "./types";
 
 export async function updateSession(request: NextRequest): Promise<{
