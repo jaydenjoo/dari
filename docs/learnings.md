@@ -32,6 +32,27 @@
 
 ## 기록
 
+### 2026-04-21 proxy matcher 확장자 제외는 "향후 동적 JS 라우트 추가 위험" 을 동반 — 주석 경고만으로 부족, learnings + 체크리스트 양쪽 명문화 필요 (설계 결정)
+
+**증상**: Task A-3 에서 `src/proxy.ts` matcher 에 `js|css|map|woff|woff2|ttf|eot` 공개 확장자 추가(cross-origin widget.js 로드 버그 수정) 후, 독립 리뷰 **2 에이전트 동일 지적** (code LOW-1 + security LOW-1): "향후 `/config.js` 같은 **동적 JS API 라우트** 추가 시 matcher 가 정적 파일로 오인해 인증 우회 발생 가능". 즉각 위험은 없으나 회귀 위험 명시.
+
+**원인**: Next.js `middleware`/`proxy` matcher 가 **부정 lookahead** 로 "제외 목록" 을 구성하는 구조 — 제외 조건에 포함되는 경로가 모두 공개로 빠짐. 현재 Dari 에선 `.js` 확장자 파일 = `public/widget.js` 단 1개라 안전하나, `/api/config.js`·`/theme/[botId].css`·`/embed/[...slug].js` 같은 **동적 확장자 라우트** 추가 시 자동 인증 밖. 주석 `⚠️ public/ 전용 가정` 이 있으나 enforce 불가능한 휴먼 기억 의존.
+
+**해결**:
+
+1. `src/proxy.ts:84-88` 주석 경고 유지 (Task A-3 추가분).
+2. **본 엔트리** 에 명문화 → `/start` 스킬이 세션 시작 시 자동 로드해 관련 결정 시 상기.
+3. 미이행(의식적): matcher "부정 제외" → "긍정 허용" 반전은 대규모 리팩토링이라 ROI 낮음 / ESLint 커스텀 룰은 작성 비용 > 발생 빈도.
+
+**규칙** ⭐:
+
+- **matcher 확장자 제외 = "미래 동적 라우트 추가 시 matcher 예외 선언" 의무와 세트** — `.js`/`.css`/`.map`/폰트 공개 제외할 때마다 "이 확장자로 끝나는 **동적 라우트** 를 추가하려면 matcher 부정 lookahead 에 긍정 예외 먼저 추가해야 한다" 는 의무가 따라옴. 코드에서 enforce 불가라 문서 layer 로 고정.
+- **"동적 확장자 라우트" 트리거 조건** — `src/app/**/` 하위에 `[slug].js`, `[...path].css`, `config.js/route.ts` 같이 **확장자로 끝나는 동적 세그먼트** 또는 명시 파일 추가 시. 이 때 `src/proxy.ts` matcher 부정 lookahead 에 해당 경로 **긍정 예외** (`(?!api/config\\.js$)` 형태) 먼저 추가.
+- **보호/공개 판단을 "파일 확장자" 로 하면 휴먼 의존, "경로 prefix" 로 하면 enforce 가능** — 가능하면 `.js` 같은 확장자 대신 `_next/static/`, `/fonts/`, `/widget.js` 처럼 **구체적 경로 패턴** 으로 공개 목록 구성. 확장자 패턴은 `public/` 정적 자산 한정이며, 동적 라우트 등장 순간 전환 재검토.
+- **독립 리뷰 2 에이전트 동일 지적 = 실제 위험 신호** — code + security 둘 다 LOW 등급으로 언급 = "현 상태 안전하나 미래 회귀 가능성". 이런 "쌍 지적" 이면 코드 주석에만 의존하지 말고 learnings + 체크리스트까지 가야 함. 주석은 읽지 않으면 없는 것, learnings 는 세션 시작 시 강제 로드.
+
+---
+
 ### 2026-04-21 Next.js proxy/middleware matcher 에 정적 자산 확장자 제외 누락 — widget.js 가 /login 리다이렉트 당하는 cross-origin embed 차단 (운영 지식)
 
 **증상**: Task A-3 Playwright widget-embed smoke 4/4 실패. 모두 `#dari-widget-host` 15초 타임아웃. curl 진단 결과 `http://localhost:4000/widget.js` → **`307 /login?next=%2Fwidget.js`** 리다이렉트. 즉 proxy(auth) 가 widget.js 를 보호 라우트로 판정하고 비로그인 방문자를 로그인 페이지로 튕김. 외부 사이트가 embed 스크립트를 로드하려 하면 로그인 HTML 을 받게 되어 IIFE 실행 실패 → cross-origin 위젯 전체 무력화.

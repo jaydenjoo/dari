@@ -8,6 +8,35 @@ const nextConfig: NextConfig = {
     // Supabase Storage 버킷 file_size_limit 도 10MB 로 이중 방어 (0010).
     serverActions: { bodySizeLimit: "10mb" },
   },
+  /**
+   * HTTP 보안 헤더 (security LOW-3 반영, 2026-04-21 Task A-3 리뷰).
+   *
+   * 고객 사이트에 embed 되는 SaaS 로서 기본 브라우저 보안 경계 설정.
+   *   - X-Content-Type-Options: nosniff — MIME 스니핑 차단 (widget.js 가 text/html
+   *     으로 오인되어 HTML 실행되는 경로 방지)
+   *   - X-Frame-Options: SAMEORIGIN — 제3자 사이트가 Dari 관리 페이지를 iframe 으로
+   *     탈취(clickjacking) 하는 경로 차단. widget 은 <script> embed 라 영향 없음.
+   *   - Referrer-Policy: strict-origin-when-cross-origin — 고객 도메인이 Referer 로
+   *     외부에 유출되는 정보 누수 최소화.
+   *
+   * widget.js 전용 `Cache-Control` 은 ADR-009 Open Q #1 (캐시 전략) 미결 — 확정 후 추가.
+   * CSP 는 ADR-009 Open Q #3/#4 (고객사 권장 CSP) 확정 후 별도 매트릭스 설계.
+   */
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 /**

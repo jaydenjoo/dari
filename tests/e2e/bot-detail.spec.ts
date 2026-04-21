@@ -95,7 +95,7 @@ test.describe("/bots/[slug] 상세 페이지", () => {
       // 변조돼도 여기서 최후 검출. Zod `.refine()` (env.ts C-1) 과 2중 방어.
       const snippet = page.getByTestId("widget-snippet");
       await expect(snippet).toBeVisible();
-      await expect(snippet).toContainText(`data-bot-slug="${slug}"`);
+      await expect(snippet).toContainText(`data-bot-id="${slug}"`);
       await expect(snippet).toContainText("https://");
       await expect(snippet).toContainText("/widget.js");
 

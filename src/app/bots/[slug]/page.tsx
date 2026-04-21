@@ -155,7 +155,10 @@ export default async function BotDetailPage({
     stats = parseBotStats(statsRaw);
   }
 
-  const snippet = `<script src="${WIDGET_URL}" data-bot-slug="${data.slug}" defer></script>`;
+  // 속성명은 widget 런타임(`src/widget/config.ts`, `index.ts`) 이 찾는 `data-bot-id` 와
+  // 일치해야 하며(값은 slug), `async` 로 로드해야 `document.currentScript` 가 정상 반환된다.
+  // `defer` 는 DOM 파싱 완료 시점 실행이라 currentScript === null → 자기 탐색 1차 경로 무력화.
+  const snippet = `<script src="${WIDGET_URL}" data-bot-id="${data.slug}" async></script>`;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#fafbfc] px-6 py-12">
