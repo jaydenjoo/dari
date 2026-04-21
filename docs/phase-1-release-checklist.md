@@ -9,17 +9,19 @@
 
 ## 1. 현재 상태 스냅샷
 
-| 영역               | 상태                                                           |
-| ------------------ | -------------------------------------------------------------- |
-| **Epic 진행**      | Phase 1 Epic 1-8 완결 + 후속 리팩 1-8-e ✅                     |
-| **테스트 통과**    | vitest **468/468** (442 → +26 in Task 1-8-e)                   |
-| **타입/린트/포맷** | typecheck 0 errors / lint 3 baseline warnings / prettier clean |
-| **빌드**           | 14 routes 녹색 (Turbopack + Sentry 10.49 호환)                 |
-| **마이그레이션**   | 0001~0012 (12개) — 로컬 `dari-dev` 적용 완료                   |
-| **CI**             | GitHub Actions `verify` + `secret-scan` 2-job — CI 녹색 유지   |
-| **호스팅**         | **아직 미구성** — Stage 1 진입 시 Vercel 프로젝트 생성 예정    |
-| **도메인**         | `dairect.kr` — DNS 연결 대기                                   |
-| **Supabase prod**  | **미생성** — Stage 1 진입 시 `dari-prod` 프로젝트 신규 생성    |
+| 영역               | 상태                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| **Epic 진행**      | Phase 1 완결 + Phase 2 Epic A Task A-1~A-5a 완결 ✅ (2026-04-21 Ⅲ)                                |
+| **테스트 통과**    | vitest **491/491** (Task A-4 스트리밍 전환 후 +23)                                                |
+| **타입/린트/포맷** | typecheck 0 errors / lint 3 baseline warnings / prettier clean                                    |
+| **빌드**           | 14 routes 녹색 (Turbopack + Sentry 10.49 호환, Vercel prod 재배포 확인)                           |
+| **마이그레이션**   | 0001~0012 (12개) — 로컬 `dari-dev` + prod `dari-prod` 둘 다 반영 완료                             |
+| **CI**             | GitHub Actions `verify` + `secret-scan` 2-job — CI 녹색 유지                                      |
+| **호스팅**         | ✅ **Vercel prod 운영 중** — `dari-theta.vercel.app` (ADR-009 γ 경로 기본 호스트)                 |
+| **도메인**         | `dairect.kr` — **별개 프로젝트** (`jaydenjoo/dairect` 리포). Dari 는 `dari-theta.vercel.app` 유지 |
+| **Supabase prod**  | ✅ **`dari-prod` 생성** (pxdopzlaffjcxqfrqidq, ap-northeast-2). 2026-04-21 Ⅲ 에 5개 봇 등록       |
+| **Google OAuth**   | ✅ **prod 실 로그인 성공** — Supabase Authentication URL Configuration 등록 후 (2026-04-21 Ⅲ)     |
+| **Vercel env**     | ✅ `NEXT_PUBLIC_WIDGET_CDN_URL` Production + Preview 명시 등록 (2026-04-21 Ⅲ, ADR-009 §9-1 γ)     |
 
 ---
 
@@ -153,14 +155,28 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 
 ### 4-5. Supabase prod 생성
 
-- [ ] Supabase Dashboard → New Project → `dari-prod` (리전: `ap-northeast-2` 권장 한국 사용자)
-- [ ] 루트 패스워드 안전 저장
-- [ ] API 키 3종 (`anon` / `service_role` / URL) 복사 → Vercel 환경변수에 반영
-- [ ] 로컬에서 `supabase link --project-ref <dari-prod-ref>`
-- [ ] `supabase db push` — 12개 마이그레이션 순차 반영 ⚠️ **되돌리기 어려움**
-- [ ] Auth 섹션 → Google Provider 설정 (client id/secret) + redirect URL 등록
+- [x] Supabase Dashboard → New Project → `dari-prod` (리전: `ap-northeast-2`) — 완료 2026-04-17
+- [x] 루트 패스워드 안전 저장
+- [x] API 키 3종 (`anon` / `service_role` / URL) 복사 → Vercel 환경변수에 반영
+- [x] 로컬에서 `supabase link --project-ref <dari-prod-ref>`
+- [x] `supabase db push` — 12개 마이그레이션 순차 반영 ⚠️ **되돌리기 어려움**
+- [x] Auth 섹션 → Google Provider 설정 (client id/secret) + redirect URL 등록
 - [ ] Storage 버킷 확인 (0010 마이그레이션의 `knowledge-files` 버킷 생성 여부)
 - [ ] Supabase advisor 실행 → 신규 이슈 0 확인
+
+### 4-5-1. 🔴 Authentication URL Configuration (교훈 2026-04-21 Ⅲ 반영)
+
+> **배경**: Supabase 프로젝트 생성 시 `Site URL` 기본값이 `http://localhost:3000`. Next.js 기본 포트 3000 가정. **Dari 는 로컬 4000 + prod `dari-theta.vercel.app`** 이라 기본값 그대로면 OAuth redirect 가 엉뚱한 URL 로 가고 prod 로그인 완전 블로킹 발생 (실제로 2026-04-21 Ⅲ 에서 발생).
+>
+> **규칙**: Phase 0-D Auth 완결 판정 = 로컬 Playwright E2E 통과 + **prod 실 Google OAuth end-to-end 로그인 성공** 양축. 외부 Dashboard 설정이라 코드로 검증 불가 — 운영 체크리스트 + 수동 확인만 유일한 검증.
+
+- [x] Supabase Dashboard → `dari-prod` → **Authentication → URL Configuration** 접속
+- [x] **Site URL** = `https://dari-theta.vercel.app` (prod 우선, 로컬만 쓰려면 `http://localhost:4000`)
+- [x] **Redirect URLs** 2줄 등록:
+  - `https://dari-theta.vercel.app/auth/callback`
+  - `http://localhost:4000/auth/callback`
+- [x] Save → prod 브라우저에서 "Google 로 계속하기" → `/auth/callback?code=...` redirect 정상 확인
+- [x] Jayden 계정(`hidream72@gmail.com`) 세션 획득 확인
 
 ### 4-6. Stage 1 smoke test
 
@@ -187,8 +203,11 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 
 ### ✅ Go 조건 (전부 충족)
 
-- [ ] Vercel prod 배포 녹색 + `dairect.kr` HTTPS 응답
-- [ ] `dari-prod` Supabase 12 마이그레이션 반영 + advisor 0 이슈
+- [x] **Vercel prod 첫 빌드 녹색 확인** (@sentry/core transitive import 교훈 2026-04-21 Ⅱ 반영 — 로컬 `pnpm build` 성공 ≠ Vercel 빌드 성공. `DEPLOYMENT_NOT_FOUND` = 빌드 실패 결과 응답일 수 있음)
+- [x] **prod Google OAuth 실 로그인 성공** (교훈 2026-04-21 Ⅲ — Supabase URL Configuration 설정 후 end-to-end 검증)
+- [x] Vercel prod 배포 녹색 + `dari-theta.vercel.app` HTTPS 응답 (dairect.kr 은 별개 프로젝트)
+- [x] `dari-prod` Supabase 12 마이그레이션 반영
+- [ ] Supabase advisor 0 이슈 확인
 - [ ] smoke test 6항목 (§4-6) 전부 통과
 - [ ] Sentry production environment 이벤트 수집 확인
 - [ ] 환경변수 유출 점검 (`git grep` + Vercel 로그 확인)

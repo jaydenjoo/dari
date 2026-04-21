@@ -24,7 +24,7 @@ export default async function Home() {
         </div>
 
         {user ? (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div className="space-y-1.5">
               <p className="text-sm font-medium tracking-[0.05em] text-blue-600 uppercase">
                 로그인됨
@@ -36,20 +36,40 @@ export default async function Home() {
                 </span>
               </h1>
               <p className="pt-2 text-base leading-relaxed text-gray-500">
-                봇 목록·대화는 다음 단계에서 만나실 수 있어요. (Phase 1)
+                운영 중인 봇을 관리하거나 새로운 봇을 만들어 보세요.
               </p>
             </div>
 
-            <form action={signOut}>
-              <button
-                type="submit"
-                data-testid="logout-button"
-                className="group flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
+            <div className="flex flex-col gap-2.5 sm:flex-row">
+              <Link
+                href="/bots"
+                data-testid="home-bots-link"
+                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[15px] font-semibold text-white shadow-[0_2px_8px_rgba(43,124,255,0.15),0_8px_24px_rgba(43,124,255,0.18)] transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-[0_4px_12px_rgba(43,124,255,0.2),0_12px_32px_rgba(43,124,255,0.25)]"
               >
-                <span>로그아웃</span>
+                <span>내 봇 목록</span>
+                <span className="text-blue-200 transition-colors group-hover:text-white">
+                  →
+                </span>
+              </Link>
+              <Link
+                href="/bots/new"
+                data-testid="home-new-bot-link"
+                className="group inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-3 text-[15px] font-medium text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
+              >
+                <span>새 봇 만들기</span>
                 <span className="text-gray-300 transition-colors group-hover:text-gray-500">
                   →
                 </span>
+              </Link>
+            </div>
+
+            <form action={signOut} className="border-t border-gray-100 pt-5">
+              <button
+                type="submit"
+                data-testid="logout-button"
+                className="text-sm text-gray-400 transition-colors hover:text-gray-600"
+              >
+                로그아웃
               </button>
             </form>
           </div>

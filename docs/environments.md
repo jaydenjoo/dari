@@ -25,21 +25,22 @@ Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환�
 ## 2. 현재 상태 & 이행 로드맵
 
 ```
-[2026-04-17 현재] ── local 만 구동 가능
-                     ├─ Supabase dari-dev 프로젝트 1개
-                     └─ prod 환경 아직 없음
+[2026-04-21 현재] ── local + preview + prod 3환경 구동 중 (Stage 1 진입 완료)
+                     ├─ Supabase dari-dev 프로젝트 1개 (local + preview 공유)
+                     ├─ Supabase dari-prod 프로젝트 1개 (pxdopzlaffjcxqfrqidq, ap-northeast-2)
+                     ├─ Vercel prod 배포 활성 (dari-theta.vercel.app, ADR-009 γ 호스트)
+                     ├─ Supabase Authentication URL Configuration 등록 완료 (2026-04-21 Ⅲ)
+                     ├─ NEXT_PUBLIC_WIDGET_CDN_URL Vercel Production+Preview 명시 등록 (2026-04-21 Ⅲ)
+                     └─ Jayden prod Google OAuth end-to-end 로그인 성공 확인
 
-[Stage 1 진입 시] ── prod 추가 (Phase 1 완료 이후)
-                     ├─ Vercel 프로젝트 생성 + dairect.kr 도메인 연결
-                     ├─ Supabase dari-prod 프로젝트 신규 생성
-                     └─ GitHub → Vercel 연동 (auto deploy on push to main)
+[Stage 2 진입 시] ── 실사용자 베타 10명 대비
+                     ├─ Sentry production env 이벤트 수집 (이미 작동)
+                     ├─ Vercel Preview DB 격리 검토 (§8)
+                     └─ A-5b Dairect 각 사이트 개발 완료 시 embed + smoke
 
-[Stage 2~3 진행 중] ── Vercel Preview 가 자연스러운 stg 역할
-                       ├─ PR 생성 시 Vercel 자동 Preview URL 발급
-                       └─ Preview 는 dari-dev DB 공유 (mutable, 쓰기 가능)
-
-[Stage 4 이후] ──── stg 도입 재평가 조건 충족 시
+[Stage 3~4 이후] ── stg 도입 재평가 조건 충족 시 (§10)
                     → ADR-008 갱신 후 dari-stg 프로젝트 추가
+                    → `dairect.kr` 은 별개 프로젝트 (`jaydenjoo/dairect` 리포). Dari 자체는 `dari-theta.vercel.app` 유지
 ```
 
 ---
@@ -212,7 +213,7 @@ Sentry.init({
 
 ### Vercel Native Integration (2026-04-20 재설정, 단일 경로 확정)
 
-Sentry 조직 2개 공존(수동 `dari-vb` + Vercel 자동 `jayden-f0`)으로 인한 source map/release 이중화 이슈를 2026-04-20 해결. 두 조직 완전 삭제 후 **Vercel Marketplace → Sentry Native Integration** 단일 경로로 재설치. 현행 단일 조직/프로젝트: `jayden-k4 / jayden-projects` (DSN host `o4511246432796672.ingest.us.sentry.io`).
+Sentry 조직 2개 공존(수동 `dari-vb` + Vercel 자동 `jayden-f0`)으로 인한 source map/release 이중화 이슈를 2026-04-20 해결. 두 조직 완전 삭제 후 **Vercel Marketplace → Sentry Native Integration** 단일 경로로 재설치. 현행 단일 조직/프로젝트: `jayden-kz / jayden-projects` (DSN host `o4511246432796672.ingest.us.sentry.io`).
 
 **Vercel Integration 이 자동 주입하는 env 7개** (Project → Settings → Environment Variables UI 숨김 주입, 빌드/런타임 양쪽 사용):
 
@@ -232,14 +233,14 @@ Sentry 조직 2개 공존(수동 `dari-vb` + Vercel 자동 `jayden-f0`)으로 �
 
 1. Vercel Dashboard → Project → Settings → Integrations → Sentry "Configured" 상태
 2. 배포 로그 3개 라인 동시 확인 (UI 에 env 가 안 보여도 이게 진실의 근원):
-   - `Organization: jayden-k4`
+   - `Organization: jayden-kz`
    - `Uploaded X sourcemaps`
    - `Creating release ...`
 3. Sentry Issues 탭에 의도적 에러 1건 도착 (임시 `/api/sentry-test` 라우트 → 검증 후 즉시 삭제)
 
 **주의사항 (Vercel Marketplace Sentry 특성)**:
 
-- "Create New Sentry Account" 는 기존 Sentry 계정 탐색 없이 **별도 조직 자동 생성**. Resource Name 이 **프로젝트 slug** 로 반영되지만 **조직 slug** 은 Vercel 계정 기준 자동 slug (예: `jayden-k4`) 으로 생성. 이후 rename 은 Sentry 대시보드에서 가능하나 URL 변경 전파 시간 고려.
+- "Create New Sentry Account" 는 기존 Sentry 계정 탐색 없이 **별도 조직 자동 생성**. Resource Name 이 **프로젝트 slug** 로 반영되지만 **조직 slug** 은 Vercel 계정 기준 자동 slug (예: `jayden-kz`) 으로 생성. 이후 rename 은 Sentry 대시보드에서 가능하나 URL 변경 전파 시간 고려.
 - 설치 시 **Plan = Developer (Free)** 선택 필수 (5k errors/월, 1 user). Team/Business 는 신용카드 요구.
 - Next.js 앱 라우터에서 테스트 라우트 경로에 `_` prefix 사용 금지 — private folder 로 취급되어 라우팅 제외 (`__sentry-test` 실패 케이스, `sentry-test` 로 수정).
 
