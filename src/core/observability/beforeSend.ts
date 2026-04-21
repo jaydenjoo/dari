@@ -1,4 +1,8 @@
-import type { Breadcrumb, ErrorEvent, EventHint } from "@sentry/core";
+// `@sentry/core` 대신 `@sentry/nextjs` 에서 import — 공식 re-export 경로.
+// `@sentry/core` 를 직접 import 하면 package.json 에 명시 안 된 transitive 의존성이라
+// Vercel strict 빌드에서 TS2307 (Cannot find module). 로컬 pnpm hoist 로는 우연히
+// 해석됐지만 Vercel 에서 빌드 실패 (learnings 2026-04-21). Phase 0-E-3 잠복 시한 폭탄.
+import type { Breadcrumb, ErrorEvent, EventHint } from "@sentry/nextjs";
 import { redactDeep } from "./redact";
 import { REDACTED, SENSITIVE_HEADER_NAMES } from "./sensitiveFields";
 

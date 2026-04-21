@@ -32,6 +32,44 @@
 
 ## 기록
 
+### 2026-04-21 @sentry/core transitive 의존성 직접 import — 로컬 pnpm hoist 로 은폐된 Vercel strict 빌드 실패 = DEPLOYMENT_NOT_FOUND 실제 원인 (운영 지식 / 설계 결정)
+
+**증상**: Vercel 배포 접속 시 `DEPLOYMENT_NOT_FOUND` 응답. 프로젝트 존재 여부 / Dashboard 레벨 이슈 등 여러 가설을 세웠으나, Jayden 이 **실제 Vercel 빌드 로그 전문** 을 제공한 뒤에야 진짜 원인 확인:
+
+```
+./src/core/observability/beforeSend.ts:1:56
+Type error: Cannot find module '@sentry/core' or its corresponding type declarations.
+> 1 | import type { Breadcrumb, ErrorEvent, EventHint } from "@sentry/core";
+Next.js build worker exited with code: 1
+```
+
+Phase 0-E-3 (Sentry 도입) 부터 잠복. **로컬 pnpm typecheck + pnpm build + vitest 모두 clean** 이라 PROGRESS.md 에 "빌드 14 routes 녹색" 반복 기록. 독립 리뷰 2 에이전트(code + security) 도 "코드/설정 단서 없음" 결론 — 리뷰어가 정확했다(코드 버그가 아님). 이 이슈는 **인프라 계층**(의존성 선언 + 환경 해석 차이) 문제.
+
+**원인**:
+
+1. `beforeSend.ts` + `beforeSend.test.ts` 가 `@sentry/core` 를 직접 type import. 그러나 `package.json` 에는 `@sentry/nextjs` 만 선언, `@sentry/core` 는 직접 의존성 아님 (`pnpm ls @sentry/core` 결과 없음).
+2. `@sentry/core` 는 `@sentry/nextjs` 의 **transitive 의존성** — `pnpm-lock.yaml` 에 10.49.0 으로 pinned 되어 물리적으로 `node_modules` 어딘가 존재.
+3. **로컬 pnpm 해석**: TypeScript module resolution 이 hoist 된 `node_modules/.pnpm/@sentry+core@10.49.0/.../build/types/index.d.ts` 를 우연히 찾아냄 → typecheck 통과 → "local OK" 착각.
+4. **Vercel pnpm strict / 일부 isolation**: 선언되지 않은 transitive 는 resolution 실패. `Next.js build worker` 의 TypeScript 단계에서 TS2307 → `Command "pnpm run build" exited with 1` → **빌드 실패 → 배포 URL 미생성 → 접속 시 DEPLOYMENT_NOT_FOUND**.
+5. `DEPLOYMENT_NOT_FOUND` 는 Vercel **플랫폼 레벨 응답** (=이 경로에 연결된 배포가 존재 안 함). 빌드 실패 에러 문자열과 달라서 "프로젝트 미생성" 가설을 먼저 세우기 쉬움 → 가설 드리프트.
+
+**해결**:
+
+1. `beforeSend.ts` + `beforeSend.test.ts` import 경로 `@sentry/core` → `@sentry/nextjs` 로 변경 — 공식 re-export 경로, `package.json` 에 이미 있는 의존성. 2 파일 2 라인 수정.
+2. 로컬 재현: `pnpm typecheck` (0 errors) + `pnpm vitest run beforeSend.test.ts` (13/13) + `pnpm build` (14 routes clean).
+3. 커밋 + push → Vercel 자동 재배포 트리거.
+
+**규칙** ⭐:
+
+- **TypeScript import 는 반드시 `package.json` 직접 의존성만** — transitive (`pnpm-lock.yaml` 만 존재, `dependencies`/`devDependencies` 부재) 를 import 하면 로컬에선 우연히 해석돼도 strict 환경(Vercel / CI / Docker) 에서 실패. ESLint `import/no-extraneous-dependencies` 룰로 사전 차단 추천. 최소한 ADR 또는 코드 컨벤션에 "외부 타입은 `@sentry/nextjs`/`@supabase/supabase-js` 같은 **최상위 wrapper** 에서만 import" 명시.
+- **로컬 `pnpm build` 성공 ≠ Vercel 배포 성공** — pnpm 의 `node_modules` hoist 동작이 로컬/원격 환경에서 미묘하게 다를 수 있음. 특히 macOS 와 Linux, pnpm 버전, `.npmrc` 설정 차이. **CI 에 `pnpm install --frozen-lockfile && pnpm build` 돌려 매 PR 재현성 확보** (현재 CI 는 `npm ci` 라 이 경로 검증 안 됨 → CI 현대화 Backlog 승격).
+- **`DEPLOYMENT_NOT_FOUND` 는 "배포 자체 부재" 신호** — 프로젝트 존재 + 도메인 연결 + 최근 빌드 **실패** 조합에서 나타나는 대표 패턴. Vercel Dashboard Deployments 탭의 **실제 빌드 로그** 가 유일한 정확 진단. "프로젝트 미생성" 으로 좁혀선 안 됨. `phase-1-release-checklist.md` 의 Stage 1 체크리스트에 "첫 Vercel 빌드 녹색 확인" 을 §4-6 smoke test 전 선결 조건으로 추가 필요.
+- **외부 빌드 서비스 진단 순서** = (1) 빌드 로그 **전문 확보 — 마지막 라인만 아님** → (2) 실패 스택 트레이스 라인 파악 → (3) 로컬에서 동일 실패 재현 시도 → (4) 재현 안 되면 "환경 drift" 의심 → (5) 수정. 로그 없이 유추는 시간 소모, **로그 요청이 최우선**. 이번 세션에서도 Jayden 이 로그 붙여준 이후 2분 내에 정확한 원인 규명.
+- **독립 리뷰의 한계 인지** — code-reviewer + security-reviewer 는 "정적 코드/패턴" 을 본다. **의존성 선언 매칭 + 로컬/원격 환경 차이** 같은 인프라 계층 이슈는 리뷰로 못 잡음. 리뷰 Ship 결정이 "문제 없음" 이라고 해서 배포 성공을 보장하지 않는다. **Deployment Verification** (실 배포 상태 확인) 을 별도 검증 축으로 추가 — 이번 세션은 리뷰 직후 실배포 재시도가 원인 규명 트리거였음.
+- **Phase 전환 시 Vercel 실배포 성공 확인 = MUST** — `phase-1-release-checklist.md` §6 "Stage 1 Go/No-Go 기준" 이 로컬 검증 + Supabase migration 에 치중. "Vercel prod 첫 배포 녹색 확인" 이 빠져 있어 Phase 1 완결 판정 = "실제 배포 가능" 을 담보 못 함. 체크리스트 갱신 이월.
+
+---
+
 ### 2026-04-21 proxy matcher 확장자 제외는 "향후 동적 JS 라우트 추가 위험" 을 동반 — 주석 경고만으로 부족, learnings + 체크리스트 양쪽 명문화 필요 (설계 결정)
 
 **증상**: Task A-3 에서 `src/proxy.ts` matcher 에 `js|css|map|woff|woff2|ttf|eot` 공개 확장자 추가(cross-origin widget.js 로드 버그 수정) 후, 독립 리뷰 **2 에이전트 동일 지적** (code LOW-1 + security LOW-1): "향후 `/config.js` 같은 **동적 JS API 라우트** 추가 시 matcher 가 정적 파일로 오인해 인증 우회 발생 가능". 즉각 위험은 없으나 회귀 위험 명시.
