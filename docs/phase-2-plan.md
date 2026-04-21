@@ -31,27 +31,32 @@
 
 PRD §7 Phase 2 원안 + Backlog(운영 품질) + 미완(위젯) 을 통합해 4개 Epic 으로 재정리.
 
-### Epic A — 🔴 위젯 런타임 (PRD Task 1-4 이월)
+### Epic A — 🔴 위젯 런타임 — 배포 + 스트리밍 전환
 
-**목표**: 사이트에 `<script src="/widget.js" data-bot-slug="..."></script>` 1줄만 넣으면 챗봇이 뜨는 런타임.
+> **현황 재조사 결과 (Task A-1, 2026-04-21)**: Phase 1 에서 위젯 런타임은 **거의 다 구현되어 있음**. Epic A 의 실체는 "빈 스텁 실구현" 이 아니라 **"실 CDN 배포 + smoke test + 스트리밍 전환"**.
 
-**범위**:
+**Phase 1 완성 상태 (이미 구현)**:
 
-- `src/widget/widget.ts` (현재 42.59% 커버, 실질 빈 스텁) 실구현
-- CORS + `allowedDomains` 검증 (`origin-check.ts` 활용)
-- 플로팅 버튼 + 채팅 패널 UI (Config.appearance 기반 테마)
-- 스트리밍 응답 표시 + 세션 관리 (visitor_id 쿠키)
-- `/api/chat/[botId]` 엔드포인트 프로덕션 대응 (rate limit, CORS)
-- iframe sandbox vs inline — 보안 결정
-- CDN 배포 (Vercel Edge or Cloudflare)
+- `src/widget/` **9 모듈** — widget.ts / chat.ts / ui.ts / config.ts / widget-config-client.ts / index.ts + 테스트 3건
+- Shadow DOM **closed mode** + CSS 격리 + 디자인 시스템 v2 raw token 이식
+- 접근성 (`role="dialog"` / `aria-modal` / `role="log"` / `aria-live="polite"` / focus 관리)
+- 모바일 반응형 (`@media max-width 480px` — 풀스크린 패널)
+- `scripts/build-widget.mjs` — esbuild IIFE es2020 minify. gzip **15KB 목표**. sourcemap prod OFF (sec H-2).
+- `/api/chat/[botId]` **6중 보안** (bot 조회 / Origin 검증 / rate limit / 소유권 재검증 / 응답 masking / enumeration 방지)
+- `/api/widget-config/[botId]` 화이트리스트 응답 + **5분 CDN 캐싱**
+- `origin-check.ts` 프로덕션급 (와일드카드 `https://*.example.com`, TLD 단독 차단, IP-style 차단, trailing dot 정규화, IDN punycode)
+- Prompt Injection 1차 방어 (`sanitizeUserInput` 제어문자 + 방향 문자 제거)
 
-**예상 규모**: 2~3주 (4~5 Task). 🔴 — Phase 1 "출시 가능한 MVP" 의 **마지막 퍼즐 조각**.
+**Phase 2 에서 남은 것**:
 
-**선결 조건**:
+- 🎯 **A-2 실 CDN 배포**: `dari.kr` 도메인 Vercel 연결 + `public/widget.js` 프로덕션 배포 + `/bots/[slug]` 설치 스니펫 URL 갱신
+- 🎯 **A-3 Dairect smoke test**: `dairect.kr` 등 실 사이트에 스크립트 삽입 + 데스크톱/모바일 수동 QA
+- ⚙️ **A-4 스트리밍 전환**: JSON 단일 → **Vercel AI SDK Data Stream Protocol** (결정 #5 확정)
+- ✨ **A-5 Dairect 4개 배포**: Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom Config 작성 + embed
 
-- CORS allowedDomains 정책 (이미 `origin-check.ts` 있음)
-- widget.js CDN 경로 결정 (`dari.kr/widget.js` vs `cdn.dairect.kr/widget.js`)
-- `SUPABASE_SERVICE_ROLE_KEY` 없이 anon key 로 작동하는 chat API 검증
+**예상 규모**: **3~5일** (Phase 1 구현 선행분 반영. 기존 "2~3주" 추정치 대폭 단축).
+
+**선결 조건**: 본 문서 §7 결정 6건 확정 (Task A-1 에서 완료).
 
 ---
 
@@ -156,44 +161,47 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
 
 ---
 
-## 5. Epic A 진입 시 Task 분해 초안 (권장안 채택 시)
+## 5. Epic A Task 분해 (결정 6건 확정 반영)
 
-> 본 절은 Jayden 이 Epic A 를 승인하면 바로 착수할 수 있도록 **Task 레벨 뼈대** 만 제시. 각 Task 별 상세 Plan 은 진입 시점에 별도 작성.
+> **현실화 기준**: Phase 1 이 이미 위젯 구현 90% 완성 상태. Epic A 는 **배포 + smoke test + 스트리밍 전환**이 핵심.
 
-### Epic A: 위젯 런타임
+### Epic A: 위젯 런타임 — 배포 + 스트리밍 전환
 
-- **Task A-1: 현황 탐색 + 설계 결정** (2h)
-  - `src/widget/widget.ts` 현재 스텁 읽기
-  - CDN 경로 결정: `dari.kr/widget.js` vs `dairect.kr/widget.js`
-  - iframe sandbox vs inline 선택 (보안 vs UX)
-  - Config.appearance 필드 최종 확인
-  - ADR-009 (widget architecture) 초안
+- **Task A-1: ADR-009 + 현황 감사** (2~3h) ✅ **완료** (2026-04-21)
+  - Phase 1 위젯 코드 전수 탐색 (9 모듈 + API 2종 + origin-check)
+  - 결정 6건 최신 정보 재검토 (CHIPS Safari 18.4 / AI SDK 6 / esbuild IIFE / Shadow DOM 2026)
+  - ADR-009 (위젯 아키텍처) 작성
+  - 본 문서 §2 / §5 / §7 현실화
 
-- **Task A-2: `/api/chat/[botId]` 프로덕션 대응** (1일)
-  - CORS origin 검증 (`allowedDomains` 매칭)
-  - rate limit (bot 단위 + visitor 단위)
-  - 비로그인 방문자 세션 (visitor_id 쿠키 + 익명 conversation 생성)
-  - anon key 로 작동 검증 (service_role 쓰지 않도록)
+- **Task A-2: `dari.kr` 배포 + 설치 스니펫 갱신** (0.5~1일)
+  - Vercel 도메인 연결 (`dari.kr` DNS — Jayden 수동)
+  - `public/widget.js` 프로덕션 빌드 체인 검증
+  - `/bots/[slug]` 설치 스니펫 URL 갱신 (`https://dari.kr/widget.js`)
+  - Cache-Control 전략 결정 (immutable hash vs latest short-TTL) — ADR-009 Open Q #1
+  - HTTPS 인증서 자동 발급 확인
 
-- **Task A-3: widget.js 런타임 구현** (2~3일)
-  - Vanilla JS + esbuild (기존 `scripts/build-widget.mjs` 확장)
-  - 플로팅 버튼 + 채팅 패널 (shadow DOM 격리)
-  - Config.appearance 테마 주입 (CSS variable)
-  - 스트리밍 응답 표시 (SSE or fetch-stream)
-  - 세션 관리 (localStorage + 쿠키)
+- **Task A-3: Dairect smoke test (dairect.kr 1개 사이트)** (0.5일)
+  - `dairect.kr` 에 스크립트 삽입 (Task A-2 의 실증)
+  - 데스크톱 (Chrome / Safari / Firefox) + 모바일 (iOS Safari / Android Chrome) QA
+  - 발견 버그 수정 + 회귀 테스트 추가
+  - CSP 호환성 실측 (ADR-009 Open Q #4)
 
-- **Task A-4: 보안 검증** (1일)
-  - XSS 방어 (content escape)
-  - CSP 호환 검증 (nonce / unsafe-inline 금지)
-  - iframe sandbox 옵션 테스트
-  - 독립 리뷰 (code + security)
+- **Task A-4: 스트리밍 전환 (Vercel AI SDK Data Stream Protocol)** (1~2일)
+  - `@ai-sdk/anthropic` + `ai` 의존성 추가
+  - `/api/chat/[botId]` → `streamText()` + `toUIMessageStreamResponse()` (Anthropic 네이티브 `messages.stream()` 은 SDK 내부에서 호출)
+  - `widget/chat.ts` → vanilla fetch + ReadableStream 으로 SSE 포맷 파싱
+  - 에러 코드 white-list 유지 (stream 중간 drop / parse_error)
+  - 회귀 테스트 (network_error / 중간 disconnect / invalid JSON chunk)
 
-- **Task A-5: CDN 배포 + smoke test** (0.5일)
-  - Vercel Edge (또는 Cloudflare) CDN 설정
-  - `/bots/[slug]` 스니펫 URL 갱신
-  - Dairect 1개 사이트에 설치 → 실동작 확인
+- **Task A-5: Dairect 4개 추가 배포** (0.5~1일)
+  - Chatsio 고객 지원 봇 — Config 작성 (support 모드, URL 지식 소스)
+  - OnboardKit FAQ 봇 — Config 작성 (faq 모드, file 지식 소스)
+  - SellKit 상품 안내 — Config 작성 (sales 모드)
+  - InterviewGenie 코칭 테스트 — Config 작성 (coaching 모드)
+  - PayLoom 개발자 문서 — Config 작성 (faq 모드)
+  - 각 봇 smoke test + PRD Task 1-6 완결
 
-**Epic A 예상 총 소요**: 5~7일. Phase 1 "MVP 출시 가능" 완결 시점.
+**Epic A 예상 총 소요**: **3~5일** (Task A-1 완료 기준 잔여 추정).
 
 ---
 
@@ -286,49 +294,65 @@ A 를 바로 가면 CORS/CDN 등 새 영역 리스크 동시 폭발. B 를 먼�
 
 ---
 
-### 7-5. 결정 #5 — 스트리밍 전송 방식
+### 7-5. 결정 #5 — 스트리밍 전송 방식 (최신 정보 재검토 반영)
 
-| 경로                          | 장점                                                           | 단점                                                                                                    | 구현 |
-| ----------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---- |
-| **a. SSE (`EventSource`)**    | 브라우저 네이티브 auto-reconnect. `Last-Event-ID` 재연결 표준  | **GET 전용** — POST body 전송 불가 → 선행 POST + 후속 GET SSE 2단계 필요. 쿼리스트링 매개변수 길이 제약 | 중   |
-| **b. fetch + ReadableStream** | POST body 로 메시지 직전송. Anthropic SDK + Vercel AI SDK 공식 | auto-reconnect 없음. 중간 drop 시 수동 retry 로직                                                       | 낮음 |
+> **원래 이분법 "SSE vs fetch-stream" 은 outdated**. 2026 표준은 **Vercel AI SDK Data Stream Protocol** — SSE 포맷을 쓰지만 POST body 로 메시지 전송 (기존 SSE 의 GET 한계 해결). `x-vercel-ai-ui-message-stream: v1` 헤더로 CORS 경계 표준화. 미래 `@dari/react` 의 `useChat` 재사용 가능.
 
-**권장**: **b. fetch-stream** — Anthropic SDK 공식 패턴. POST body 자연스러움. 연결 drop 은 사용자 메시지 재전송으로 복구 (대화 UX 허용).
+| 경로                                             | 장점                                                                                                                                                                            | 단점                                                                                                        | 구현 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---- |
+| **a. SSE (`EventSource`)**                       | 브라우저 네이티브 auto-reconnect. `Last-Event-ID` 재연결 표준                                                                                                                   | **GET 전용** — POST body 전송 불가 → 선행 POST + 후속 GET SSE 2단계 필요. 쿼리스트링 매개변수 길이 제약     | 중   |
+| **b. fetch + ReadableStream 직접**               | POST body 자연. 최소 의존성                                                                                                                                                     | 자체 포맷 정의 필요 → 미래 `@dari/react` + `useChat` 재호환 불가. Tool call / reasoning 블록 확장 시 재설계 | 낮음 |
+| **c. Vercel AI SDK Data Stream Protocol** (신규) | 2026 표준. POST body + SSE 혼합. `useChat` 호환. 내부에서 Anthropic `messages.stream()` 사용. Tool call / reasoning block 확장성. `x-vercel-ai-ui-message-stream: v1` CORS 표준 | `@ai-sdk/anthropic` + `ai` 의존성 2개 추가                                                                  | 중   |
+
+**권장**: **c. Vercel AI SDK Data Stream Protocol** — 2026 표준 + 미래 `@dari/react` 호환성 + Tool call 확장성.
+
+**현재 구현은 JSON 단일 응답** (Phase 1 Task 1-6-a — `{conversationId, message}`). 전환 시 서버(`/api/chat/[botId]`) + 위젯(`widget/chat.ts`) 둘 다 수정 필요. Epic A 후순위 **Task A-4** 로 분리 — 배포(A-2) + smoke test(A-3) 가 우선.
 
 - [ ] a. SSE
-- [ ] b. fetch-stream (권장)
+- [ ] b. fetch-stream 직접
+- [x] **c. Vercel AI SDK Data Stream Protocol (권장, 확정 2026-04-21)**
 
 ---
 
-### 7-6. 결정 #6 — 익명 방문자 세션 관리
+### 7-6. 결정 #6 — 익명 방문자 세션 관리 (현황 재고찰)
 
-| 경로                                | 장점                                                                         | 단점                                                                      | 보안   |
-| ----------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------ |
-| **a. localStorage + HTTPOnly 쿠키** | 대화 히스토리 즉시 복원 (UX 강함). `visitor_id` 쿠키는 HTTPOnly 로 서버 검증 | XSS 시 히스토리 노출 (결제·신분 정보 없음이라 영향 제한). Incognito 리셋  | ⭐⭐   |
-| **b. HTTPOnly 쿠키만**              | XSS 완전 방어. 서버 주도 세션                                                | 페이지 로드마다 히스토리 서버 fetch (라운드트립 1회). Incognito 리셋 동일 | ⭐⭐⭐ |
+> **Phase 1 현재 구현**: 위젯은 `localStorage.dari.widget.cid.<botId>` 에 `conversationId` 저장. 서버 `/api/chat/[botId]` 는 첫 요청 시 `visitor_id` UUID 를 발급해 DB 에 저장하고 `conversationId` 를 응답으로 반환. **쿠키 미사용**.
 
-**권장**: **a. localStorage + HTTPOnly 쿠키 조합** — Dari 대화는 익명 (🟡 등급). `visitor_id` 는 **HTTPOnly + Secure + SameSite=None + Partitioned** 쿠키 필수 (cross-site embed 이므로 CHIPS 필요). 대화 히스토리는 client 측 UX 최적화용으로만 localStorage.
+**원래 권장 "localStorage + HTTPOnly Partitioned 쿠키" 재고찰 결과 — 쿠키 도입 보류**:
 
-> **Partitioned (CHIPS)**: widget 이 고객사 사이트에 embed 되면 쿠키가 "Dari 서버" 로 가는 cross-site 통신. Chrome/Firefox 지원 / Safari 는 ITP 로 부분 대체 (first-party 쿠키 전환 fallback 설계 필요).
+- 쿠키 도입 시 **CORS `credentials: true`** 가 필요한데 `origin-check.ts` 가 명시적으로 금지:
+  - > "`Access-Control-Allow-Credentials: true` 금지 — 위젯은 anon 전제이며 credentials 허용 시 **allow-all (빈 배열) + 동적 Allow-Origin 조합이 쿠키 탈취 벡터로 전환**"
+- `allowedDomains` 빈 배열 allow-all 정책은 MVP UX 의 핵심 — 쿠키 도입 시 포기해야 함
+- CHIPS Partitioned 도입 시 Safari <18.4 ITP 플래그 fallback 로직 추가 필요
+- **대화 UX 관점**: `conversationId` 는 랜덤 UUID — XSS 로 탈취해도 `bot_id` 소유권 재검증(`route.ts` L264)으로 타인 대화 훔치기 불가. **쿠키 도입의 보안 이득이 미미**
 
-- [ ] a. localStorage + HTTPOnly 쿠키 (권장)
-- [ ] b. HTTPOnly 쿠키만
+| 경로                                       | Phase 1 현 구현 | 쿠키 도입 시 비용                                                                     | 세션 UX 이득 |
+| ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------- | ------------ |
+| **a. localStorage + 서버 UUID** (**현행**) | ✅ 이미 동작    | —                                                                                     | 기본         |
+| **b. + HTTPOnly Partitioned 쿠키**         | —               | `credentials: true` 필요 → `allowedDomains` allow-all 포기 + CHIPS fallback 로직 추가 | 미미         |
+
+**권장**: **a. 현행 유지** — 쿠키 도입 보류. Phase 3 (멀티테넌트 + 인증) 시점에 사용자 로그인 기반 세션 설계와 함께 재평가.
+
+> **변경점 근거**: Task A-1 현황 감사에서 `origin-check.ts` 의 "credentials 금지" 원칙이 MVP `allowedDomains` allow-all 정책과 불가분 결합된 것을 확인 → 원래 권장 "쿠키 추가" 는 이 보안 계층을 깨뜨림. 현 구현이 최적.
+
+- [x] **a. localStorage + 서버 UUID (현행 유지, 확정 2026-04-21)**
+- [ ] b. + HTTPOnly Partitioned 쿠키
 
 ---
 
-### 7-7. 결정 요약표 (Jayden 확정 후 이곳에 기록)
+### 7-7. 결정 확정표 (2026-04-21)
 
-| #   | 결정          | Jayden 선택 | 확정일 |
-| --- | ------------- | ----------- | ------ |
-| 0   | Epic A 진입   |             |        |
-| 1   | CDN 호스트    |             |        |
-| 2   | 스타일 격리   |             |        |
-| 3   | A/B 병렬      |             |        |
-| 4   | 빌드 툴       |             |        |
-| 5   | 스트리밍 방식 |             |        |
-| 6   | 세션 관리     |             |        |
+| #   | 결정          | Jayden 선택                                                       | 확정일     |
+| --- | ------------- | ----------------------------------------------------------------- | ---------- |
+| 0   | Epic A 진입   | ✅ 진행 (5~3일 — Phase 1 구현 선행분 반영 단축)                   | 2026-04-21 |
+| 1   | CDN 호스트    | **a. `dari.kr`** — 독립 제품 브랜드                               | 2026-04-21 |
+| 2   | 스타일 격리   | **a. Shadow DOM (closed mode)** — Phase 1 구현 유지               | 2026-04-21 |
+| 3   | A/B 병렬      | **a. 순차** (A → B)                                               | 2026-04-21 |
+| 4   | 빌드 툴       | **a. esbuild 확장** — 이미 동작 중 (`scripts/build-widget.mjs`)   | 2026-04-21 |
+| 5   | 스트리밍 방식 | **c. Vercel AI SDK Data Stream Protocol** — 2026 표준 (권장 변경) | 2026-04-21 |
+| 6   | 세션 관리     | **a. localStorage + 서버 UUID** — 현행 유지 (쿠키 도입 보류)      | 2026-04-21 |
 
-> **다음 단계**: Jayden 이 위 0~6 번 체크박스 선택 → Task A-1 (설계 + ADR-009 widget architecture) 착수. ADR 에 본 결정 7건 레퍼런스.
+> **다음 단계**: Task A-2 (`dari.kr` 배포 + 설치 스니펫 갱신) — Plan 은 다음 세션에 별도 작성. ADR-009 에 본 결정 7건 전체 근거 기록.
 
 ---
 

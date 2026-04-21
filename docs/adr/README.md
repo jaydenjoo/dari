@@ -56,18 +56,21 @@
 
 ## 인덱스
 
-| #                                          | 제목                                         | 상태     | 작성일     |
-| ------------------------------------------ | -------------------------------------------- | -------- | ---------- |
-| [001](./ADR-001-nextjs-16-app-router.md)   | Next.js 16.2 + App Router + Turbopack        | Accepted | 2026-04-17 |
-| [002](./ADR-002-supabase-ssr.md)           | Drizzle 제외, @supabase/ssr 일원화           | Accepted | 2026-04-17 |
-| [003](./ADR-003-config-jsonb.md)           | Config jsonb 저장 + types 수동 유지          | Accepted | 2026-04-17 |
-| [004](./ADR-004-preact-shadow-dom.md)      | Widget: Preact + Shadow DOM                  | Planned  | -          |
-| [005](./ADR-005-plugin-interfaces.md)      | Plugin 인터페이스 설계                       | Planned  | -          |
-| [006](./ADR-006-observability-stack.md)    | 관찰성 스택: Pino + Sentry + sensitiveFields | Accepted | 2026-04-17 |
-| [007](./ADR-007-testing-strategy.md)       | 테스트 전략: Vitest + Playwright 보류        | Accepted | 2026-04-17 |
-| [008](./ADR-008-environment-separation.md) | 환경 분리: 2환경 Lean + Vercel Preview       | Accepted | 2026-04-17 |
+| #                                          | 제목                                         | 상태                              | 작성일     |
+| ------------------------------------------ | -------------------------------------------- | --------------------------------- | ---------- |
+| [001](./ADR-001-nextjs-16-app-router.md)   | Next.js 16.2 + App Router + Turbopack        | Accepted                          | 2026-04-17 |
+| [002](./ADR-002-supabase-ssr.md)           | Drizzle 제외, @supabase/ssr 일원화           | Accepted                          | 2026-04-17 |
+| [003](./ADR-003-config-jsonb.md)           | Config jsonb 저장 + types 수동 유지          | Accepted                          | 2026-04-17 |
+| 004                                        | Widget: Preact + Shadow DOM                  | ~~Planned~~ Superseded by ADR-009 | -          |
+| [005](./ADR-005-plugin-interfaces.md)      | Plugin 인터페이스 설계                       | Planned                           | -          |
+| [006](./ADR-006-observability-stack.md)    | 관찰성 스택: Pino + Sentry + sensitiveFields | Accepted                          | 2026-04-17 |
+| [007](./ADR-007-testing-strategy.md)       | 테스트 전략: Vitest + Playwright 보류        | Accepted                          | 2026-04-17 |
+| [008](./ADR-008-environment-separation.md) | 환경 분리: 2환경 Lean + Vercel Preview       | Accepted                          | 2026-04-17 |
+| [009](./ADR-009-widget-architecture.md)    | 위젯 아키텍처: Shadow DOM + dari.kr + AI SDK | Accepted                          | 2026-04-21 |
 
-> **Planned**: 해당 Epic 진행 시 작성 예정 (004 = Phase 1 위젯, 005 = Epic 0-G 플러그인)
+> **Planned**: 해당 Epic 진행 시 작성 예정 (005 = Epic 0-G 플러그인)
+>
+> **ADR-004 (Preact)**: Phase 1 실 구현은 Vanilla JS + Shadow DOM 으로 진행되어 Preact 채택 없음 → ADR-009 가 실제 결정을 문서화. 파일 미작성 상태로 대체됨.
 >
 > **연관 문서**:
 >
