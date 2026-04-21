@@ -1,15 +1,23 @@
 /**
  * Chat API 클라이언트 — 위젯 번들 전용.
  *
- * 서버 계약 (src/app/api/chat/[botId]/route.ts):
+ * 서버 계약 (Task A-4, Vercel AI SDK Data Stream Protocol):
  *   POST /api/chat/{botSlug}
  *   요청:  { message: string (1-4000), conversationId?: uuid }
- *   성공:  200 { conversationId: string, message: string }
- *   실패:  4xx/5xx { error: string, code: ErrorCode }
+ *   성공:  200 + `x-conversation-id` 응답 헤더 + UIMessageStream SSE body
+ *          (chunk 별 `text-delta` 이벤트 → 최종 전체 텍스트는 누적)
+ *   실패:  4xx/5xx { error: string, code: ErrorCode }  (JSON 단일 응답 유지)
  *
  * 에러 코드는 서버와 클라이언트가 공유하는 화이트리스트 union.
- * 서버가 알 수 없는 code 를 반환하거나 body 가 누락되면 internal_error 로 정규화 (sec M-6/A09).
+ * 서버가 알 수 없는 code 를 반환하거나 body 가 누락되면 internal_error 로 정규화 (sec M-6).
+ * 스트림 중 에러 이벤트의 errorText 도 동일 화이트리스트로 normalize.
  */
+
+import {
+  consumeUIMessageStream,
+  StreamError,
+  type ConsumeStreamOptions,
+} from "./stream-parser";
 
 export type WidgetErrorCode =
   | "network_error"
@@ -39,6 +47,8 @@ export interface SendMessageInput {
   readonly message: string;
   readonly conversationId?: string;
   readonly signal?: AbortSignal;
+  /** 스트림 chunk 도착 시마다 호출 — UI 에 점진 렌더용. */
+  readonly onChunk?: ConsumeStreamOptions["onChunk"];
 }
 
 export type SendMessageResult =
@@ -68,9 +78,9 @@ export async function sendChatMessage(
     return { ok: false, code: "network_error", status: 0 };
   }
 
-  const body = await safeJson(response);
-
+  // 에러 응답은 스트림이 아니라 JSON 단일 — 기존 경로 유지
   if (!response.ok) {
+    const body = await safeJson(response);
     return {
       ok: false,
       code: extractKnownCode(body) ?? "internal_error",
@@ -78,15 +88,32 @@ export async function sendChatMessage(
     };
   }
 
-  if (!isSuccessBody(body)) {
+  // 성공 경로: UIMessageStream 소비
+  const conversationId = response.headers.get("x-conversation-id");
+  if (!conversationId) {
+    // 서버 계약 위반 — 헤더 없이 200 오는 경우. 정적 에러 코드로 정규화.
+    return { ok: false, code: "parse_error", status: response.status };
+  }
+  if (!response.body) {
     return { ok: false, code: "parse_error", status: response.status };
   }
 
-  return {
-    ok: true,
-    conversationId: body.conversationId,
-    message: body.message,
-  };
+  try {
+    const message = await consumeUIMessageStream(response.body, {
+      onChunk: input.onChunk,
+      signal: input.signal,
+    });
+    return { ok: true, conversationId, message };
+  } catch (err) {
+    if (err instanceof StreamError) {
+      return { ok: false, code: err.code, status: response.status };
+    }
+    // fetch 이미 성공한 뒤 중간 중단 — AbortError 는 caller signal.aborted 로 구분
+    if (input.signal?.aborted) {
+      return { ok: false, code: "network_error", status: response.status };
+    }
+    return { ok: false, code: "parse_error", status: response.status };
+  }
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -105,14 +132,6 @@ function extractKnownCode(body: unknown): WidgetErrorCode | null {
   return (KNOWN_ERROR_CODES as ReadonlySet<string>).has(code)
     ? (code as WidgetErrorCode)
     : null;
-}
-
-function isSuccessBody(
-  body: unknown,
-): body is { conversationId: string; message: string } {
-  if (!body || typeof body !== "object") return false;
-  const b = body as Record<string, unknown>;
-  return typeof b.conversationId === "string" && typeof b.message === "string";
 }
 
 export const ERROR_LABELS: Record<WidgetErrorCode, string> = {

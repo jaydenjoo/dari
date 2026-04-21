@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { type NextRequest, NextResponse } from "next/server";
+import { streamText } from "ai";
+import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getAnthropicClient } from "@/core/ai/anthropic-client";
+import { getAnthropicProvider } from "@/core/ai/anthropic-provider";
 import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createAdminClient } from "@/core/db/client-admin";
-import type { KnowledgeChunkMatch } from "@/core/db/types";
 import {
   augmentSystemPromptWithKnowledge,
   retrieveRelevantChunks,
@@ -20,6 +20,14 @@ import {
   matchAllowedDomain,
 } from "@/core/security/origin-check";
 
+// Node runtime 명시 — Supabase admin client 이 @supabase/ssr + pg 드라이버 경로
+// (Edge 런타임 비호환 가능) 를 경유할 수 있어 안정성 우선. streamText 는 양쪽 호환.
+export const runtime = "nodejs";
+
+// streamText + RAG + Anthropic 호출 latency 상한. Vercel Hobby 10s / Pro 60s 기본.
+// 응답 생성 중 타임아웃 시 AI SDK 가 stream 을 닫고 클라는 network_error 수신.
+export const maxDuration = 30;
+
 // Chat API 레이어의 추가 하한. bot config 의 maxTokens 는 소유자 설정이지만,
 // allowedDomains 빈 배열(=allow-all) + 공개 노출 상태에서 100 req/h × 8192 = 819K 토큰/h/봇
 // 까지 비용 노출될 수 있어 레이어에서 한 번 더 clamp. Phase 2 과금 모델 설계 시 재조정. (security M-3)
@@ -32,18 +40,22 @@ const MAX_MESSAGES_PER_CONVERSATION = 200;
 /**
  * 위젯 Chat API — anon origin 접근 허용 엔드포인트.
  *
- * Phase 1 구현 (Task 1-6-a + 1-6-c):
- *   - 응답 방식: JSON 단일 (스트리밍은 1-6-d 또는 Phase 2)
- *   - RAG: Task 1-6-c 로 `match_knowledge_chunks` 연결 — 실패 시 빈 청크로 fallback
+ * Phase 2 Epic A Task A-4:
+ *   - 응답 방식: Vercel AI SDK Data Stream Protocol (UIMessageStream SSE)
+ *   - 모델 호출: `streamText()` + `@ai-sdk/anthropic` provider
+ *   - RAG: `match_knowledge_chunks` 청크 → XML 태그로 system 프롬프트 증강 (실패 시 빈 배열 fallback)
+ *   - conversationId: 응답 `x-conversation-id` 헤더로 전달 (클라가 헤더에서 읽음)
+ *   - assistant 저장: `onFinish({ text })` 콜백에서 DB insert
  *   - Preflight OPTIONS 분기 지원
  *
- * 보안 레이어 (6중):
+ * 보안 레이어 (6중, streamText 전환 후에도 유지):
  *   1. bot 조회 — service_role 경유 + `status='active'` 필터 (RLS 우회 안전, soft-delete 차단)
- *   2. Origin 검증 — `matchAllowedDomain` (Task 1-0-b 유틸 첫 실증)
+ *   2. Origin 검증 — `matchAllowedDomain` (Task 1-0-b 유틸)
  *   3. Rate limit — `${botId}:${ip}` 봇당 IP 100/h (Task 1-0-a factory 재사용)
  *   4. conversationId 소유권 — `conversation.bot_id === bot.id` 불일치 시 재생성
- *   5. 응답에 systemPrompt 등 config 원문 미노출 — assistant text 만 반환
+ *   5. 응답에 systemPrompt/config 원문 미노출 — `onError` 로 에러 상세도 차단
  *   6. 에러 메시지 enumeration 방지 — 봇 부존재 / RLS 차단 / 포맷 오류 모두 일반 메시지
+ *   7. max_tokens clamp — `CHAT_MAX_OUTPUT_TOKENS` 로 소유자 설정값 상한 강제
  */
 
 const requestSchema = z.object({
@@ -128,7 +140,7 @@ async function loadActiveBot(botSlug: string): Promise<BotContext | null> {
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ botId: string }> },
-): Promise<NextResponse> {
+): Promise<Response> {
   const { botId: botSlug } = await params;
   const origin = req.headers.get("origin");
   const clientIp = resolveClientIp(req.headers);
@@ -202,32 +214,79 @@ export async function POST(
     "RAG chunks retrieved",
   );
 
-  const assistantText = await callAnthropic(bot, message, chunks);
-  if (assistantText === null) {
-    return jsonError("upstream_error", 502, origin, bot.config.allowedDomains);
-  }
-
-  // assistant 메시지 저장 실패는 사용자에게 에러로 노출하지 않음 (이미 응답 준비됨).
-  // 운영 추적용 logger.error 만.
-  const { error: assistantMsgError } = await admin.from("messages").insert({
-    conversation_id: conversationId,
-    role: "assistant",
-    content: assistantText,
-  });
-  if (assistantMsgError) {
-    logger.error(
-      { err: sanitizeLoggableError(assistantMsgError) },
-      "assistant message insert 실패",
-    );
-  }
-
-  return NextResponse.json(
-    { conversationId, message: assistantText },
-    {
-      status: 200,
-      headers: buildCorsHeaders(origin, bot.config.allowedDomains),
-    },
+  // Chat API 레이어에서 max_tokens clamp — 소유자 설정값과 무관하게 상한 강제 (security M-3)
+  const maxOutputTokens = Math.min(
+    bot.config.ai.maxTokens,
+    CHAT_MAX_OUTPUT_TOKENS,
   );
+  // RAG 청크 비어있으면 원본 systemPrompt 반환 (augment 내부 분기)
+  const system = augmentSystemPromptWithKnowledge(
+    bot.config.ai.systemPrompt,
+    chunks,
+  );
+
+  const result = streamText({
+    model: getAnthropicProvider()(bot.config.ai.model),
+    system,
+    messages: [{ role: "user", content: message }],
+    maxOutputTokens,
+    temperature: bot.config.ai.temperature,
+  });
+
+  // assistant 메시지 DB insert — Vercel 서버리스 lifecycle 보장을 위해 `after()` 사용.
+  // streamText 의 `onFinish` 콜백은 응답 flush 이후 실행이 보장 안 될 수 있어
+  // (Vercel 문서 `waitUntil` 없는 Promise), Next 16 의 `after()` API 로 인프라 레벨 보장.
+  // `result.text` 는 스트림 소비 완료 후 resolve (에러 발생 시 reject → try/catch 로 흡수).
+  // 클라가 스트림 중간에 abort 해도 AI SDK 는 서버 측 파이프를 유지하므로 partial 이라도 저장.
+  // (리뷰 code H-1 / sec M-2 반영)
+  after(async () => {
+    try {
+      const finalText = await result.text;
+      // 새 admin 인스턴스 — 기존 `admin` 이 응답 flush 시점에 이미 HTTP 연결 정리됐을 수 있음
+      // (리뷰 code M-1 반영)
+      const adminForAfter = createAdminClient();
+      const { error: assistantMsgError } = await adminForAfter
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          role: "assistant",
+          content: finalText,
+        });
+      if (assistantMsgError) {
+        logger.error(
+          { err: sanitizeLoggableError(assistantMsgError) },
+          "assistant message insert 실패 (after)",
+        );
+      }
+    } catch (err) {
+      // streamText 가 throw 하거나 Anthropic APIError 등 — stream `onError` 에서도
+      // 이미 logger.error 로 기록됐지만 여기선 after() 콘텍스트 추적용.
+      logger.error(
+        { err: sanitizeLoggableError(err), botId: bot.id },
+        "after() 중 assistant 저장 실패 (stream 에러 경로)",
+      );
+    }
+  });
+
+  return result.toUIMessageStreamResponse({
+    headers: {
+      ...buildCorsHeaders(origin, bot.config.allowedDomains),
+      "x-conversation-id": conversationId,
+      // cross-origin 에서 JS 가 custom 헤더를 읽으려면 필수 (브라우저 CORS 정책)
+      "Access-Control-Expose-Headers": "x-conversation-id",
+    },
+    // Anthropic SDK APIError 등 stream 중 에러는 Authorization 헤더·API 키·쿼리 파편을
+    // message 에 포함할 수 있어, 클라에 내려보내는 에러 payload 는 정적 문자열로 통일.
+    // (security N-7 — 에러 enumeration 방지) logger.error 에서만 sanitize 후 전체 기록.
+    onError: (err) => {
+      logger.error(
+        { err: sanitizeLoggableError(err), botId: bot.id },
+        "stream 중 upstream 에러",
+      );
+      // 클라 파서는 이 문자열을 `upstream_error` 코드로 매핑 (chat.ts 의 화이트리스트)
+      return "upstream_error";
+    },
+  });
 }
 
 /**
@@ -311,50 +370,6 @@ async function resolveConversationId(
     return null;
   }
   return created.id;
-}
-
-/**
- * Anthropic 호출 — 실패는 null 반환 (caller 는 502).
- *
- * RAG (Task 1-6-c): chunks 가 비어있지 않으면 systemPrompt 에 XML 태그로 구조화 주입.
- * `augmentSystemPromptWithKnowledge` 내부에서 content escape + 경계 지시문으로
- * Prompt Injection 1차 방어. 빈 배열이면 원본 systemPrompt 그대로 사용.
- *
- * ContentBlock 은 text / tool_use / thinking 등 union. 우리는 text 만 필요하므로
- * 첫 text 블록을 찾아 반환 (도구/사고 블록은 스킵).
- */
-async function callAnthropic(
-  bot: BotContext,
-  message: string,
-  chunks: readonly KnowledgeChunkMatch[],
-): Promise<string | null> {
-  // Chat API 레이어에서 max_tokens clamp — 소유자 설정값과 무관하게 상한 강제 (security M-3)
-  const maxTokens = Math.min(bot.config.ai.maxTokens, CHAT_MAX_OUTPUT_TOKENS);
-  const system = augmentSystemPromptWithKnowledge(
-    bot.config.ai.systemPrompt,
-    chunks,
-  );
-  try {
-    const completion = await getAnthropicClient().messages.create({
-      model: bot.config.ai.model,
-      max_tokens: maxTokens,
-      temperature: bot.config.ai.temperature,
-      system,
-      messages: [{ role: "user", content: message }],
-    });
-    for (const block of completion.content) {
-      if (block.type === "text") return block.text;
-    }
-    return "";
-  } catch (err) {
-    // Anthropic SDK 의 APIError 는 Authorization 헤더·API 키 값을 message 에 포함할 수 있어
-    // sanitizeLoggableError 로 URL/토큰 마스킹 후 기록 (security M-1 반영).
-    logger.error(
-      { err: sanitizeLoggableError(err), botId: bot.id },
-      "Anthropic 호출 실패",
-    );
-    return null;
-  }
 }
 
 export async function OPTIONS(

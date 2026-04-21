@@ -2,6 +2,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { errorLabelFor, sendChatMessage } from "./chat";
 
+/**
+ * UIMessageStream SSE 응답을 반환하는 Response fixture.
+ * `x-conversation-id` 헤더 + text-delta 이벤트 배열.
+ */
+function makeStreamResponse(
+  events: ReadonlyArray<Record<string, unknown>>,
+  init: { conversationId?: string; status?: number } = {},
+): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const event of events) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+        );
+      }
+      controller.close();
+    },
+  });
+  const headers = new Headers({ "content-type": "text/event-stream" });
+  if (init.conversationId !== undefined) {
+    headers.set("x-conversation-id", init.conversationId);
+  }
+  return new Response(body, { status: init.status ?? 200, headers });
+}
+
 describe("sendChatMessage", () => {
   const fetchSpy = vi.fn();
 
@@ -20,11 +46,15 @@ describe("sendChatMessage", () => {
     message: "hello",
   };
 
-  it("200 응답을 파싱해 ok:true 를 반환한다", async () => {
+  it("UIMessageStream 을 끝까지 소비해 ok:true + 전체 텍스트를 반환한다", async () => {
     fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ conversationId: "conv-1", message: "안녕하세요" }),
-        { status: 200 },
+      makeStreamResponse(
+        [
+          { type: "text-delta", delta: "안녕" },
+          { type: "text-delta", delta: "하세요" },
+          { type: "finish" },
+        ],
+        { conversationId: "conv-1" },
       ),
     );
 
@@ -42,12 +72,33 @@ describe("sendChatMessage", () => {
     expect(JSON.parse(init.body as string)).toEqual({ message: "hello" });
   });
 
+  it("onChunk 콜백으로 점진 렌더 delta 를 전달한다", async () => {
+    fetchSpy.mockResolvedValue(
+      makeStreamResponse(
+        [
+          { type: "text-delta", delta: "A" },
+          { type: "text-delta", delta: "B" },
+          { type: "text-delta", delta: "C" },
+        ],
+        { conversationId: "conv-2" },
+      ),
+    );
+    const chunks: string[] = [];
+
+    const result = await sendChatMessage({
+      ...baseInput,
+      onChunk: (d) => chunks.push(d),
+    });
+
+    expect(chunks).toEqual(["A", "B", "C"]);
+    expect(result).toMatchObject({ ok: true, message: "ABC" });
+  });
+
   it("conversationId 가 있으면 body 에 포함한다", async () => {
     fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ conversationId: "conv-1", message: "hi" }),
-        { status: 200 },
-      ),
+      makeStreamResponse([{ type: "text-delta", delta: "hi" }], {
+        conversationId: "conv-1",
+      }),
     );
 
     await sendChatMessage({ ...baseInput, conversationId: "existing-id" });
@@ -56,6 +107,43 @@ describe("sendChatMessage", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       message: "hello",
       conversationId: "existing-id",
+    });
+  });
+
+  it("x-conversation-id 헤더가 없으면 parse_error 로 정규화한다", async () => {
+    // 서버 계약 위반 방어 — 200 + stream 이어도 conversationId 없으면 클라가 봇을
+    // 이전 대화로 붙일 수 없으므로 실패 처리.
+    fetchSpy.mockResolvedValue(
+      makeStreamResponse([{ type: "text-delta", delta: "x" }]),
+    );
+
+    const result = await sendChatMessage(baseInput);
+
+    expect(result).toEqual({
+      ok: false,
+      code: "parse_error",
+      status: 200,
+    });
+  });
+
+  it("스트림 중 error 이벤트가 오면 매핑된 code 로 실패한다", async () => {
+    fetchSpy.mockResolvedValue(
+      makeStreamResponse(
+        [
+          { type: "text-delta", delta: "부" },
+          { type: "text-delta", delta: "분" },
+          { type: "error", errorText: "upstream_error" },
+        ],
+        { conversationId: "conv-err" },
+      ),
+    );
+
+    const result = await sendChatMessage(baseInput);
+
+    expect(result).toEqual({
+      ok: false,
+      code: "upstream_error",
+      status: 200,
     });
   });
 
@@ -105,20 +193,6 @@ describe("sendChatMessage", () => {
     });
   });
 
-  it("200 이지만 body 형식이 다르면 parse_error 를 반환한다", async () => {
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ unexpected: true }), { status: 200 }),
-    );
-
-    const result = await sendChatMessage(baseInput);
-
-    expect(result).toEqual({
-      ok: false,
-      code: "parse_error",
-      status: 200,
-    });
-  });
-
   it("fetch 실패는 network_error 로 변환한다", async () => {
     fetchSpy.mockRejectedValue(new TypeError("Failed to fetch"));
 
@@ -127,7 +201,7 @@ describe("sendChatMessage", () => {
     expect(result).toEqual({ ok: false, code: "network_error", status: 0 });
   });
 
-  it("AbortSignal 로 취소된 요청도 network_error 로 정규화된다", async () => {
+  it("AbortSignal 로 취소된 fetch 는 network_error 로 정규화된다", async () => {
     const controller = new AbortController();
     const abortError = new DOMException("aborted", "AbortError");
     fetchSpy.mockRejectedValue(abortError);
@@ -139,14 +213,13 @@ describe("sendChatMessage", () => {
     });
 
     expect(result).toEqual({ ok: false, code: "network_error", status: 0 });
-    // caller 는 signal.aborted 로 "의도된 취소" 를 별도 판정한다.
     expect(controller.signal.aborted).toBe(true);
   });
 
   it("botId 에 특수문자가 있으면 URL 인코딩한다", async () => {
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ conversationId: "c", message: "m" }), {
-        status: 200,
+      makeStreamResponse([{ type: "text-delta", delta: "m" }], {
+        conversationId: "c",
       }),
     );
 

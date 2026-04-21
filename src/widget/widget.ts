@@ -111,6 +111,7 @@ async function submit(state: WidgetState): Promise<void> {
   autoResize(state.refs.input);
 
   const pending = appendAssistantPending(state);
+  let firstChunkSeen = false;
 
   // 중복 submit 방지: sending 가드가 먼저지만, 혹시라도 남은 inflight 는 취소.
   state.inflight?.abort();
@@ -127,6 +128,19 @@ async function submit(state: WidgetState): Promise<void> {
       message: text,
       conversationId: state.conversationId ?? undefined,
       signal: controller.signal,
+      onChunk: (delta) => {
+        // 첫 chunk 도착 시 placeholder 제거 + pending 스타일 해제.
+        if (!firstChunkSeen) {
+          pending.textContent = "";
+          pending.classList.remove("dari-msg--pending");
+          firstChunkSeen = true;
+        }
+        // pending.textContent += delta 는 내부적으로 텍스트 노드 재생성 비용이 있으나
+        // 위젯 대화 길이(<=CHAT_MAX_OUTPUT_TOKENS=2048) 에서는 문제 없는 수준.
+        // textContent 는 HTML 해석 0 (XSS 방어) — 마크다운은 Phase 2 에 DOMPurify.
+        pending.textContent += delta;
+        state.refs.messages.scrollTop = state.refs.messages.scrollHeight;
+      },
     });
   } finally {
     if (state.inflight === controller) state.inflight = null;
@@ -141,8 +155,11 @@ async function submit(state: WidgetState): Promise<void> {
     return;
   }
 
-  pending.classList.remove("dari-msg--pending");
+  // 스트림 성공 시 pending 은 이미 점진 렌더된 상태. 최종 전체 텍스트로 한번 더
+  // 덮어써 delta 누적과 서버 onFinish 의 text 가 100% 일치하도록 동기화
+  // (네트워크 재전송·인코딩 차이로 인한 잠재적 drift 방어).
   pending.textContent = result.message;
+  pending.classList.remove("dari-msg--pending");
 
   if (result.conversationId !== state.conversationId) {
     state.conversationId = result.conversationId;
