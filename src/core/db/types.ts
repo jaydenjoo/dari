@@ -84,6 +84,8 @@ export type Database = {
           config: DariConfig;
           config_version: string;
           status: BotStatus;
+          // Epic B Task B-3: soft delete 마커. NULL=활성, NOT NULL=휴지통.
+          deleted_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -95,6 +97,7 @@ export type Database = {
           config: DariConfig;
           config_version?: string;
           status?: BotStatus;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -106,6 +109,7 @@ export type Database = {
           config?: DariConfig;
           config_version?: string;
           status?: BotStatus;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

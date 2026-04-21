@@ -16,7 +16,12 @@
 export const AUDIT_EVENTS = {
   BOT_CREATE: "bot.create",
   BOT_UPDATE: "bot.update",
+  // BOT_DELETE 의 metadata.deleteMode: 'soft' | 'permanent' 로 구분 (Task B-3).
+  //   - soft:      UPDATE deleted_at = now() (휴지통 이동, 30일 복구 가능)
+  //   - permanent: DB DELETE + Storage cleanup (되돌릴 수 없음, 휴지통 경로 전용)
   BOT_DELETE: "bot.delete",
+  // Task B-3: 휴지통에서 복구 (deleted_at = NULL).
+  BOT_RESTORE: "bot.restore",
   CONVERSATION_DELETE: "conversation.delete",
   CONVERSATION_EXPORT: "conversation.export",
 } as const;

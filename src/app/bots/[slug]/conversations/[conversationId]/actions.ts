@@ -59,6 +59,8 @@ export async function deleteConversationAction(
     .from("bots")
     .select("id")
     .eq("slug", slug)
+    // Task B-3: soft delete 봇의 대화는 삭제 경로 차단.
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (botErr) {

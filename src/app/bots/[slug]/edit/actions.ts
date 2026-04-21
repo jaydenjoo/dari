@@ -161,6 +161,7 @@ export async function updateBot(
     .from("bots")
     .select("id, config")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (selectErr) {
@@ -294,6 +295,7 @@ export async function updateBot(
     .from("bots")
     .update(payload)
     .eq("slug", slug)
+    .is("deleted_at", null)
     .select("id");
 
   if (updateErr) {
@@ -410,6 +412,7 @@ export async function addUrlSourceAction(
     .from("bots")
     .select("id, config")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (selectErr) {
@@ -492,6 +495,7 @@ export async function addUrlSourceAction(
       config: newConfig,
     } satisfies Database["public"]["Tables"]["bots"]["Update"])
     .eq("slug", slug)
+    .is("deleted_at", null)
     .select("id");
 
   if (updateErr) {
@@ -628,6 +632,7 @@ export async function addFileSourceAction(
     .from("bots")
     .select("id, config")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (selectErr) {
@@ -746,6 +751,7 @@ export async function addFileSourceAction(
       config: newConfig,
     } satisfies Database["public"]["Tables"]["bots"]["Update"])
     .eq("slug", slug)
+    .is("deleted_at", null)
     .select("id");
 
   if (updateErr) {
@@ -873,6 +879,7 @@ export async function removeSourceAction(
     .from("bots")
     .select("id, config")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (selectErr) {
@@ -1013,6 +1020,7 @@ export async function removeSourceAction(
       config: newConfig,
     } satisfies Database["public"]["Tables"]["bots"]["Update"])
     .eq("slug", slug)
+    .is("deleted_at", null)
     .select("id");
 
   if (updateErr) {
@@ -1045,53 +1053,33 @@ export async function removeSourceAction(
   };
 }
 
-// ─── Task B-1 (Epic B): 봇 영구 삭제 ─────────────────────────────────────────
+// ─── Task B-3 (Epic B): 봇 soft delete (휴지통으로 이동) ─────────────────────
 
 export type DeleteBotFormState = {
   error?: string;
 };
 
-// Storage list 한 번당 상한.
-// 근거:
-//   - 파일 크기 상한 10MB (0010 `knowledge-files.file_size_limit`) × 1000건 = 10GB/봇.
-//     MVP 단계에서 한 봇이 10GB 분량 지식을 쌓는 케이스는 없음 가정 (상위 outlier 이하).
-//   - Supabase storage.list 기본 limit 은 100, 단일 호출 최대 1000 — 이 값이 실용 상한.
-//   - 초과 시 pagination 구현 대신 Phase 2 sweeper 에 위임 (`bot_id` 디렉토리 정리).
-// 초과 시 동작: 상위 1000개만 제거, 나머지는 orphan 으로 잔존 (DB row 는 이미 삭제).
-// orphan 파일은 `knowledge_files_select_owner` RLS 가 `bots.owner_id = auth.uid()` 를
-// 요구하므로 외부 노출 위험 없음 (bots row 가 사라지면 select 도 0-row → 접근 불가).
-const STORAGE_CLEANUP_LIST_LIMIT = 1000;
-
 /**
- * 봇 영구 삭제 Server Action (Epic B Task B-1).
+ * 봇 soft delete Server Action (Epic B Task B-3).
  *
  * UX: "위험 영역" 카드 → DeleteBotDialog (typed confirmation) → 이 action 호출.
+ *     봇은 즉시 목록에서 사라지고 `/bots/trash` 에 30일간 보관. 그 기간 내 복구 가능.
+ *     영구 삭제는 `/bots/trash` 페이지에서만 가능 (Storage cleanup 포함).
  *
  * 방어 (4중):
  *   1. slug 형식 정규식 (DB 왕복 전).
  *   2. 세션 `getUser()` — proxy 에 이은 재확인.
  *   3. `checkBotDeleteRatelimit(user.id)` — 5 req/1h, 반복 스크립트 차단.
- *   4. **typed confirmation 서버측 재검증** — `confirmName === bot.name` 체크
- *      (클라이언트 활성 상태만 믿으면 우회 가능).
- *   + RLS `bots_delete_owner` 가 DB 레벨 owner 격리 (5중 방어).
+ *   4. **typed confirmation 서버측 재검증** — `confirmName === bot.name`
+ *      (복구 가능한 작업이지만 실수 삭제로 휴지통이 꽉 차는 것을 방지).
+ *   + RLS `bots_update_owner` 가 DB 레벨 owner 격리 (5중 방어).
  *
- * 삭제 순서 (중요):
- *   - Storage cleanup → DB DELETE 순.
- *   - 이유: DB row 가 먼저 사라지면 `knowledge_files_*_owner` RLS 의 `bots` 참조가
- *     0-row 가 되어 Storage 삭제가 RLS 거부됨. 반드시 DB 존재하는 상태에서
- *     Storage 먼저 정리.
- *
- * Cascade (DB 레벨 자동):
- *   - bots → conversations (0003 ON DELETE CASCADE)
- *   - bots → knowledge_chunks (0005 ON DELETE CASCADE)
- *   - conversations → messages (0003 ON DELETE CASCADE)
- *   → 앱에선 `DELETE FROM bots` 한 번이면 연관 테이블 전부 정리됨.
- *
- * Storage cleanup 은 best-effort:
- *   - list/remove 실패 시 `logger.warn` 남기고 DB 삭제 진행.
- *   - orphan 파일은 Phase 2 주기 sweeper 로 정리 (경로 {bot_id}/* 인데 bots row
- *     가 이미 없으면 고아).
- *   - DB 삭제 성공 = 사용자에겐 "삭제됨". Storage 잔존은 비가시적 정리 부채.
+ * 구현 (영구 삭제 → soft delete 전환):
+ *   - `UPDATE bots SET deleted_at = now() WHERE slug = $1 AND deleted_at IS NULL`
+ *   - Storage cleanup **없음** — 복구 시 지식 파일 재사용. Storage cleanup 은 permanent
+ *     delete (trash/actions.ts) 시점에만 수행.
+ *   - conversations/messages/knowledge_chunks 는 DB row 가 유지되므로 FK cascade 미발생.
+ *     (soft-deleted 봇의 하위 데이터는 앱 레이어에서 `deleted_at IS NULL` 필터로 숨김)
  *
  * 에러 메시지는 정적 — enumeration / 내부 구조 유출 방어.
  * 성공 시 revalidatePath("/bots") + redirect("/bots").
@@ -1111,7 +1099,6 @@ export async function deleteBotAction(
   if (confirmName.length === 0) {
     return { error: "봇 이름을 입력해 주세요." };
   }
-  // 입력 길이 상한 — 과도한 문자열 방어. DB name 컬럼 실제 상한과 무관하게 1024 충분.
   if (confirmName.length > 1024) {
     return { error: "입력값이 너무 길어요." };
   }
@@ -1125,7 +1112,7 @@ export async function deleteBotAction(
     redirect(`/login?next=${encodeURIComponent(`/bots/${slug}/edit`)}`);
   }
 
-  // 4. Rate limit — 파괴적 작업 엄격 (5 req/1h).
+  // 4. Rate limit — soft 라도 휴지통 스팸 방지 (5 req/1h).
   const rl = await checkBotDeleteRatelimit(user.id);
   if (!rl.ok) {
     return {
@@ -1134,12 +1121,12 @@ export async function deleteBotAction(
     };
   }
 
-  // 5. 봇 조회 (id + name 만 필요).
-  //    RLS bots_select_owner 가 owner 자동 필터 → 타인 봇/미존재 = null.
+  // 5. 봇 조회 — 활성 봇만 대상 (이미 soft-deleted 는 이 페이지 진입 불가).
   const { data: existing, error: selectErr } = await supabase
     .from("bots")
     .select("id, name")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (selectErr) {
@@ -1150,94 +1137,46 @@ export async function deleteBotAction(
         slug,
         userId: user.id,
       },
-      "봇 조회 실패 — 삭제 action",
+      "봇 조회 실패 — soft delete action",
     );
     return {
       error: "봇 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
     };
   }
   if (!existing) {
-    // 타인 봇/미존재 — enumeration 방어.
     return { error: "봇을 찾을 수 없어요." };
   }
 
   // 6. typed confirmation 서버측 재검증.
-  //    - client 의 활성 버튼 상태만 믿으면 curl/devtools 우회 가능.
-  //    - 정확한 이름 일치로 "실수 삭제" 와 "의도적 삭제" 를 구분.
   if (confirmName !== existing.name) {
     return { error: "봇 이름이 일치하지 않아요." };
   }
 
-  // 7. Storage cleanup — best-effort, DB 삭제 전에 수행 (RLS 참조 유효 상태).
-  try {
-    const { data: files, error: listErr } = await supabase.storage
-      .from("knowledge-files")
-      .list(existing.id, { limit: STORAGE_CLEANUP_LIST_LIMIT });
-
-    if (listErr) {
-      logger.warn(
-        {
-          errMsg: listErr.message,
-          botId: existing.id,
-          userId: user.id,
-        },
-        "Storage list 실패 — DB 삭제는 진행, orphan 잔존 가능",
-      );
-    } else if (files && files.length > 0) {
-      const paths = files.map((f) => `${existing.id}/${f.name}`);
-      const { error: rmErr } = await supabase.storage
-        .from("knowledge-files")
-        .remove(paths);
-      if (rmErr) {
-        logger.warn(
-          {
-            errMsg: rmErr.message,
-            botId: existing.id,
-            userId: user.id,
-            count: paths.length,
-          },
-          "Storage remove 실패 — orphan 잔존 가능, Phase 2 sweeper 대상",
-        );
-      }
-    }
-  } catch (err) {
-    // list/remove 가 throw 하는 경로 (네트워크 단절 등) — 로깅 후 DB 삭제 진행.
-    logger.warn(
-      {
-        err,
-        botId: existing.id,
-        userId: user.id,
-      },
-      "Storage cleanup 예외 — DB 삭제는 진행",
-    );
-  }
-
-  // 8. DELETE FROM bots — FK cascade 가 conversations/messages/knowledge_chunks 자동 정리.
-  //    .select('id') 로 영향받은 row 확인 → 0 이면 RLS 거부 또는 race.
-  const { data: deleted, error: delErr } = await supabase
+  // 7. UPDATE deleted_at = now() — soft delete.
+  //    `is("deleted_at", null)` race 방어 (다른 탭에서 이미 삭제됨 시 0-row).
+  const { data: updated, error: updErr } = await supabase
     .from("bots")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("slug", slug)
+    .is("deleted_at", null)
     .select("id");
 
-  if (delErr) {
+  if (updErr) {
     logger.error(
       {
-        errCode: delErr.code,
-        errMsg: delErr.message,
+        errCode: updErr.code,
+        errMsg: updErr.message,
         slug,
         botId: existing.id,
         userId: user.id,
       },
-      "봇 DELETE 실패",
+      "봇 soft delete 실패",
     );
     return {
       error: "봇 삭제에 실패했어요. 잠시 후 다시 시도해 주세요.",
     };
   }
-  if (!deleted || deleted.length === 0) {
-    // RLS 거부 또는 race condition — 위 select 로 이미 owner 검증 통과했으므로
-    // 여기 도달 = 동시성 이슈 (다른 탭/세션에서 이미 삭제) 가능.
+  if (!updated || updated.length === 0) {
     return { error: "봇을 삭제할 권한이 없거나 이미 삭제되었어요." };
   }
 
@@ -1247,24 +1186,21 @@ export async function deleteBotAction(
       slug,
       userId: user.id,
     },
-    "봇 영구 삭제 완료",
+    "봇 soft delete 완료 (휴지통으로 이동)",
   );
 
-  // 감사 로그 — Epic B Task B-2. DB row 삭제 후 기록.
-  //   - entity_id(=existing.id) 는 UUID 값 자체로는 유효하지만 bots row 가 이미 삭제됨 →
-  //     **dangling 참조**. B-3 soft delete 복구 UI 에서 audit_logs.entity_id 로 봇을 재조회
-  //     할 경우 null 반환. 복구 키는 별도 bots_tombstone 또는 soft delete 테이블로 격리 필요
-  //     (security review MEDIUM, 2026-04-21).
-  //   - throw 금지 계약 → 기록 실패해도 삭제 완료 상태 유지.
+  // 감사 로그 — Epic B Task B-3. entity_id(=bot.id) 는 row 유지되므로 dangling 아님.
+  // metadata.deleteMode = 'soft' 로 permanent 와 구분 (복구 가능 상태).
   await logAuditEvent(supabase, {
     eventType: AUDIT_EVENTS.BOT_DELETE,
     entityType: "bot",
     entityId: existing.id,
     actorId: user.id,
-    metadata: { slug, deleteMode: "permanent" },
+    metadata: { slug, deleteMode: "soft" },
   });
 
-  // 9. 캐시 갱신 + 리다이렉트 (서버 고정 경로 — open redirect 방어).
+  // 8. 캐시 갱신 + 리다이렉트 (서버 고정 경로 — open redirect 방어).
   revalidatePath("/bots");
+  revalidatePath("/bots/trash");
   redirect("/bots");
 }

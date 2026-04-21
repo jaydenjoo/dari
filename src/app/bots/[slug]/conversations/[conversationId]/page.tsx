@@ -63,6 +63,8 @@ export default async function ConversationDetailPage({
     .from("bots")
     .select("id, slug, name")
     .eq("slug", slug)
+    // Task B-3: soft delete 봇의 대화 상세는 숨김.
+    .is("deleted_at", null)
     .maybeSingle();
   if (botErr) {
     // Supabase error 를 raw 로 로깅하지 않는다 — `details`/`hint` 에 row

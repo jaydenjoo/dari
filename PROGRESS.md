@@ -2312,9 +2312,116 @@ _수정_
 
 ---
 
+## 이번 세션 (2026-04-21 Ⅵ) — Task B-3: 봇 Soft Delete + 휴지통
+
+Epic B 3/6 Task. `bots.deleted_at` 컬럼 + 부분 인덱스 + 앱 레이어 필터 13 지점 + `/bots/trash` 페이지 + 복구/영구 삭제 분리. 리뷰 Fix 3건 반영.
+
+### 흐름
+
+1. **선결 체크 + Plan** — prod `bots.status='deleted'` 0행 + `deleted_at` 컬럼 없음 확인 → backfill 불필요. 4 결정 포인트 (UX α + RLS β + AUDIT γ + Storage β) 권장안 + learnings 기록 제안 → Jayden 승인.
+
+2. **마이그레이션 0014 + types + AUDIT 상수 (20분)** —
+   - `supabase/migrations/0014_add_bots_deleted_at.sql`: `deleted_at timestamptz null` + 부분 인덱스 `bots_active_idx (owner_id, updated_at DESC) WHERE deleted_at IS NULL` + 주석 + 롤백
+   - Supabase MCP `apply_migration` ✅
+   - `src/core/db/types.ts` 수동 갱신 — `bots.Row/Insert/Update` 에 `deleted_at: string | null`
+   - `src/core/audit/types.ts` — `BOT_RESTORE: 'bot.restore'` 신규 + `BOT_DELETE` metadata `deleteMode` 필드 주석
+   - `src/core/audit/log.test.ts` 상수 snapshot 업데이트 (6 이벤트)
+   - **RLS 정책 변경 없음** (Phase 0-D-2 "소프트 삭제 owner 접근 허용" 결정 유지 + 앱 레이어 필터 전략)
+
+3. **deleteBotAction soft 리팩터 + dialog 문구 (20분)** —
+   - 기존 B-1 영구 삭제 → soft delete: `DELETE FROM bots` → `UPDATE deleted_at = now() WHERE ... AND deleted_at IS NULL`
+   - Storage cleanup 제거 (복구 시 재사용) → permanent delete 시점으로 이동
+   - audit metadata `deleteMode: 'soft'`
+   - 방어 4중 유지 (slug 검증 + 세션 + rate limit + typed confirmation + RLS)
+   - dialog 문구: "봇 영구 삭제" → "봇 삭제 (휴지통으로 이동)", "30일 보관 + 복구 가능", "영구 삭제는 휴지통에서"
+
+4. **`/bots/trash` 페이지 + actions (60분)** —
+   - `src/app/bots/trash/page.tsx` — 세션 검증 + `.eq("owner_id", user.id).not("deleted_at","is",null)` (RLS 의존 + 명시 이중) + 카드 + 복구 form + 영구 삭제 dialog + EmptyState
+   - `src/app/bots/trash/loading.tsx` / `error.tsx` (design-system v2 + Sentry 연동)
+   - `src/app/bots/trash/actions.ts`:
+     - `restoreBotAction(slug)` — SELECT `.not("deleted_at","is",null)` + UPDATE `deleted_at=null` 양쪽 필터 + audit BOT_RESTORE + 성공/실패 모두 redirect
+     - `permanentDeleteBotAction(slug, state, formData)` — 기존 B-1 로직 이동 + `.not("deleted_at","is",null)` 필터 이중 (select + delete) + Storage cleanup + typed confirmation
+   - `src/app/bots/trash/permanent-delete-dialog.tsx` — typed confirmation (기존 delete-bot-dialog 의 영구 삭제 로직 복사 + action 만 permanentDeleteBotAction 바인딩)
+
+5. **조회 지점 13곳 `.is("deleted_at", null)` 필터 추가 (30분)** —
+   - bots list (`.neq("status","deleted")` 제거 + 교체) / bot detail / bot edit / conversations list / conversation detail / conversation delete action / chat API / widget-config API / export API
+   - `src/app/bots/[slug]/edit/actions.ts` 의 4개 action (updateBot / addUrl / addFile / removeSource) 의 선행 SELECT + UPDATE 8 지점 (replace_all)
+   - 공개 API 2곳: `.eq("status","active").is("deleted_at",null)` 이중 필터 (status/deleted_at 독립 축)
+
+6. **검증** —
+   - typecheck 0 / prettier ✅ / eslint ✅ / **vitest 507** 유지 (테스트 신규 없음, snapshot 만 업데이트)
+   - build **14 → 15 routes** (`/bots/trash` 추가)
+   - **SQL 회귀 9/9 PASS** (BEGIN/ROLLBACK 단일 트랜잭션, prod 데이터 원상복구 확인):
+     soft delete 후 활성 4·휴지통 1 / 부분 인덱스 존재 / 공개 API 필터 soft-deleted 격리 / 복구 후 활성 5 / permanent delete 후 0 / FK cascade 정보
+
+7. **독립 리뷰 2 병렬** —
+   - **code-reviewer: Fix-then-ship**:
+     - **MEDIUM-1**: `edit/actions.ts` 4개 action (updateBot/addUrl/addFile/removeSource) 의 UPDATE 쿼리에 `.is("deleted_at",null)` 필터 누락 → **반영** (race condition 방어 일관성)
+     - LOW-1: `trash/page.tsx` owner_id 명시 → **반영** (RLS 의존도 감소)
+     - LOW-2: `deleted_at ?? updated_at` fallback 유지 (TypeScript narrowing 비용 vs fallback 간결함)
+     - LOW-3: `restoreBotAction` 반환 타입 `Promise<void>` 정리 + `RestoreBotFormState` 미사용 타입 제거 → **반영** (주석 보강)
+   - **security-reviewer: Ship** (CRITICAL/HIGH 0):
+     - MEDIUM: Storage RLS deleted_at 체크 없음 → Phase 2 retention cron + signed URL TTL 로 보완 (설계상 이미 수용)
+     - MEDIUM: slug UNIQUE 전체 점유 → Phase 2 partial unique (Backlog)
+     - MEDIUM: export API TOCTOU (500 반환으로 차단됨, 낮은 위험) — 반영 안 함
+
+### Fix 반영 3건
+
+1. `edit/actions.ts` 4개 UPDATE 쿼리에 `.is("deleted_at", null)` race 방어 일관성 (replace_all)
+2. `trash/page.tsx` `.eq("owner_id", user.id)` 명시 + 세션 검증 블록 추가
+3. `trash/actions.ts` `RestoreBotFormState` 타입 제거 + `Promise<void>` 반환 이유 주석 보강
+
+### 신규 7 + 수정 14
+
+_신규_
+
+- `supabase/migrations/0014_add_bots_deleted_at.sql`
+- `src/app/bots/trash/{actions,page,loading,error,permanent-delete-dialog}.{ts,tsx}` (5파일)
+- `docs/learnings.md` — B-2 교훈 append
+
+_수정_
+
+- `src/core/db/types.ts` — `bots.deleted_at`
+- `src/core/audit/types.ts` — `BOT_RESTORE`
+- `src/core/audit/log.test.ts` — 상수 snapshot
+- `src/app/bots/[slug]/edit/actions.ts` — `deleteBotAction` soft + 4 action SELECT+UPDATE 8지점 필터
+- `src/app/bots/[slug]/edit/delete-bot-dialog.tsx` — 문구 변경
+- 조회 필터 8곳: bots list / detail / edit / conversations list / conversation detail / conversation delete action / chat API / widget-config API / export API
+- `PROGRESS.md`
+
+### 검증 (최종)
+
+- typecheck ✅ / lint ✅ / prettier ✅ / vitest **507** 유지 / build ✅ (14 → 15 routes)
+- SQL 회귀 9/9 PASS (prod 데이터 원상복구)
+- 리뷰 2 병렬 → code Fix-then-ship (Fix 3 반영) + security Ship (CRITICAL·HIGH 0)
+
+### 주요 결정 / 교훈
+
+1. **RLS 변경 없음 + 앱 레이어 필터 전략** — Phase 0-D-2 "소프트 삭제 owner 접근 허용" 결정 유지. RLS 에 `deleted_at IS NULL` 을 포함하면 휴지통 조회용 별도 정책 필요 (정책 수 2배) + 정책 수정 범위 넓음. 대신 앱 레이어 필터 13 지점 + 부분 인덱스로 성능 + grep 전수 검증.
+2. **SELECT + UPDATE 양쪽 필터가 race 방어 일관성** — 리뷰에서 지적된 UPDATE 누락 반영. 선행 SELECT 와 UPDATE 사이 race 창은 매우 좁지만, 휴지통 봇 config 덮어쓰기 방지 + deleteBotAction 과 동일 패턴.
+3. **permanent delete 경로 분리 = Storage cleanup 책임 이동** — soft delete 는 row 유지 + Storage 파일 유지 (복구 시 재사용), permanent delete 만 Storage cleanup. 30일 보관 정책이 GDPR 관점에서 "보관 기간 명시" 와 정합.
+4. **slug UNIQUE 전체 점유** — soft-deleted 봇이 slug 유지 → 새 봇 생성 시 `unique_violation` 발생. 복구 중심 설계에선 정합 (동일 slug 재등장 방지). partial unique index `WHERE deleted_at IS NULL` 로 해결 가능하나 Phase 2 이월.
+
+### learnings.md +1
+
+"immutable 감사 로그의 entity_id FK 의도적 부재" — FK + CASCADE/RESTRICT/SET NULL 모두 역설적 (증거 자동 삭제 / 참조 대상 삭제 차단 / 가치 무효). 참조 무결성 포기 + 기록 독립성 우선 설계 결정. B-3 복구 키로 audit.entity_id 오용 금지 (dangling 가능) 재확인.
+
+### Backlog (B-3 이월 / 다음 세션 후보)
+
+1. **conversations soft delete** — B-3-후속 (대화는 익명성 ↑, 봇보다 덜 critical)
+2. **Retention cron 30일 자동 purge** — Phase 2 (Supabase pg_cron + service_role 최소 권한 RPC + dry-run)
+3. **slug partial unique `WHERE deleted_at IS NULL`** — Phase 2 마이그레이션 (soft-deleted 봇의 slug 재사용 허용)
+4. **status='deleted' enum 값 정리** — Phase 2 (현재 사용 0, enum 값 유지는 무해)
+5. **Storage RLS 에 `deleted_at IS NULL` 조건 추가** — Phase 2 retention 과 패키지
+6. **`audit_logs.Update` 타입** `Record<string, never>` (B-2 code MEDIUM-1)
+7. **GDPR anonymize 스크립트 / ADR** (B-2 sec MEDIUM)
+8. **Task B-4** 원가/차트 → **B-5** 품질 sweep → **B-6** Playwright E2E CI (Supabase 테스트 환경 선결)
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅴ (Epic B Task B-2 완결 — `audit_logs` 테이블 + core/audit 모듈 + 5 지점 통합 + RLS 10/10 + 리뷰 Fix 4건, **Phase 2 Epic B 2/6 진행**, 다음: B-6 Playwright CI 또는 B-3 soft delete)
+- 날짜: 2026-04-21 Ⅵ (Epic B Task B-3 완결 — soft delete + 휴지통 + 복구/영구 삭제 분리 + 조회 필터 13곳 + RLS 9/9 + 리뷰 Fix 3건, **Phase 2 Epic B 3/6 진행**, 다음: B-4 원가/차트 또는 B-6 Playwright CI)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 커밋: `09ea01d` (B-1 save) · `bd38558` (B-1 feat) · `6c71599` (Epic B 분해 doc)
+- 커밋: `5d14476` (B-2 audit) · `09ea01d` (B-1 save) · `bd38558` (B-1 feat)

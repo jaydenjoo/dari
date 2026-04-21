@@ -85,6 +85,8 @@ async function loadActiveBot(botSlug: string): Promise<BotContext | null> {
     .select("id, config")
     .eq("slug", botSlug)
     .eq("status", "active")
+    // Task B-3: soft delete 봇은 위젯 설정 반환 안 함 (공개 API 404 → 위젯 비활성).
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {

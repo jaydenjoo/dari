@@ -180,6 +180,7 @@ describe("logAuditEvent", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
       "bot.create",
       "bot.delete",
+      "bot.restore",
       "bot.update",
       "conversation.delete",
       "conversation.export",

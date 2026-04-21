@@ -74,6 +74,8 @@ export default async function ConversationsPage({
     .from("bots")
     .select("id, slug, name")
     .eq("slug", slug)
+    // Task B-3: soft delete 봇의 대화 목록은 숨김.
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (botErr) {

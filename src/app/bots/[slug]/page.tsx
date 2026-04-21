@@ -99,6 +99,8 @@ export default async function BotDetailPage({
     .from("bots")
     .select("id, slug, name, status, config, created_at, updated_at")
     .eq("slug", slug)
+    // Task B-3: soft delete 는 404 처리 — 휴지통 전용 경로에서만 노출.
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {

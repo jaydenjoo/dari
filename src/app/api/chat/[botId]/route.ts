@@ -115,6 +115,9 @@ async function loadActiveBot(botSlug: string): Promise<BotContext | null> {
     .select("id, config")
     .eq("slug", botSlug)
     .eq("status", "active")
+    // Task B-3: soft delete 봇은 공개 채팅 API 에서 404. status='active' 필터만으로는
+    // 누락될 수 있어 방어선 추가 (status 와 deleted_at 는 독립 축).
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {

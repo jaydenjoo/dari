@@ -1992,3 +1992,30 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **Zod preprocess 대신 `.trim()` chain 선호** — Zod 4.x 의 `z.string().trim()` 은 transform 을 체인 가능하며 `.min(1)` 이 trim 후 길이 기준으로 동작해 공백만 입력 거부 가능. 두 가지 정규화 (빈값 + 공백) 가 한 줄에 해결.
 
 ---
+
+### 2026-04-21 immutable 감사 로그의 entity_id FK 의도적 부재 — 참조 대상 삭제와 증거 보존의 역설 (설계 결정)
+
+**맥락**: Task B-2 (Audit Log) 에서 `audit_logs` 스키마 설계 시 외래 키 구성 결정. `actor_id` 는 `auth.users(id) ON DELETE RESTRICT` 로 참조하지만, `entity_id` (봇/대화 UUID) 는 **FK 없이 uuid 컬럼으로만 기록**. 처음엔 "올바른 관계형 설계 = 모든 참조는 FK" 원칙에 따라 `entity_id → bots(id)` FK 를 고려했다.
+
+**결정 이유**:
+
+1. **FK + CASCADE 의 역설**: `entity_id → bots(id) ON DELETE CASCADE` 로 설정하면 봇 삭제 시 해당 봇의 모든 `audit_logs` row 가 자동 삭제됨. **즉 "봇을 삭제한 사실" 에 대한 감사 증거 자체가 삭제됨** — immutable 감사 로그의 정의와 정면 충돌. 감사 로그는 참조 대상이 사라진 후에도 "언제 누가 삭제했나" 의 증거로 반드시 살아있어야 한다.
+2. **FK + RESTRICT 의 역설**: `ON DELETE RESTRICT` 를 걸면 봇 삭제 자체가 불가능해짐 — 감사 로그가 있는 한 봇을 삭제할 수 없다. 이는 Task B-1 (봇 영구 삭제) 요구와 정면 충돌.
+3. **FK + SET NULL 의 역설**: `ON DELETE SET NULL` 은 `entity_id` 를 NULL 로 만들지만 `entity_id NOT NULL` 제약과 충돌 + NULL 이 된 감사 로그는 "어떤 엔티티에 대한 이벤트인가" 알 수 없어 무가치.
+4. **최종 선택 = FK 없이 uuid 만 기록**: 참조 무결성은 포기하고 "기록 독립성" 을 우선. B-1 permanent delete 시 봇 row 는 제거되지만 해당 봇의 `audit_logs` row 는 그대로 유지 — `entity_id` 는 가리킬 row 가 없는 **dangling uuid** 가 되지만, 감사 관점에서는 그대로가 올바름 (역사적 식별자).
+5. **actor_id 는 다름**: 사용자 탈퇴는 "개인정보 삭제" GDPR 요건이고 법적으로 별도 anonymize 스크립트로 처리. `actor_id → auth.users(id) ON DELETE RESTRICT` 로 묶어 탈퇴 시 명시적 처리 요구. `entity_id` 와 비대칭.
+
+**파생된 설계 주의사항**:
+
+- **B-3 soft delete 복구 UI 에서 `audit_logs.entity_id` 를 복구 키로 쓰지 말 것** — permanent delete 시 dangling, soft delete 시만 유효. 복구는 항상 `bots` 테이블 직접 조회 기준. (B-2 security 리뷰 MEDIUM 지적 후 코드 주석 강화).
+- **변경 이력 테이블 (Phase 3 `bot_versions`) 은 별도** — 변경 전/후 값 저장은 audit_logs metadata 에 넣지 않고 별도 테이블로. `bot_versions.bot_id → bots(id) ON DELETE CASCADE` 로 감사 로그와 다르게 설계 (변경 이력은 원본과 생사 같이).
+
+**규칙** ⭐:
+
+- **immutable 감사 로그 테이블은 참조 대상과 독립된 생명주기 설계** — FK 대신 uuid 컬럼만. 참조 대상 삭제 후에도 증거가 반드시 남아야 할 경우 FK 의 CASCADE/RESTRICT/SET NULL 모두 부적합.
+- **FK 부재로 인한 dangling uuid 는 "그 엔티티는 이제 없음" 의 정확한 기록** — 복구 키로 오용 금지. 감사 조회 UI 는 `entity_id` 로 `bots` 를 조회할 때 null 을 정상 케이스로 처리.
+- **"immutable" 테이블은 UPDATE/DELETE 정책 부재 + FK 신중** 두 축이 반드시 함께 — 한 쪽만 빠져도 증거 훼손 경로 발생. 예: UPDATE 정책 있으면 row 수정 가능, FK CASCADE 있으면 row 자동 삭제, FK RESTRICT 있으면 참조 대상 삭제 불가.
+- **actor_id 는 예외**: 사용자 탈퇴는 GDPR 요건 + 명시적 anonymize 스크립트가 올바른 처리. FK RESTRICT + 탈퇴 시 스크립트가 `actor_id` 를 sentinel UUID 로 치환하는 설계가 참조 무결성 + 프라이버시 모두 충족.
+- **Phase 3 `bot_versions` 같은 변경 이력 테이블은 다른 원리** — 원본과 생사 같이 가도 되는 이력은 FK + CASCADE 로 정합. "감사 증거" 와 "변경 이력" 을 같은 테이블로 묶지 말 것.
+
+---

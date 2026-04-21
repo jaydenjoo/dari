@@ -24,7 +24,8 @@ export default async function BotsListPage() {
   const { data: bots, error } = await supabase
     .from("bots")
     .select("id, slug, name, status, updated_at")
-    .neq("status", "deleted")
+    // Task B-3: soft delete 기본 숨김. 휴지통 전용 경로는 /bots/trash.
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
   if (error) {

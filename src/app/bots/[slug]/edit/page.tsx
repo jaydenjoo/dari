@@ -47,6 +47,8 @@ export default async function EditBotPage({
     .from("bots")
     .select("id, slug, name, config")
     .eq("slug", slug)
+    // Task B-3: soft delete 봇은 편집 불가 (휴지통에서 복구 후 편집).
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {

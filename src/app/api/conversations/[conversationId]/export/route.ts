@@ -100,6 +100,9 @@ export async function GET(
     .from("bots")
     .select("name")
     .eq("id", conv.bot_id)
+    // Task B-3: soft delete 봇의 대화는 export 차단 (위 conversations 조회는 이미 통과했으나
+    // 그 사이 봇이 soft-deleted 된 경우 race 방어).
+    .is("deleted_at", null)
     .maybeSingle();
   if (botErr || !bot) {
     logger.error(
