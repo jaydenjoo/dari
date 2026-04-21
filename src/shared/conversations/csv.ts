@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * 대화 CSV export 유틸.
  *
@@ -9,6 +11,8 @@
  *     `'` prefix 추가. 이후 쉼표/개행/따옴표가 있으면 `"..."` wrap + `""` escape.
  *   - content 는 messages.content 원문 — React escape 없이 그대로 CSV 셀로 감싸
  *     Excel/Sheets 로 이동 시 실행되지 않도록 방어.
+ *   - `"server-only"` barrier — 대화 export 는 route handler / server action 전용.
+ *     Client 컴포넌트에서 실수로 import 시 빌드 에러로 차단 (리뷰 sec L-1 이월).
  */
 
 export interface CsvMessageRow {

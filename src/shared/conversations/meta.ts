@@ -1,10 +1,17 @@
+import "server-only";
+
 /**
  * 대화 메타 유틸 (UUID 검증 / 토큰 합산 / KST 시각 포맷).
  *
- * 순수 함수만 배치하여 Server/Client 어디서든 동일 결과를 보장한다.
- * 시각 관련 유틸은 Asia/Seoul 고정 (KST=UTC+9, DST 없음) — 서버/클라 타임존
- * 차이로 인한 hydration mismatch 를 차단. Server Component 에서 미리 포맷한
- * 문자열을 Client Component prop 으로 전달하는 패턴을 권장한다.
+ * 순수 함수만 배치하여 Server 환경에서 hydration mismatch 없이 동일 결과를
+ * 보장한다. 시각 관련 유틸은 Asia/Seoul 고정 (KST=UTC+9, DST 없음) — 서버
+ * 타임존 설정과 무관. Server Component 에서 미리 포맷한 문자열을 Client
+ * Component prop 으로 전달하는 패턴을 권장한다.
+ *
+ * `"server-only"` barrier — 대화 메타 포맷은 `/bots/[slug]/conversations/*` 의
+ * Server Component / Server Action / route handler 전용. Client 컴포넌트에서
+ * 실수로 import 시 빌드 에러로 차단 (리뷰 sec L-1 이월). Client 측 포맷이
+ * 필요하면 별도 isomorphic 유틸로 분리.
  */
 
 // Postgres uuid 타입의 형식을 8-4-4-4-12 16진수로 검증. 공백/개행/부가 문자를
