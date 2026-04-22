@@ -2019,3 +2019,31 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **Phase 3 `bot_versions` 같은 변경 이력 테이블은 다른 원리** — 원본과 생사 같이 가도 되는 이력은 FK + CASCADE 로 정합. "감사 증거" 와 "변경 이력" 을 같은 테이블로 묶지 말 것.
 
 ---
+
+### 2026-04-22 shared barrel 도입 시 server-only 모듈 포함 barrel 은 barrel 자체에 `import "server-only"` 로 명시 락 (설계 결정)
+
+**맥락**: Task B-5 (코드 품질 sweep) 에서 `src/shared/{bots,conversations,time}/index.ts` barrel 3개 생성. `conversations/index.ts` 가 `csv.ts` + `meta.ts` (둘 다 `import "server-only"`) + 클라/서버 공용 3개 (`mask-email`, `status`, `visitor`) 를 한 barrel 로 묶게 됨. 독립 code 리뷰에서 MEDIUM "barrel 경유 server-only 경계가 tree-shaking 후 silent 우회 가능성" 지적. security 리뷰는 "Next.js 정적 그래프 기반이라 안전" 반박.
+
+**결정 이유**:
+
+1. **두 리뷰의 교차 지점** — security 가 맞다 (Next.js Webpack/Turbopack 은 정적 import 그래프에서 `server-only` 를 만나면 즉시 차단) 하지만, code 리뷰의 "silent 우회" 시나리오는 미래 번들러 변경 / CDN edge 환경 / custom loader 에서 가능성을 남긴다. **Defense-in-depth 관점에서 비용 0 으로 barrel 레이어에 명시 락** 이 견고성을 최대화.
+2. **barrel 자체를 `import "server-only"` 로 락하면** 클라이언트 컴포넌트가 실수로 barrel import 시 Next.js 가 barrel 레이어에서 즉시 차단 → 에러 추적 위치가 명확해지고 tree-shaking 종속성 0.
+3. **Isomorphic 심볼 (status/visitor/mask-email) 도 barrel 에선 락됨** — 하지만 실제 client consumer 0건이고, 필요 시 세부 경로 (`@/shared/conversations/status`) 로 import 가능하므로 실효 손실 없음. "client 에서 status 를 쓸 일이 있다면 barrel 이 아니라 세부 경로" 가 오히려 명시적.
+4. **경계 주석을 함께 추가** — security 리뷰 LOW 의 미래 심볼 충돌 대비 + 기여자 가이드. server-only / isomorphic 블록 구분 주석.
+
+**파생된 import 경로 컨벤션**:
+
+- **같은 폴더에서 2개 이상 심볼 import 하는 consumer = barrel 경로** (import 줄 수 감소)
+- **단일 심볼 = 세부 경로 유지 허용** (barrel 전환 이득 없음)
+- **isomorphic 심볼을 client 에서 쓸 경우 = 무조건 세부 경로** (barrel 이 server-only 락 되어있을 수 있음)
+- 같은 폴더 내에 barrel 소비자와 세부 경로 소비자가 공존 OK — "심볼 개수" 가 기준.
+
+**규칙** ⭐:
+
+- **barrel 에 하나라도 server-only 모듈이 포함되면 barrel 자체를 `import "server-only"` 로 락** — tree-shaking / 번들러 변경 / 미래 환경 변화에 대한 defense-in-depth. 비용 0.
+- **server-only / isomorphic 심볼 블록을 주석으로 구분** — 미래 기여자가 barrel 에 모듈 추가할 때 server/client 경계 실수 방지.
+- **isomorphic 심볼의 client 소비는 barrel 이 아니라 세부 경로** 원칙을 learnings / CLAUDE.md 에 명시. barrel 은 "server 에서 여러 심볼 편의 import" 가 주목적.
+- **config 같은 server/client 분리가 의도된 폴더는 barrel 미생성** — barrel 이 분리 경계를 희석시킬 수 있다. env.server.ts ↔ env.client.ts 는 각각 세부 경로 유지.
+- **리뷰에서 code 와 security 판단이 엇갈리면 "비용 0 으로 둘 다 수용 가능한 defense-in-depth" 를 우선** — 이번 경우 barrel 에 `import "server-only"` 추가는 런타임 비용 0 + 미래 위험 차단.
+
+---

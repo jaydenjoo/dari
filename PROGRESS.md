@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 완결 + Epic B 1/6 Task 완료** (A-1~A-5a + B-1). env 분리 + CI 현대화 + Epic B 분해 유지. Epic B 나머지 5 Task 진행 예정.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 진입** — Task B-1 (보안 hardening — 봇 삭제 UI + rate limit 통합) 완료. 다음: B-6 (Playwright E2E CI) → B-2 (audit log) → B-3 (soft delete) → B-4 (원가/차트) → B-5 (품질 sweep).
-- 상태: **B-1 완결 = 이번 세션(2026-04-21 Ⅳ) 2 커밋 예상** (코드 + 문서). vitest 491→500 (+9), build 14 routes, Playwright widget-embed 20/20 회귀 0, 독립 리뷰 2 병렬 Fix 6건 반영. A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월 유지.
-- ⚠️ **차단**: 없음. B-6 우선 (Supabase 테스트 환경 결정 필요) / 그 외 Task 별 Plan→Approve→Build 엄격 준수.
+- Phase: **2 Epic A 완결 + Epic B 4/6 Task 완료** (A-1~A-5a + B-1 + B-2 + B-3 + B-5). env 분리 + CI 현대화 + barrel refactor 반영. Epic B 남은 2 Task = B-4 (원가/차트) + B-6 (Playwright E2E CI).
+- Epic: **Phase 2 Epic B (운영 품질 Hardening)** — Task B-5 (코드 품질 sweep: shared barrel + server-only 경계) 완료. 다음: **B-4** (원가/차트, 🟢 독립) → **B-6** (E2E CI, Supabase 테스트 환경 선결 필요).
+- 상태: **B-5 완결 = 이번 세션(2026-04-22) 2 커밋 예상** (코드 + 문서). vitest 507 유지 (기능 변화 0), build 15 routes 유지, 독립 리뷰 2 병렬 (code Ship + security Ship) 후 defense-in-depth Fix 1건 반영 (barrel 에 `import "server-only"` 락 + 경계 주석). A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월 유지.
+- ⚠️ **차단**: 없음. B-4 바로 진행 가능 / B-6 는 Supabase 테스트 환경 결정 선행 필요 / 각 Task 별 Plan→Approve→Build 엄격 준수.
 
 ## 완료된 Epic
 
@@ -2309,6 +2309,70 @@ _수정_
 6. **Sentry 프로젝트 멤버 접근 제어 문서화** (sec MEDIUM)
 7. **변경 전·후 값 감사** — Phase 3 `bot_versions` 별도 테이블
 8. **Task B-6** Playwright E2E CI (Supabase 테스트 환경 결정) → **Task B-3** soft delete → **B-4** 원가/차트 → **B-5** 품질 sweep
+
+---
+
+## 이번 세션 (2026-04-22) — Task B-5: 코드 품질 sweep (shared barrel + server-only 경계)
+
+Epic B 4/6 Task. `src/shared/{bots,conversations,time}/index.ts` barrel 3개 + consumer 3파일 import 통합 + 빈 placeholder `shared/{lib,ui}` 정리 + Task 1-8-e 리뷰 이월 (code M-2 barrel + L-1 type re-export) 일괄 해소. 독립 리뷰 2 Ship + defense-in-depth Fix 1건.
+
+### 흐름
+
+1. **현황 파악 + Plan (15분)** — shared/ 구조 (6 폴더 중 4 실사용, barrel 0), `"server-only"` 3파일 (env.server/meta/csv), `@/shared/*` 28 import 19 파일 측정. Jayden 승인 기준 3개 결정 α/α/α (config barrel 제외 / 2+ 심볼 consumer 만 전환 / server-only 현재 3파일 유지) + 빈 폴더 삭제 + 리뷰 2 병렬 승인.
+
+2. **Build (30분)** —
+   - _신규 3_: `src/shared/bots/index.ts` / `src/shared/conversations/index.ts` / `src/shared/time/index.ts` (순수 `export *`)
+   - _수정 3_: `bots/[slug]/conversations/page.tsx` (status 2 + visitor 1 → barrel) / `[conversationId]/page.tsx` (meta 5 + status 2 + visitor 1 → barrel) / `api/conversations/[id]/export/route.ts` (csv 2 + meta 1 + status 1 + visitor 1 → barrel)
+   - _삭제 2_: `shared/lib/.gitkeep` / `shared/ui/.gitkeep` (git rm, 빈 폴더 정리)
+
+3. **검증 (15분)** — typecheck 0 / prettier clean / eslint baseline 3 warnings (기존, 이번 변경 무관) / **vitest 507/507 유지** (기능 변화 0) / build 15 routes 유지.
+
+4. **독립 리뷰 2 병렬 (code + security)** — **둘 다 Ship** 판정.
+   - code MEDIUM: barrel 경유 server-only 경계가 tree-shaking 후 silent 우회 가능성 — 방어로 barrel 에 `import "server-only"` 추가 권고
+   - code LOW: 혼합 import 스타일 (단일 심볼은 세부 경로, 2+ 는 barrel) 컨벤션 명시화
+   - security LOW: barrel 에 server/client 경계 주석 추가 (미래 심볼 충돌 대비)
+
+5. **Fix 반영 1건 (defense-in-depth, 비용 0)** —
+   - `src/shared/conversations/index.ts` 에 `import "server-only"` 락 + server-only/isomorphic 블록 구분 주석. code MEDIUM + security LOW 동시 해소.
+   - 재검증: typecheck/prettier/build 모두 clean.
+
+6. **문서 갱신** — learnings.md +1 (barrel + server-only defense-in-depth 규칙) + PROGRESS.md 현재 위치 + 세션 기록.
+
+### 신규 3 / 수정 3 / 삭제 2
+
+- _신규_: `src/shared/{bots,conversations,time}/index.ts` (+11 lines net)
+- _수정_: `src/app/bots/[slug]/conversations/page.tsx` / `src/app/bots/[slug]/conversations/[conversationId]/page.tsx` / `src/app/api/conversations/[conversationId]/export/route.ts` (-2 lines net, import 경로 간소화)
+- _삭제_: `src/shared/lib/.gitkeep` / `src/shared/ui/.gitkeep`
+- _문서_: `docs/learnings.md` +1 / `PROGRESS.md`
+
+### 검증 (최종)
+
+- typecheck 0 / lint baseline 3 (무관) / prettier clean / vitest **507 유지** / build ✅ (15 routes 유지)
+- 리뷰 2 병렬 → 둘 다 Ship / defense-in-depth Fix 1 반영 후 재검증 clean
+
+### 주요 결정 / 교훈
+
+1. **barrel 에 하나라도 server-only 모듈 포함 시 barrel 자체에 `import "server-only"` 명시 락** — 리뷰에서 code 와 security 판단이 엇갈릴 때 "비용 0 defense-in-depth" 를 우선. Next.js 정적 그래프가 현재 안전해도 미래 번들러 변경 / edge 환경 / custom loader 변수 차단.
+2. **import 경로 컨벤션 확립** — 같은 폴더 2+ 심볼 consumer = barrel / 단일 심볼 = 세부 경로 / isomorphic 심볼을 client 에서 = 세부 경로 (barrel 이 server-only 락 되어있을 수 있으므로).
+3. **config 는 barrel 제외 유지** — Task 2 에서 env.ts → env.server + env.client 로 분리한 경계가 barrel 로 희석되지 않도록.
+4. **Task 1-8-e "premature" 로 미뤘던 리뷰 이월 항목은 Epic 변화 시점에 재평가** — MVP 규모에선 barrel 이 premature 였지만 Epic B 진입 + 폴더 구조 안정 후엔 적기. "미반영 사유" 가 상황 변화로 무효가 될 수 있음.
+
+### learnings.md +1
+
+"shared barrel 도입 시 server-only 모듈 포함 barrel 은 barrel 자체에 `import 'server-only'` 로 명시 락" — 리뷰 교차 지점에서 defense-in-depth 를 선택한 설계 결정 + 파생 컨벤션 (barrel 사용 규칙, isomorphic/server-only 블록 구분 주석, config 예외) 규칙화.
+
+### Backlog (B-5 이월 / 다음 세션 후보)
+
+1. **Task B-4** 원가 환산 + 일별 차트 — `supabase/migrations/0015_add_usd_cents_to_bot_stats.sql` + `getBotDailyStats` RPC + `/bots/[slug]` 14일 차트 컴포넌트 (Chart.js vs Recharts 선택 결정 필요). 🟢 독립, ~2h.
+2. **Task B-6** Playwright E2E CI job — Supabase 테스트 환경 결정 선행 (별도 설계 세션). 🟡, ~1.5h.
+3. **의식적 미반영 (code LOW-2)** — 빈 문자열 email 암묵 처리 (Task 1-8-e, 테스트 커버 + JS falsy 관용 근거로 유지).
+4. **barrel consumer 추가 전환** — 이번은 2+ 심볼 3파일만. 향후 폴더별 소비자가 늘어나면 재평가.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-22 (KST)
+- 브랜치: `main`
+- 차단 요소: 없음 (B-4 바로 진행 가능)
 
 ---
 
