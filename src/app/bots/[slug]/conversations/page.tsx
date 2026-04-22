@@ -10,9 +10,9 @@ import { logger } from "@/core/logging";
 import {
   CONVERSATION_STATUS_CLASS,
   CONVERSATION_STATUS_LABEL,
-} from "@/shared/conversations/status";
-import { visitorLabelOf } from "@/shared/conversations/visitor";
-import { formatRelative } from "@/shared/time/relative";
+  visitorLabelOf,
+} from "@/shared/conversations";
+import { formatRelative } from "@/shared/time";
 
 import { isValidSlug } from "../../new/slug-util";
 import {

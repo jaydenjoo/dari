@@ -6,11 +6,11 @@ import { logger } from "@/core/logging";
 import { checkConversationExportRatelimit } from "@/core/ratelimit/conversation-export-limiter";
 import {
   buildConversationCsv,
+  CONVERSATION_STATUS_LABEL,
   type CsvMessageRow,
-} from "@/shared/conversations/csv";
-import { isValidUuid } from "@/shared/conversations/meta";
-import { CONVERSATION_STATUS_LABEL } from "@/shared/conversations/status";
-import { visitorLabelOf } from "@/shared/conversations/visitor";
+  isValidUuid,
+  visitorLabelOf,
+} from "@/shared/conversations";
 
 /**
  * Task 1-8-d: 대화 CSV export API.

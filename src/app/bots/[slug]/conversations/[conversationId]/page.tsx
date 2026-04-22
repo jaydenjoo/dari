@@ -6,17 +6,15 @@ import { PageBackground } from "@/components/ui/page-background";
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
 import {
+  CONVERSATION_STATUS_CLASS,
+  CONVERSATION_STATUS_LABEL,
   formatDuration,
   formatFullTime,
   formatMessageTime,
   isValidUuid,
   sumTokens,
-} from "@/shared/conversations/meta";
-import {
-  CONVERSATION_STATUS_CLASS,
-  CONVERSATION_STATUS_LABEL,
-} from "@/shared/conversations/status";
-import { visitorLabelOf } from "@/shared/conversations/visitor";
+  visitorLabelOf,
+} from "@/shared/conversations";
 
 import { isValidSlug } from "../../../new/slug-util";
 import { DeleteConversationButton } from "./delete-button";
