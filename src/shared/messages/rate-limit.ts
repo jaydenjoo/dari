@@ -11,7 +11,11 @@
  *   - `withRetryAfter()` 로 reset 시간 동적 부착 (Upstash reset → 초)
  *
  * server-only 불필요 — 순수 상수 + 함수. Client Component 에서도 import 가능.
+ * `computeRetryAfterSeconds` 는 server-only 의존성 없는 공용 위치에서 import
+ * (체인 오염 방지, β-5 INFO-1 부분 통합).
  */
+
+import { computeRetryAfterSeconds } from "@/shared/time/retry-after";
 
 export const RATE_LIMIT_MESSAGES = {
   bot_create: "봇 생성 한도에 도달했어요. 잠시 후 다시 시도해 주세요.",
@@ -49,7 +53,7 @@ export function withRetryAfter(
   resetMs: number,
   now: number = Date.now(),
 ): string {
-  const retryAfterSec = Math.max(1, Math.ceil((resetMs - now) / 1000));
+  const retryAfterSec = computeRetryAfterSeconds(resetMs, now);
   if (retryAfterSec < 60) {
     return `${message} (잠시 후 1분 이내 재시도 가능)`;
   }

@@ -11,6 +11,7 @@ import {
   isValidUuid,
   visitorLabelOf,
 } from "@/shared/conversations";
+import { computeRetryAfterSeconds } from "@/shared/time/retry-after";
 
 /**
  * Task 1-8-d: 대화 CSV export API.
@@ -59,11 +60,8 @@ export async function GET(
   const rl = await checkConversationExportRatelimit(user.id);
   if (!rl.ok) {
     // RFC 6585 표준 Retry-After 헤더 — 클라이언트 재시도 UX 개선 (code M-2 / sec M-1 반영).
-    // `rl.reset` 은 epoch ms. 이미 지난 시점(음수) 대비 최소 1초 보장.
-    const retryAfterSec = Math.max(
-      1,
-      Math.ceil((rl.reset - Date.now()) / 1000),
-    );
+    // 공용 계산 함수 사용 (β-5 code L-2) — 최소 1초 보장.
+    const retryAfterSec = computeRetryAfterSeconds(rl.reset);
     return new NextResponse(JSON.stringify({ error: "too_many_requests" }), {
       status: 429,
       headers: {

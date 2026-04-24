@@ -20,10 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { DariConfig } from "@/core/config";
 import type { RatelimitCheck } from "@/core/ratelimit/factory";
 
-import {
-  computeRetryAfterSeconds,
-  withAllowedOrigin,
-} from "./with-allowed-origin";
+import { withAllowedOrigin } from "./with-allowed-origin";
 
 type TestBot = { id: string; config: DariConfig };
 
@@ -60,17 +57,6 @@ const blockRl = (resetMs: number) => async (): Promise<RatelimitCheck> => ({
 });
 
 const ctx = { params: Promise.resolve({ botId: "test-slug" }) };
-
-describe("computeRetryAfterSeconds", () => {
-  it("미래 reset → 양수 초", () => {
-    expect(computeRetryAfterSeconds(10_000, 0)).toBe(10);
-    expect(computeRetryAfterSeconds(1_500, 0)).toBe(2);
-  });
-  it("지나간 reset → 최소 1초", () => {
-    expect(computeRetryAfterSeconds(0, 5_000)).toBe(1);
-    expect(computeRetryAfterSeconds(-9999, 0)).toBe(1);
-  });
-});
 
 describe("withAllowedOrigin", () => {
   it("bot 없음 → 404 + bot_not_available", async () => {

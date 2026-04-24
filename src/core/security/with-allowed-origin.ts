@@ -5,8 +5,13 @@ import { type NextRequest, NextResponse } from "next/server";
 import type { DariConfig } from "@/core/config";
 import { resolveClientIp } from "@/core/ratelimit/login-limiter";
 import type { RatelimitCheck } from "@/core/ratelimit/factory";
+import { computeRetryAfterSeconds } from "@/shared/time/retry-after";
 
 import { buildCorsHeaders, matchAllowedDomain } from "./origin-check";
+
+// 선제 안전망 re-export (β-5): 현재 외부 소비자 0. 신규 코드는 `@/shared/time/retry-after` 직접 import 권장.
+// Phase 3 정리 시점에 제거 후보 (code LOW 이월).
+export { computeRetryAfterSeconds };
 
 /**
  * 위젯 엔드포인트 공통 가드 (Task β-4).
@@ -61,17 +66,6 @@ export type AllowedOriginOptions<
 }>;
 
 type RouteContext = { params: Promise<{ botId: string }> };
-
-/**
- * `Retry-After` 초 계산 — Upstash reset (unix timestamp ms) 기준.
- * 최소 1초 보장 (이미 만료됐어도 클라이언트가 즉시 재시도하지 않게).
- */
-export function computeRetryAfterSeconds(
-  resetMs: number,
-  now: number = Date.now(),
-): number {
-  return Math.max(1, Math.ceil((resetMs - now) / 1000));
-}
 
 function jsonError(
   code: AllowedOriginErrorCode,
@@ -151,6 +145,9 @@ export function withAllowedOrigin<
       );
     }
 
+    // 성공 경로 CORS 헤더. 실패 경로는 `jsonError` 가 자체 호출 — 두 경로는 상호
+    // 배타 (런타임 중복 0). 실패 경로별 allowedDomains 인자가 달라 (bot load 실패=`[]` /
+    // 그 외=`bot.config.allowedDomains`) 통합 시 정확성 손실 위험 → 분기 유지 (β-5 code L-1).
     const corsHeaders = buildCorsHeaders(origin, bot.config.allowedDomains);
     return handler({ bot, origin, clientIp, corsHeaders }, req);
   };
