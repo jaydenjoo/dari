@@ -40,9 +40,15 @@ Phase 0 단계의 테스트 전략 확정 필요. 검증 대상은 —
 - ✅ Playwright 도입 시점에 계정 · fixture · secret 정책 이미 확정 → 재논의 없음
 - ⚠️ Phase 0 단계에서 UI 회귀 자동 검증 부재 → 수동 검증 의존
 - ⚠️ Playwright 설치 시 CI 시간 증가 → 단일 job 구조 재평가 필요 (별도 E2E job 분리 유력)
+- **✅ Task B-6 (2026-04-24): Playwright CI E2E 완료** — 별도 `e2e` job (`needs: verify`, chromium 전용, timeout 20분).
+  - **경로 C — 로컬 Supabase Docker on CI** 채택 (추가 프로젝트 비용 0). `supabase/setup-cli@v1` + `supabase start` + `.env.local` 동적 생성.
+  - 외부 API (Anthropic/Gemini/Firecrawl) placeholder + `E2E_SKIP_EXTERNAL_API=true` 로 Gemini 의존 spec 2개 파일 전체 skip. 나머지 11 spec CI 실행.
+  - artifact (trace/video/screenshot) 1일 보존 (private repo + 로컬 fixture 키만 노출 → 실 피해 0).
+  - rate limit 은 `checkRatelimit` 의 `NODE_ENV !== "production"` 자동 통과 설계로 Upstash placeholder 안전.
+  - Phase 3 후속: 로컬 E2E 도 테스트 프로젝트 분리 (현재 prod 공유 → B-6b 이월) / Gemini mock 화 → skip 제거.
 
 ## 관련 ADR
 
 - ADR-001 (Next.js)
-- `docs/testing-accounts.md` (E2E 계정 · fixture · secret 전략)
-- `docs/learnings.md`: "공식 가이드 vs 도구 런타임 권고 충돌 시"
+- `docs/testing-accounts.md` (E2E 계정 · fixture · secret 전략 + Task B-6 CI 운영 가이드)
+- `docs/learnings.md`: "공식 가이드 vs 도구 런타임 권고 충돌 시" / "E2E CI 에서 외부 API 의존 spec 과 로컬 Supabase 경계" (B-6)

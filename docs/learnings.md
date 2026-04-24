@@ -2099,3 +2099,28 @@ function DailyTooltip({ active, payload, label }: DailyTooltipProps) { ... }
 - **Asia/Seoul 일별 집계는 SQL + JS 양쪽 동일 포맷 생성이 핵심** — SQL `date_trunc('day', ts AT TIME ZONE 'Asia/Seoul')::date` + `to_char('YYYY-MM-DD')` ↔ JS `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })` 둘 다 `YYYY-MM-DD` 반환 → Map 매칭 가능. KR 사용자 "오늘/어제" 직관과 일치 (UTC day 사용 시 KST 자정 근처 메시지가 다음 날로 묶임).
 
 ---
+
+## 2026-04-24 — Task B-6: 로컬 Supabase Docker on CI (경로 C) + 비용 0 CI E2E
+
+**상황**: Playwright E2E 를 GitHub Actions 에 도입. Jayden 의 제약 = "현재 지불 중인 서비스 외 추가 비용 없이" + "단순화". Supabase Pro 플랜이지만 **전용 `dari-ci` 프로젝트 생성 = 사용량 과금 증가 가능성** → Pro 플랜도 "추가 비용 0" 경로를 별도 탐색 필요.
+
+**판단**: **경로 C — 로컬 Supabase Docker on CI** 채택. `supabase/setup-cli@v1` + `supabase start` 로 runner 내부에서 전체 스택 (Postgres + Auth + Storage) 기동. 외부 Supabase 트래픽 0 → 사용량 과금 0. CI 시간 +90~120s 증가 (docker image pull + init) 는 수용.
+
+**설계 시너지 발견**:
+
+1. **rate limit 의 `NODE_ENV !== "production"` 자동 통과 설계 (`factory.ts` Phase 0 작성)** 가 CI placeholder env 와 조합되어 **Upstash 외부 호출 완전 회피**. Pino logger 는 `NODE_ENV=development` 에서 rate limit skip → `getRedisClient()` 호출 자체가 일어나지 않음. 원래 dev 편의 설계였으나 CI 에서도 정확히 동일 논리 활용.
+
+2. **Playwright `test.skip(condition, reason)` 파일 최상위 호출** 로 Gemini embedding 의존 spec 2개 (`bot-knowledge-sources`, `bot-knowledge-file`) 파일 전체 skip. `E2E_SKIP_EXTERNAL_API=true` 환경변수 매칭 — 로컬은 default false (실 API 실행), CI 는 true (skip). `admin()` 함수는 lazy 초기화라 skip 시 실 호출 경로 진입 안 함.
+
+3. **`supabase status -o json` 키명 불안정성 리스크** → `-o env` 포맷 선호 (code review HIGH). CLI 버전 간 JSON 필드명이 Go PascalCase 로 달라질 수 있음 (`API_URL` vs `ApiURL`). `-o env` 는 `KEY=VALUE` 포맷이 바이너리 내부 상수로 고정 → 버전 업 내성 + 재현성.
+
+**규칙** ⭐:
+
+- **Pro 플랜이라도 "사용량 과금" 우려 시 로컬 Docker 경로가 유효** — 월 구독료 ≠ 사용량 과금. 새 프로젝트 추가는 월 구독 내지만 storage/compute hours 는 별도 과금 가능. 프로젝트 추가 비용 신중 평가.
+- **`checkRatelimit` 의 `NODE_ENV !== "production"` 자동 통과 설계는 CI 에서 "placeholder env 만으로 통과" 를 보장** — 외부 서비스 의존 라이브러리를 사용할 때 "dev/test 에서는 skip" 설계 패턴은 CI 에도 재활용 가능.
+- **Playwright 외부 API 의존 spec 은 파일 상단 `test.skip(process.env.X === 'true', reason)` 환경변수 기반 skip** — `describe` 블록 밖 최상위 호출 시 파일 전체 skip (Playwright 공식 지원). `E2E_SKIP_EXTERNAL_API` 같은 명시적 env 이름으로 의도 가시화.
+- **Supabase CLI status 추출은 `-o env | grep/cut` 패턴 선호 (`-o json | jq` 비선호)** — json 키명이 CLI 버전 간 달라질 수 있으나 `-o env` 포맷의 `KEY=VALUE` 는 바이너리 내부 상수. 양끝 따옴표 제거 (`${VAR%\"}; ${VAR#\"}`) + 빈 값 검증 + `::error::` 로 조기 실패 필수.
+- **`supabase init` 자동 생성 config.toml 의 기본값은 프로젝트 포트 / 정책과 불일치 가능성 점검 필수** — `site_url = http://127.0.0.1:3000` (Next.js 기본) vs Dari 는 `:4000` / `minimum_password_length = 6` vs 앱 Zod `z.string().min(8)` defense-in-depth 불일치. init 직후 수동 점검.
+- **artifact (trace/video) 에 로컬 fixture service_role 키 노출 = 실 피해 0** — ephemeral Docker 컨테이너 전용 키. private repo + 1일 보존이면 sec L-2 원래 교훈 (prod 키 노출 위험) 이 이 경로에는 해당 없음. 로컬 E2E 는 여전히 prod Supabase 사용 중 = B-6b 이관 필수.
+
+---

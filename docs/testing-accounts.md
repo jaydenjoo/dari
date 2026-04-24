@@ -1,7 +1,14 @@
-# Testing Accounts & Fixtures Strategy (Playwright E2E 준비)
+# Testing Accounts & Fixtures Strategy (Playwright E2E)
 
-> **상태**: 계획 단계 (Phase 0 문서화 only). 실 구현은 Epic 0-D (Auth) 완료 이후.
+> **상태**: **구현 완료** (Phase 0 계획 + Phase 2 Task B-6 CI 반영, 2026-04-24).
 > **연관 ADR**: [ADR-007 테스트 전략](./adr/ADR-007-testing-strategy.md)
+>
+> **Task B-6 반영 (CI 전략 확정)**:
+>
+> - **경로 C — 로컬 Supabase Docker on CI** 채택 (원 "test 프로젝트 분리" 계획의 간소화 변형). 외부 프로젝트 추가 비용 0, CI runner 내부에서 `supabase start` 로 전체 스택 기동.
+> - 외부 API (Anthropic/Gemini/Firecrawl) placeholder — **rate limit 은 `checkRatelimit` 이 `NODE_ENV !== "production"` 자동 통과**. Gemini 의존 spec (`bot-knowledge-sources`, `bot-knowledge-file`) 은 상단 `test.skip(E2E_SKIP_EXTERNAL_API === 'true', ...)` 으로 파일 전체 skip.
+> - artifact 보존 1일 (private repo + 로컬 fixture 키라 노출 시 실 피해 0).
+> - **로컬 E2E 는 여전히 prod Supabase 사용** (기존 그대로). Phase 3 후속 Task B-6b 에서 로컬 Supabase 전환 예정.
 
 ## 목적
 
@@ -46,15 +53,47 @@ Playwright E2E 도입 시 사용할 **테스트 사용자 계정 + 데이터 fix
 
 ## 5. Playwright 도입 체크리스트 (Epic 0-D 이후 실행)
 
-- [ ] `npm i -D @playwright/test` + `npx playwright install chromium firefox webkit`
-- [ ] `playwright.config.ts` — `baseURL: http://localhost:4000`, `trace: on-first-retry`, `webServer: npm run dev`
-- [ ] `tests/e2e/fixtures/{users,bots,messages}.ts` 작성
-- [ ] `tests/e2e/smoke.spec.ts` — `/api/health` 200, 랜딩 로딩, 콘솔 에러 0
-- [ ] `tests/e2e/auth.spec.ts` — Google OAuth mock 또는 Supabase test user 직접 로그인
-- [ ] `tests/e2e/bot-crud.spec.ts` — 봇 생성 / 수정 / 삭제 + RLS 격리 검증 (다른 owner 의 봇 조회 시 403)
-- [ ] `.github/workflows/ci.yml` 에 `e2e` job 추가 — `test` 프로젝트 secret 참조, 별도 job 분리 (단일 job 재평가)
-- [ ] `.prettierignore` + `.gitignore` 에 `playwright-report/`, `test-results/` 추가
-- [ ] ADR-007 의 결과 섹션에 "Playwright 도입 완료 (YYYY-MM-DD)" append
+- [x] `npm i -D @playwright/test` + `npx playwright install chromium firefox webkit`
+- [x] `playwright.config.ts` — `baseURL: http://localhost:4000`, `trace: retain-on-failure`, `webServer` 2종 (dev + static 4001)
+- [x] `tests/e2e/fixtures.ts` + `tests/e2e/support/` (test-accounts / auth-helpers / MAIN_TEST_USER)
+- [x] `tests/e2e/smoke.spec.ts` — `/api/health` 200, 홈 로딩, 콘솔 에러 0
+- [x] `tests/e2e/bots-list.spec.ts` / `bot-create.spec.ts` / `bot-detail.spec.ts` / `bot-edit.spec.ts` / `bot-stats.spec.ts` 등 13 spec
+- [x] **`.github/workflows/ci.yml` 에 `e2e` job 추가 (Task B-6, 2026-04-24)** — 경로 C 로컬 Supabase Docker 전략
+- [x] `.gitignore` 에 `playwright-report/`, `test-results/` 추가
+- [x] ADR-007 의 결과 섹션에 "Playwright 도입 완료 (2026-04-24)" append
+- [ ] 로컬 E2E 도 테스트 프로젝트 분리 (Task B-6b 이월)
+- [ ] Gemini embedding mock 도입 → `E2E_SKIP_EXTERNAL_API` 제거 (Phase 3)
+
+## 7. CI E2E 운영 가이드 (Task B-6)
+
+### CI 실행 흐름
+
+1. `verify` job (typecheck / lint / format / vitest / build) 녹색 확인 대기
+2. `e2e` job 시작 — `supabase/setup-cli@v1` + `supabase start` (90~120s, 첫 실행 이후 캐시)
+3. `supabase status -o json` → `.env.local` 동적 생성 (로컬 Supabase 키 + 외부 API placeholder)
+4. `pnpm playwright install --with-deps chromium`
+5. `pnpm test:e2e --project=chromium` (`E2E_SKIP_EXTERNAL_API=true` 지정)
+6. 실패 시 artifact (trace/video/screenshot) 1일 보존 업로드
+
+### 외부 API 처리 (`E2E_SKIP_EXTERNAL_API=true`)
+
+| Spec | 상태 | 이유 |
+|------|-----|-----|
+| `bot-knowledge-sources.spec.ts` | **CI 에서 skip** | text 저장이 실 Gemini embedding 호출 |
+| `bot-knowledge-file.spec.ts` | **CI 에서 skip** | TXT 업로드가 실 Gemini embedding 호출 |
+| 그 외 11 spec | CI 실행 | Supabase Auth/DB/Storage 만 사용 |
+
+Phase 3 에서 Gemini embedding 을 `MSW` 또는 `vi.mock` 스타일로 intercept → skip 제거 가능.
+
+### 로컬 실행 (변동 없음)
+
+```bash
+pnpm test:e2e                    # 전체 (prod Supabase, 13 spec)
+pnpm test:e2e --project=chromium # chromium 만
+pnpm test:e2e --ui               # 디버깅
+```
+
+로컬 실행은 `.env.local` (prod Supabase) 사용. `E2E_SKIP_EXTERNAL_API` 미설정 → knowledge spec 도 실행 (실 Gemini 호출, 비용 발생).
 
 ## 6. 계정 생성 시점
 

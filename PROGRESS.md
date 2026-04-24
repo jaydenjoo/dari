@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 완결 + Epic B 5/6 Task 완료** (A-1~A-5a + B-1 + B-2 + B-3 + B-5 + B-4). env 분리 + CI 현대화 + barrel refactor + 원가/차트 반영. Epic B 남은 1 Task = **B-6 (Playwright E2E CI)**.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening)** — Task B-4 (원가 환산 + 일별 차트) 완료. 다음: **B-6** (E2E CI, Supabase 테스트 환경 선결 필요).
-- 상태: **B-4 완결 = 이번 세션(2026-04-24) 2 커밋 예상** (코드 + 문서). Recharts 3.8.1 설치, `bot_stats_daily` RPC 신규 (Asia/Seoul day bins), 앱 레이어 `computeUsdCents` (단가 변경 시 마이그 회피), `/bots/[slug]` 6번째 KPI (원가) + 이중축 차트 (bar: 메시지, line: 원가). vitest 507 → **540** (+33), build 15 routes 유지, 독립 리뷰 2 병렬 (code Ship as-is + security Ship) 후 Fix 3건 반영 (SQL 주석 인덱스 정확성 / 차트 delay 시각 순서 / tooltip 단가 노출 🟡 대외비).
-- ⚠️ **차단**: 없음. **B-6 는 Supabase 테스트 환경 결정 선행 필요** (별도 설계 세션 가치) / 각 Task 별 Plan→Approve→Build 엄격 준수.
+- Phase: **2 Epic B 완결 (6/6)** — A-1~A-5a + B-1 + B-2 + B-3 + B-4 + B-5 + B-6. env 분리 + CI 현대화 + barrel + 원가/차트 + **Playwright E2E CI (로컬 Supabase Docker)**.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — Phase 2 Epic 전환 신호 평가 필요.
+- 상태: **B-6 완결 = 이번 세션(2026-04-24 Ⅱ) 2 커밋 예상**. 경로 C (로컬 Supabase Docker on CI) 로 추가 비용 0. `supabase/setup-cli@v1` + `supabase start` + `.env.local` 동적 생성 + Gemini 의존 spec 2개 `E2E_SKIP_EXTERNAL_API=true` skip. 독립 리뷰 2 병렬 (code Fix-then-ship HIGH 1 + security Ship conditional MEDIUM 3/LOW 3) 후 **Fix 7건 반영**: jq 파싱 → env 파싱 (HIGH) / timeout 20→25분 / site_url 3000→4000 / minimum_password_length 6→8 / api_url 포트 명시 / .gitignore volumes / testing-accounts 체크리스트.
+- ⚠️ **차단**: 없음. Epic C/D 결정은 실사용자/SI 계약 등 외부 신호 필요 (phase-2-plan §B-6 다음 Epic 표).
 
 ## 완료된 Epic
 
@@ -2560,9 +2560,91 @@ Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `compute
 
 ---
 
+---
+
+## 이번 세션 (2026-04-24 Ⅱ) — Task B-6: Playwright E2E CI (로컬 Supabase Docker, 비용 0)
+
+**Epic B 6/6 최종 Task 완료 = Epic B 전체 완결** 🎉. Jayden 조건 "현재 지불 중인 서비스 외 추가 비용 없이 + 단순화" → **경로 C 로컬 Supabase Docker on CI** 선택.
+
+### 흐름
+
+1. **Plan + 선결 조건 사전 체크 (25분)** — 현재 E2E 가 `.env.local` → dari prod 직접 사용 중 🚨 발견. Supabase 프로젝트 현황 (dari / dairect / chatsio-v1 / autovoxflow 4개). testing-accounts.md 이미 Phase 0 계획 문서 존재. 결정 포인트 5건 비교 + Jayden 답변: Pro 유료 / dairect 무관 / 경로 (c) 단순화 + 권장방향.
+
+2. **경로 C 확정 — 로컬 Supabase Docker on CI** — 별도 프로젝트 추가 = 사용량 과금 가능성. 로컬 Docker 는 runner 임시 컨테이너 = 실 Supabase 트래픽 0. 로컬 E2E 전환은 B-6b 이월.
+
+3. **Build 착수 (~1h)**:
+   - **Step 1 — 외부 API 의존 spec 식별**: `bot-knowledge-sources.spec.ts` + `bot-knowledge-file.spec.ts` (Gemini embedding 실 호출). 나머지 11 spec 은 Supabase 로컬로 커버.
+   - **Step 2 — `supabase init --force`**: `config.toml` 생성 (project_id="dari", 포트 54321/54322 기본값).
+   - **Step 3 — spec 2개에 `test.skip(E2E_SKIP_EXTERNAL_API==='true', ...)` 파일 최상위 호출**: Playwright 공식 파일 전체 skip 패턴. `describe` 밖에서 호출 → 로드 시점에 `_staticAnnotations` 로 등록.
+   - **Step 4 — `.github/workflows/ci.yml` e2e job 추가** (+75줄): needs: verify / supabase/setup-cli@v1 / supabase start / `.env.local` 동적 생성 (로컬 Supabase 키 + 외부 API placeholder) / playwright install --with-deps chromium / test:e2e --project=chromium / artifact 실패 시 1일 보존.
+   - **Step 5 — 로컬 검증**: typecheck ✅ / `playwright test --list` 13 파일 49 테스트 수집 확인.
+   - **Step 6 — testing-accounts.md §7 신규 + ADR-007 결과 블록 append**: 계획 → 구현 완료 반영.
+
+4. **독립 리뷰 2 병렬 (code + security)** —
+   - **code: Fix-then-ship** — **HIGH-1**: `supabase status -o json | jq '.API_URL'` 키명 불안정성 (CLI Go 구조체 PascalCase 가능성) → `-o env | grep/cut` 권장. MEDIUM-1 timeout 20분 빠듯 (25분 권장) / LOW-1 Studio api_url 포트 누락 / INFO-1 testing-accounts 체크리스트.
+   - **security: Ship conditional** — MEDIUM-3 `site_url = 3000` vs 앱 포트 4000 mismatch / LOW-1 `minimum_password_length = 6` vs 앱 Zod min(8) defense-in-depth 불일치 / LOW-2 `supabase/.gitignore` volumes 추가 / MEDIUM-1 `supabase start` 키 로그 노출 (로컬 fixture = 실 피해 0, Phase 3 이관) / MEDIUM-2 action SHA pinning (Phase 3) / INFO-1 로컬 E2E prod 공유 (B-6b 이관).
+
+5. **Fix 7건 반영 (모두 비용 0 + 1~3줄 수정)**:
+   1. `ci.yml` jq 파싱 → `-o env | grep/cut` + 빈 값 검증 + `::error::` 조기 실패 (HIGH 해소)
+   2. `ci.yml` timeout 20 → 25분 (첫 실행 docker pull 여유)
+   3. `config.toml` `site_url` 3000 → 4000 + `additional_redirect_urls` 리스트 갱신
+   4. `config.toml` `minimum_password_length` 6 → 8 (앱 Zod 와 일관)
+   5. `config.toml` Studio `api_url` `127.0.0.1` → `127.0.0.1:54321` (포트 명시)
+   6. `supabase/.gitignore` `volumes` 추가 (로컬 실수 방지)
+   7. `testing-accounts.md` 체크리스트 `[ ]` → `[x]` (ADR-007 이미 갱신됨)
+
+6. **문서 갱신** — testing-accounts.md §7 CI 운영 가이드 / ADR-007 결과 블록 / PROGRESS.md / learnings.md +1 (Task B-6 전체 — 6개 규칙)
+
+### 신규 1 + 수정 6
+
+_신규_: `supabase/config.toml` (supabase init 자동 생성 + 3건 커스터마이징)
+
+_수정_:
+
+- `.github/workflows/ci.yml` — e2e job 추가 (+75줄)
+- `tests/e2e/bot-knowledge-sources.spec.ts` — 파일 최상위 `test.skip`
+- `tests/e2e/bot-knowledge-file.spec.ts` — 동일
+- `supabase/.gitignore` — `volumes` 추가
+- `docs/testing-accounts.md` — 구현 완료 반영 + §7 CI 운영 가이드
+- `docs/adr/ADR-007-testing-strategy.md` — 결과 섹션 Task B-6 블록
+
+### 검증 (최종)
+
+- typecheck ✅ / 로컬 vitest 540 유지 (영향 없음) / build 15 routes 유지
+- Playwright `test --list --project=chromium` → 13 파일 49 tests 수집 OK
+- 리뷰 2 병렬 → code Fix-then-ship (HIGH 1 + 4건) + security Ship (MEDIUM 3 + LOW 3) / **Fix 7건 반영** 후 재검증 clean
+- CI 실 작동은 PR merge 또는 push 시 최초 실행에서 확인 예정
+
+### 주요 결정 / 교훈 (learnings.md +1 — 6개 규칙)
+
+1. **Pro 플랜이라도 "사용량 과금" 우려 시 로컬 Docker 경로 유효** — 월 구독료 ≠ 사용량 과금. 프로젝트 추가 시 storage/compute hours 별도 과금 가능. 비용 측면에서 "추가 사용량 0" 경로 탐색 필수.
+2. **`checkRatelimit` `NODE_ENV !== "production"` 자동 통과 설계가 CI placeholder env 와 조합** — 원래 dev 편의 설계였으나 CI 에서도 재활용. 외부 서비스 의존 라이브러리의 "dev/test skip" 설계 패턴은 CI 재활용 가능.
+3. **Playwright 파일 전체 skip = `test.skip(condition, reason)` 최상위 호출** — `describe` 블록 밖에서 호출 시 파일 전체 skip (공식 지원). `E2E_SKIP_EXTERNAL_API` 같은 명시 env 이름으로 의도 가시화.
+4. **Supabase CLI status 추출은 `-o env | grep/cut` 선호** — `-o json` 은 CLI 버전 간 키명 (PascalCase vs snake_case) 달라질 수 있음. `-o env` 의 `KEY=VALUE` 포맷은 바이너리 내부 상수로 고정.
+5. **`supabase init` 자동 생성 config.toml 기본값 점검 필수** — `site_url=3000` (Next.js 기본) vs 실 앱 포트 / `minimum_password_length=6` vs 앱 Zod 검증. init 직후 수동 점검.
+6. **로컬 fixture key 만 포함된 artifact = 실 피해 0** — ephemeral Docker 컨테이너 전용. private repo + 1일 보존이면 sec L-2 원 교훈 (prod 키 노출) 해당 없음. 단, 로컬 E2E prod 공유 유지 = B-6b 이관 필수.
+
+### Backlog (B-6 이월 / Phase 3)
+
+1. **Task B-6b 로컬 E2E 테스트 프로젝트 분리** — 로컬도 `.env.test.local` 로 전환 (현재 prod 공유 = 설계상 위험). artifact 에 실 prod service_role 포함 위험 해소.
+2. **Gemini embedding mock 도입** — `msw` 또는 `vi.mock` 패턴으로 `E2E_SKIP_EXTERNAL_API` 제거 → CI 커버리지 13 spec 완전 복구.
+3. **`supabase start` 출력 키 redact** — fixture 키지만 collaborator 혼란 방지 (security MEDIUM-1 이월).
+4. **GitHub Actions SHA pinning + dependabot** — `supabase/setup-cli@v1` 등 (security MEDIUM-2 이월).
+5. **`.gitleaks.toml` 커스텀 allowlist** — `sk-<random>` CI 동적 생성 패턴 (security LOW-3 이월).
+6. **Supabase CLI 버전 고정** — `version: latest` → `version: 1.x.x` (CI 재현성, security INFO-2 이월).
+7. **Docker layer cache** — `supabase start` 첫 실행 시간 단축 (code MEDIUM-2 연장).
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-24 Ⅱ (KST) — **Epic B Task B-6 완결 = Epic B 전체 완결 🎉**
+- 브랜치: `main`
+- 차단 요소: 없음 (Phase 2 Epic C/D 전환 신호 평가 필요)
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-24 (Epic B Task B-4 완결 — 원가 환산 + 일별 차트 + Recharts 3.8.1 + 스펙 수정 판단 + 리뷰 Fix 3건, **Phase 2 Epic B 5/6 진행**, 다음: B-6 Playwright CI)
+- 날짜: 2026-04-24 Ⅱ (Epic B Task B-6 완결 = **Epic B 6/6 전체 완결 🎉** — Playwright E2E CI (로컬 Supabase Docker, 비용 0) + 리뷰 Fix 7건, Phase 2 Epic B 종료. 다음: Epic C 멀티테넌트 or Epic D 카카오톡)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
 - 커밋: `5d14476` (B-2 audit) · `09ea01d` (B-1 save) · `bd38558` (B-1 feat)
