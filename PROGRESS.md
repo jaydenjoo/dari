@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL ✅** — A-1~A-5a + B-1~B-6 + β-1~β-4 + 잔여 ①. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (β-4 본체 5건 + 잔여 ① PSL `tldts` Ship ✅ / 잔여 ② Upstash refund 진입 예정 / ③ i18n Phase 3 분리). `withAllowedOrigin` HOC + Retry-After 표준화 + `allowedDomains` PSL effective TLD 차단 + userinfo (@) 주입 차단.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 핵심 그룹 모두 해소 + PSL 강화까지 완결. 다음: β-4 잔여 ② Upstash refund (본 세션 Ⅶ 진입) → 완결 시 외부 신호 평가 단계 도달.
-- 상태: **이번 세션(2026-04-24 Ⅶ) Task β-4 잔여 ① Ship 완료 + 잔여 ② Upstash refund 진입**. 패키지 3 (Ship A + Plan/Build B) 구조. Ship 완료: 5 files 커밋 (PSL `tldts` 7.0.28 + `@` 차단 + 회귀 +13). vitest 587/587 / tsc clean / lint 0 errors / build 14 routes clean.
-- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 = β-4 본체 + 잔여 ① ✅. β-4 잔여 = ② Upstash refund (본 세션 Ⅶ Plan 예정) / ③ i18n (Phase 3).
-- ⚠️ **차단**: 없음. 잔여 ② 본 세션 Plan→Approve→Build 진행 중.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL ✅ + 잔여 ② refund 조사 ✅** — A-1~A-5a + B-1~B-6 + β-1~β-4 + 잔여 ①·②. **백로그 우선 1·2·3 ✅ + 우선 4 ✅ (MVP 범위 내 항목 모두 완결)**. β-4 잔여 = ① PSL `tldts` Ship ✅ / ② Upstash refund 조사 완료 → Phase 3 이월 확정 (ADR-010) / ③ i18n Phase 3 분리. 내부 경로 α 모두 클로징 → 외부 신호 평가 단계 도달.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 내부 가능 항목 모두 해소 + PSL 강화 + rate limit refund 조사·이월 ADR 화. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
+- 상태: **이번 세션(2026-04-24 Ⅶ) Task β-4 잔여 ① Ship + 잔여 ② 조사·ADR-010 작성 완료**. 패키지 3 (Ship A + Plan/Build B-α) 전부 완결. Ship 커밋: 6 files (5 코드 + PROGRESS.md). Build (α=기록화): ADR-010 신규 + learnings.md 교훈 +1 + ADR README 인덱스 + PROGRESS.md 백로그 상태 전환. vitest 587/587 / tsc clean / lint 0 errors / build 14 routes clean.
+- 확인: 백로그 진행률 = 우선 1·2·3·4 모두 ✅ (MVP 범위 내 완결). β-4 잔여 ③ i18n 은 Phase 3 SaaS 신호 대기로 영구 이월.
+- ⚠️ **차단**: 없음. Phase 2 내부 경로 α 완전 종결. 다음 세션 후보 = 외부 신호 평가 (Kakao / 실사용자 / 포트폴리오 사이트) 또는 γ/δ 백로그 재검토.
 
 ## 완료된 Epic
 
@@ -1842,7 +1842,7 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - [x] Task 1-0-b 후속 #2 Route Handler wrapper `withAllowedOrigin` — chat + widget-config 라우트 4단 (bot 조회 / origin / rate limit / CORS) 일원화 + Retry-After 자동 주입 (β-4)
 - [ ] Task 1-0-b 후속 #3 ccSLD PSL 차단 (`tldts` 도입) — 🚫 **외부 의존 분리** (β-4-후속 #1, ~30분 + 의존성 사이즈 평가)
 - [x] Task 1-0-a 후속 #1 rate limit reset UX — Route Handler `Retry-After` 헤더 표준화 + Server Action 7개 지점 메시지 퍼지 표현 ("잠시 후 1분 이내" / "약 N분/시간 후") (β-4)
-- [ ] Task 1-0-a 후속 #2 DariConfig 실패 카운터 복구 — 🚫 **조사 필요 분리** (β-4-후속 #2, Upstash refund API 가능성 + 보상 카운터 설계, ~1h)
+- [x] Task 1-0-a 후속 #2 DariConfig 실패 카운터 복구 — ✅ **조사 완료 → Phase 3 이월 확정** (2026-04-24 Ⅶ, [ADR-010](./docs/adr/ADR-010-rate-limit-refund-deferred.md)). Upstash `resetUsedTokens` 은 전체 리셋만 지원 (부분 환불 부재), 내부 우회 (Redis DECR / Lua 재구현) 는 SDK 내부 구현 의존·race·slidingWindow 2키 이슈로 MVP 부적합. Phase 3 SaaS 카운터 분리 설계 때 통합 재평가 (트리거 4개 ADR 명시).
 - [ ] Task 1-0-a 후속 #3 i18n 라이브러리 — 🚫 **Phase 3 분리** (β-4-후속 #3, `next-intl` 등, 다국어 지원 신호와 함께)
 
 **백로그 총 소요 추정**: 5~7시간 (3~4 세션 분량). 우선 1·2 먼저 묶어 한 Task 로 진입하는 것 권장 (범위 작고 독립).
@@ -2641,6 +2641,40 @@ Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `compute
 **Phase 2 백로그 진행률**: 우선 1 ✅ / 우선 3 ✅ / 우선 2 🔶 부분 (#1+#4 완 / #3 이월 / #2 β-3b 분리) / 우선 4 ⏳ 대기.
 
 - 날짜: 2026-04-24 Ⅲ (KST) — 백로그 β-1 + β-2 + β-3a 3 Task 연속 완결, 외부 신호 대기 중 내부 정돈 집중 세션
+
+---
+
+## 이번 세션 (2026-04-24 Ⅶ) — Task β-4 잔여 ① Ship + 잔여 ② 조사·Phase 3 이월 (ADR-010) · 패키지 3 완결
+
+**맥락**: 세션 Ⅵ 에서 β-4 잔여 ① PSL `tldts` Build + 리뷰·반영 완료 후 커밋 미완 (working tree 5 files) 상태로 세션 종료. 세션 Ⅶ 시작 시 /start 스킬로 상태 로드 → "패키지 3 (최대): A Ship + B Plan/Build" 승인 받고 진행.
+
+### 흐름 (~1h 30분)
+
+1. **A. β-4 잔여 ① Ship 준비 + 최종 검증 (15분)** — vitest 587/587, tsc clean, lint 0 errors, build 14 routes clean 전수 통과 확인. tldts 7.0.28 설치 확인. 커밋 메시지 초안 + PROGRESS.md "현재 위치" 4줄 업데이트 Plan 제시 → Jayden 승인.
+
+2. **A. β-4 잔여 ① 커밋·푸시 완료 (5분)** — `feat(security): Task β-4 잔여 ① PSL tldts ...` 커밋 (440cacd, 6 files, 172+/20-, gitleaks no leaks). origin/main 푸시 (2291bec..440cacd). A 단계 종결.
+
+3. **B. β-4 잔여 ② Upstash refund 조사 (20분)** — Upstash Ratelimit TS SDK 공식 메서드 전수 점검 (WebFetch) + Dari rate limit 11 호출 지점 grep. 결과: SDK 6 메서드 중 `resetUsedTokens` 단 하나가 환불 관련, 그러나 **전체 리셋** (1 차감 아님) → `bot-create` 5 req/h 에서 4회 성공 후 1회 실패 시 `resetUsedTokens` 호출하면 과거 4회까지 모두 초기화 → **정책 우회 위험**. 공식 `refund` / rollback / pending-commit 패턴 **없음**. 내부 우회 (Redis DECR / Lua 재구현) 는 SDK 내부 구현 의존 + slidingWindow 2키 모호 + race + 유지 비용 영구화 → MVP 부적합.
+
+4. **B. Plan 5 경로 비교표 + 권장 D (현상 유지 + Phase 3 이월) 제시 (15분)** — 경로 A (resetUsedTokens 사용: 전체 리셋 정책 우회) / B (Redis DECR: SDK 의존·race) / C (pending-commit 추상화: 근본 미해결) / **D (이월 ⭐)** / E (Lua 재구현: ~3h+, SDK 재구현). 권장 근거 4개: 공식 부분 환불 부재 / MVP UX 리스크 낮음 / Phase 3 통합 재설계 효율 / CLAUDE.md 원칙 부합. 옵션 α (D + ADR + 기록화) / β (B 감수 + Build) / γ (즉시 종료) 중 **Jayden α 선택**.
+
+5. **B-α Build: ADR-010 + learnings.md + 백로그 클로징 (25분)** —
+   - `docs/adr/ADR-010-rate-limit-refund-deferred.md` 신규 — 맥락/결정/조사/5 대안/근거/결과/재평가 트리거 4개(Phase 3 SaaS / 유저 불만 3건+ / 정책 타이트닝 / Upstash SDK refund 공식 도입)/관련 ADR·백로그 포함.
+   - `docs/adr/README.md` 인덱스에 ADR-010 추가.
+   - `docs/learnings.md` +1 교훈 — "외부 SDK 부분 동작 vs 부분 미지원 구분 → Phase 이월 결정 패턴" (네이밍만 보지 말고 의미론 확인 / 내부 우회 3대 비용 / 조사 필요 백로그 2 세션 내 클로징 원칙 등 6 규칙).
+   - `PROGRESS.md` 백로그 우선 4 Task 1-0-a 후속 #2 → `[x]` 전환 + ADR-010 링크.
+
+### 결과
+
+- **Phase 2 내부 경로 α 전면 종결** — 백로그 우선 1·2·3·4 모두 ✅ (MVP 범위 내). β-4 잔여 ③ i18n 은 Phase 3 SaaS 신호 대기로 영구 이월.
+- **외부 신호 평가 단계 도달** — 다음 세션 후보: Kakao Business 계정 개설 / 실사용자 3~5명 확보 / 5개 포트폴리오 사이트 embed (A-5b) / iOS 실기기 smoke. 모두 Jayden 외부 조치 선결.
+- **현재 세션 Ⅶ 커밋**: 440cacd (feat ship) + (예정) docs: ADR-010 + learnings + 백로그 클로징 + 세션 기록.
+
+### 교훈 (learnings.md 추가분)
+
+1. **외부 SDK 부분 동작 vs 부분 미지원 구분** — 이름(refund/reset)이 유사해도 의미론(1 차감 vs 전체 리셋) 확인 필수. 공식 문서 한 줄 설명 + 실 동작 테스트 1회.
+2. **내부 구현 우회 3대 비용** — SDK 내부 키/알고리즘 의존 (업그레이드 시 깨짐) / 원자성 부재 (race 추가 구현) / SDK 재구현 (유지 비용 영구). 비용 감수 트리거 없으면 이월이 더 싸다.
+3. **"조사 필요 분리" 백로그는 2 세션 내 클로징 원칙** — 조사 한 세션 + 결정 한 세션. 영구 이월은 이중 부채, "조사 완료 → Phase 3 이월 (ADR)" 형태 한 번에 종결이 효율.
 
 ---
 

@@ -67,6 +67,7 @@
 | [007](./ADR-007-testing-strategy.md)       | 테스트 전략: Vitest + Playwright 보류        | Accepted                          | 2026-04-17 |
 | [008](./ADR-008-environment-separation.md) | 환경 분리: 2환경 Lean + Vercel Preview       | Accepted                          | 2026-04-17 |
 | [009](./ADR-009-widget-architecture.md)    | 위젯 아키텍처: Shadow DOM + dari.kr + AI SDK | Accepted                          | 2026-04-21 |
+| [010](./ADR-010-rate-limit-refund-deferred.md) | Rate limit 실패 카운터 복구 Phase 3 이월 | Accepted                          | 2026-04-24 |
 
 > **Planned**: 해당 Epic 진행 시 작성 예정 (005 = Epic 0-G 플러그인)
 >
