@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL ✅ + 잔여 ② refund 조사 ✅** — A-1~A-5a + B-1~B-6 + β-1~β-4 + 잔여 ①·②. **백로그 우선 1·2·3 ✅ + 우선 4 ✅ (MVP 범위 내 항목 모두 완결)**. β-4 잔여 = ① PSL `tldts` Ship ✅ / ② Upstash refund 조사 완료 → Phase 3 이월 확정 (ADR-010) / ③ i18n Phase 3 분리. 내부 경로 α 모두 클로징 → 외부 신호 평가 단계 도달.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 내부 가능 항목 모두 해소 + PSL 강화 + rate limit refund 조사·이월 ADR 화. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
-- 상태: **이번 세션(2026-04-24 Ⅶ) Task β-4 잔여 ① Ship + 잔여 ② 조사·ADR-010 작성 완료**. 패키지 3 (Ship A + Plan/Build B-α) 전부 완결. Ship 커밋: 6 files (5 코드 + PROGRESS.md). Build (α=기록화): ADR-010 신규 + learnings.md 교훈 +1 + ADR README 인덱스 + PROGRESS.md 백로그 상태 전환. vitest 587/587 / tsc clean / lint 0 errors / build 14 routes clean.
-- 확인: 백로그 진행률 = 우선 1·2·3·4 모두 ✅ (MVP 범위 내 완결). β-4 잔여 ③ i18n 은 Phase 3 SaaS 신호 대기로 영구 이월.
-- ⚠️ **차단**: 없음. Phase 2 내부 경로 α 완전 종결. 다음 세션 후보 = 외부 신호 평가 (Kakao / 실사용자 / 포트폴리오 사이트) 또는 γ/δ 백로그 재검토.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + 잔여 ①·② + β-5 ✅** — A-1~A-5a + B-1~B-6 + β-1~β-5. **백로그 우선 1·2·3·4 + 이월 cleanup 모두 완결**. β-4 이월 code L-1/L-2/INFO-1 3건 β-5 에서 클로즈. 내부 경로 α 전면 종결 → 외부 신호 평가 단계 유지.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 내부 가능 항목 모두 해소 + PSL 강화 + rate limit refund ADR-010 + `Retry-After` 계산 단일 출처 + DoS 가드. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
+- 상태: **이번 세션(2026-04-24 Ⅷ) Task β-5 완결** — `computeRetryAfterSeconds` 를 `core/security/with-allowed-origin.ts` (server-only) → `shared/time/retry-after.ts` (Client/Server 공용) 로 분리 이동 + NaN/Infinity 가드 + 24h 상한 (sec DoS) + 3 사용처 공용 함수 일원화 + L-1 `buildCorsHeaders` 상호 배타 근거 주석. 리뷰 Fix 4건. vitest 587 → 589 / tsc clean / lint 0 errors / build 15 routes clean.
+- 확인: 백로그 β-4 이월 3건 (code L-1 주석 / code L-2 공용 함수 / code INFO-1 내부 DRY) 모두 클로즈. `shared/time/` barrel 일관성 반영.
+- ⚠️ **차단**: 없음. Phase 2 내부 경로 α 완전 종결 + 이월 cleanup 완결. 다음 세션 후보 = 외부 신호 평가 (Kakao / 실사용자 / 포트폴리오 사이트) 또는 γ/δ 백로그 재검토.
 
 ## 완료된 Epic
 
@@ -2947,9 +2947,93 @@ _수정_:
 
 ---
 
+## 이번 세션 (2026-04-24 Ⅷ) — Task β-5: β-4 이월 cleanup (`computeRetryAfterSeconds` 공용화 + DoS 가드 + L-1 근거 주석)
+
+**맥락**: 세션 Ⅶ 에서 β-4 잔여 ① PSL Ship + 잔여 ② Phase 3 이월 ADR-010 완결 직후. 내부 경로 α 전면 종결 상태. Jayden 옵션 A 선택 (β-5 cleanup) — 이월된 3건 (code L-1 / L-2 / INFO-1) 통합 정리. 외부 신호 대기 중 내부 정돈 집중 세션.
+
+### 흐름 (~1h)
+
+1. **Plan 수립 + 재평가 (15분)** — Grep/Read 로 실 코드 상태 사전 검증 (2026-04-24 교훈 적용):
+   - **code L-1 재평가**: `buildCorsHeaders` "이중 호출" 지적 → 실제는 실패 경로 (`jsonError`) 와 성공 경로 (`withAllowedOrigin` 본문) 가 **상호 배타** (런타임 중복 0). 실패 경로별 `allowedDomains` 인자가 달라 (bot load 실패=`[]` / 그 외=`bot.config.allowedDomains`) 통합 시 정확성 손실 위험. **수정 불필요 → 주석 1줄 보강**.
+   - **code L-2**: `export/route.ts` 인라인 `Math.max(1, Math.ceil(...))` → 공용 함수 교체.
+   - **code INFO-1**: `withRetryAfter` (string, 퍼지) ↔ `computeRetryAfterSeconds` (number, 정확) **외부 API 분리 유지** (용도 다름). 내부 계산 로직만 단일 출처로 DRY.
+   - 핵심 설계 결정: `computeRetryAfterSeconds` 를 `core/security/with-allowed-origin.ts` (server-only) → `shared/time/retry-after.ts` (Client/Server 공용) 로 이동. `rate-limit.ts` 가 server-only 모듈 참조하면 client 빌드 오염 위험.
+   - Jayden 승인.
+
+2. **Build (~20분)** — 신규 2 + 수정 5 병렬 Edit:
+   - `src/shared/time/retry-after.ts` 신규 (~20줄 초안, Fix 후 ~33줄)
+   - `src/shared/time/retry-after.test.ts` 신규 (초안 2 케이스, Fix 후 4 케이스)
+   - `src/core/security/with-allowed-origin.ts` — 로컬 선언 제거 + import + 하위 호환 re-export + L-1 주석 보강
+   - `src/core/security/with-allowed-origin.test.ts` — `computeRetryAfterSeconds` 테스트 블록 제거 (이동됨)
+   - `src/shared/messages/rate-limit.ts` — 내부 `Math.max(1, Math.ceil(...))` → `computeRetryAfterSeconds(resetMs, now)` 호출
+   - `src/app/api/conversations/[conversationId]/export/route.ts` — import + 인라인 계산 1줄 교체
+
+3. **검증 1차** — typecheck ✅ / lint 3 baseline 0 errors / vitest 587/587 / build 15 routes / prettier **2 unrelated ADR 파일 drift 발견** (세션 Ⅶ ADR-010 + ADR README 인덱스, 테이블 column padding) → 일괄 fix 커밋에 포함.
+
+4. **독립 리뷰 2 병렬 (code + security) (15분)**:
+   - **code-reviewer: Ship** — 통과 5건 (이동 타당성 / re-export trade-off / 회귀 테스트 수학적 보장 / 주석 의도 왜곡 없음 / L-1 주석 충분성). LOW 2건.
+   - **security-reviewer: Ship conditional** — OWASP 통과 6건 (A01/A04/A09/A06/A08/A03). DoS 부분 위험: NaN/Infinity → Retry-After 헤더 "NaN"/"Infinity" 문자열 삽입 시 RFC 6585 위반 + 클라이언트 예외. 4줄 수정 권장.
+
+5. **Fix 4건 반영 (10분, 모두 비용 0~4줄)**:
+   1. **sec (DoS 가드)**: `shared/time/retry-after.ts` 에 `MAX_RETRY_AFTER_SEC = 86_400` (24h 상한) + `Number.isFinite(diff)` 체크 → 1초 fallback. 테스트 +2 케이스 (NaN/Infinity + 먼 미래 reset).
+   2. **code LOW-1**: `src/shared/time/index.ts` 에 `export * from "./retry-after"` 추가 (`relative` 와 barrel 패턴 일관성).
+   3. **code LOW-2**: `with-allowed-origin.ts` re-export 주석 "기존 import 사이트 유지" → "선제 안전망 (외부 소비자 0, Phase 3 제거 후보)" 정밀도 교정.
+   4. **Unrelated prettier drift fix**: `docs/adr/ADR-010-rate-limit-refund-deferred.md` + `docs/adr/README.md` 테이블 column padding 자동 포맷 (세션 Ⅶ 검증 누락 — 교훈 재발, β-3b 세션에 이어 두 번째).
+
+6. **재검증** — typecheck 0 / lint 3 baseline / vitest **589/589** (587 → 589, +2) / prettier clean / build 15 routes ✅.
+
+### 검증 (최종)
+
+- typecheck ✅ / lint 3 baseline / prettier ✅ / **vitest 589** (587→589 / retry-after 테스트 +2 NaN/Infinity + 먼 미래) / build ✅ (15 routes 유지)
+- gitleaks no leaks 예상 (커밋 시점 hook)
+
+### 주요 결정 / 교훈 (learnings.md +1 예정)
+
+1. **server-only 모듈 내 순수 함수는 Client/Server 공용 위치로 분리** — `computeRetryAfterSeconds` 는 `Math.max/ceil + Date.now` 만 쓰는 순수 산술 함수였지만 `core/security/with-allowed-origin.ts` (server-only) 내부에 있었음. Client Component 체인에서 쓰고 싶은 다른 모듈 (`rate-limit.ts`) 이 이 함수를 import 하면 server-only 가 client 번들에 새어 빌드 오염. **규칙**: "외부 export 되는 pure 함수는 server-only 의존성 없는 공용 위치 (`@/shared/...`) 에 배치. server-only 는 외부 의존 (DB/env/SDK) 실제로 있는 함수에만 붙임".
+
+2. **외부 SDK 응답 값은 HTTP 헤더로 노출되기 전 유효성 가드** — Upstash `RatelimitResponse.reset` 이 비정상 (NaN / Infinity / 시계 skew 로 먼 미래) 일 수 있음. 헤더에 `"NaN"` / `"Infinity"` 삽입 시 RFC 6585 위반 + 일부 클라이언트 라이브러리 예외. `Number.isFinite` 가드 + 상한 (24h) 필수. **규칙**: "외부 API/SDK 응답값이 네트워크로 다시 나가는 경우 (HTTP 헤더 / 응답 body / 리다이렉트 URL 등) 유효성 가드 없이 그대로 내보내지 말 것. 최소 typeof/NaN/Infinity 체크".
+
+3. **Plan 전 재평가로 LOW 항목 실제 런타임 문제 없음 판별** — code L-1 "이중 호출" 지적은 `jsonError` (실패 경로) + `withAllowedOrigin` 본문 (성공 경로) 두 호출을 가리킨 것인데, 두 경로는 상호 배타 → 런타임 중복 0. 단순 통합 시도 시 오히려 `allowedDomains` 인자 분기 정확성 손실. **규칙**: "이월 리뷰 항목은 Plan 전 실 코드 재검토 필수. 주석 보강만으로 충분한 경우도 있음 (의식적 설계의 문서화)".
+
+4. **prettier check 는 전체 파일에 대해 매 세션 검증 필수 (교훈 재발)** — 세션 Ⅶ 에서 ADR-010 + ADR README 추가 시 prettier 누락. β-3b 세션 교훈에도 이미 명시된 규칙이지만 두 번째 재발 = 프로세스 강화 필요. 수동 규칙만으로 불충분 — `pnpm check` (`typecheck && lint && format:check && test`) 를 세션 종료 전 최종 게이트로 사용하거나 pre-commit hook 에 `format:check` 추가 검토.
+
+### 신규 2 + 수정 6 + unrelated 2
+
+_신규_:
+
+- `src/shared/time/retry-after.ts` (~33줄, NaN/Infinity 가드 + 24h 상한)
+- `src/shared/time/retry-after.test.ts` (4 케이스)
+
+_수정_:
+
+- `src/shared/time/index.ts` — barrel 추가
+- `src/core/security/with-allowed-origin.ts` — 로컬 선언 제거 + import + re-export (선제 안전망) + L-1 상호 배타 주석
+- `src/core/security/with-allowed-origin.test.ts` — 중복 테스트 블록 제거
+- `src/shared/messages/rate-limit.ts` — 공용 함수 호출로 교체
+- `src/app/api/conversations/[conversationId]/export/route.ts` — 인라인 → 공용 함수
+
+_Unrelated (세션 Ⅶ drift 일괄 fix, 의미 변경 0)_:
+
+- `docs/adr/ADR-010-rate-limit-refund-deferred.md` — prettier 자동 포맷
+- `docs/adr/README.md` — prettier 자동 포맷 (테이블 column padding)
+
+### Backlog (β-5 이월 / Phase 3)
+
+1. **`with-allowed-origin.ts` re-export 제거** — 외부 소비자 0 (grep 확인). Phase 3 cleanup 시 한 줄 삭제.
+2. **prettier 강화**: `pre-commit hook` 에 `format:check` 추가 or `pnpm check` 를 PR 필수 게이트. β-3b + β-5 = 두 세션 연속 동일 drift.
+3. **sec L-2 (β-4 이월 유지)**: `loadBot` null 원인 구분 (DB 오류 vs 미존재) — RLS 우회 검증과 묶어 별도 설계 작업.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-24 Ⅷ (KST) — **Task β-5 완결 = β-4 이월 cleanup 3건 클로즈 + DoS 가드 + shared/time barrel 일관성**
+- 브랜치: `main`
+- 차단 요소: 없음 (Phase 2 내부 α 전면 종결 + 이월 모두 해소. 다음 후보 = 외부 신호 평가)
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-24 Ⅴ (Task **β-4 완결** = 백로그 우선 4 부분 완결 + 백로그 핵심 그룹 모두 해소. `withAllowedOrigin` HOC + Retry-After 표준화 + Server Action reset 퍼지 표현 + allowedDomains schema refine. 리뷰 Fix 5건. 다음: 백로그 후속 3건 또는 외부 신호 평가)
+- 날짜: 2026-04-24 Ⅷ (Task **β-5 완결** = β-4 이월 cleanup 3건 클로즈. `computeRetryAfterSeconds` 공용화 (`shared/time/retry-after`) + NaN/Infinity 가드 + 24h 상한 + L-1 상호 배타 근거 주석. 리뷰 Fix 4건. 다음: 외부 신호 평가 또는 sec L-2 별도 설계)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 최근 커밋: `6205e3f` (β-3b) · `19877d5` (β-1+β-2+β-3a docs) · `b1ae464` (β-3a) · `96e48e8` (β-2) · `0a01305` (β-1)
+- 최근 커밋: `d0f02b3` (β-4 잔여 ② ADR-010) · `440cacd` (β-4 잔여 ① PSL tldts) · `2291bec` (β-4 잔여 ① docs) · `1ff2dfb` (β-4) · `6205e3f` (β-3b)

@@ -2441,3 +2441,53 @@ return result.publicSuffix === baseHost;
 - **"조사 필요 분리" 백로그 항목은 조사 한 세션 + 결정 한 세션 = 총 2 세션 내 클로징 원칙** — 영구 이월은 "조사 부재 + 결정 부재" 이중 부채. 본 Task 처럼 "조사 완료 → Phase 3 이월 확정 + ADR" 형태로 한 번에 종결하는 것이 효율 + 정신적 부담 감소.
 
 ---
+
+## 2026-04-24 Task β-5 — server-only 모듈 내 순수 함수 위치 & 외부 SDK 응답값 유효성 가드 & 이월 LOW 항목 재평가
+
+**상황**: Phase 2 백로그 β-4 이월 cleanup (code L-1 `buildCorsHeaders` 이중 호출 / code L-2 export route `Retry-After` 인라인 / code INFO-1 `withRetryAfter` ↔ `computeRetryAfterSeconds` 통합). 셋 다 LOW 등급이었으나 Plan 전 재평가에서 **판단이 달라진 것 1건** + **보안 리뷰가 새 이슈 발견 1건** + **공통 위치 결정에 설계 근거 필요 1건**.
+
+**발견 1 — server-only 모듈 내 순수 함수가 client 빌드 오염 트리거**:
+
+- `computeRetryAfterSeconds` 는 `Math.max + Math.ceil + Date.now` 만 쓰는 pure function (외부 I/O / env / SDK 의존 0).
+- 기존 위치 = `src/core/security/with-allowed-origin.ts` (파일 상단 `import "server-only"`). HOC 자체는 `NextRequest`/DB/rate limiter 의존으로 server-only 정당.
+- 하지만 동일 파일에서 export 되는 pure function (`computeRetryAfterSeconds`) 을 `src/shared/messages/rate-limit.ts` (Client Component 에서도 import 가능한 모듈) 이 참조하면 **빌드 체인에 server-only 가 섞임** → 일부 import 경로에서 Next.js "Server-only module was imported from a Client Component" 에러 가능.
+
+**발견 2 — Upstash `rl.reset` 비정상값이 `Retry-After` HTTP 헤더로 그대로 노출**:
+
+- `rl.reset` 은 epoch ms. `Math.max(1, Math.ceil((rl.reset - Date.now()) / 1000))` 로 초 변환.
+- **NaN 입력** → `NaN` 반환 → `String(NaN)` → `"NaN"` 헤더 값 삽입.
+- **Infinity 입력** → `Infinity` 반환 → `"Infinity"` 헤더 값 삽입.
+- RFC 6585 위반 + axios-retry 등 일부 클라이언트 라이브러리가 헤더 파싱 시 예외.
+- 트리거: Upstash SDK 비정상 응답 / 시계 skew / serialize 버그.
+
+**발견 3 — "이중 호출" 지적이 실제로는 상호 배타 경로**:
+
+- β-4 리뷰에서 `buildCorsHeaders` 가 `jsonError` + `withAllowedOrigin` 본문 두 곳에서 호출 → "이중 호출" 지적.
+- Plan 전 재검토 결과: `jsonError` 는 **실패 경로만**, 본문 line 154 는 **성공 경로만** → 두 경로는 상호 배타 → **런타임 중복 0**.
+- 단순 통합 시 실패 경로별 `allowedDomains` 인자 차이 (bot load 실패=`[]` / 나머지=`bot.config.allowedDomains`) 가 손실됨. 정확성 저하.
+- 의식적 설계였음 → 주석 1줄 보강으로 "왜 통합 안 했나" 문서화하는 것이 올바른 해소.
+
+**해결**:
+
+1. `src/shared/time/retry-after.ts` 신규 — `computeRetryAfterSeconds(resetMs, now?)` 공용 함수.
+   ```typescript
+   const MAX_RETRY_AFTER_SEC = 86_400; // 24시간 상한
+   export function computeRetryAfterSeconds(resetMs, now = Date.now()) {
+     const diff = resetMs - now;
+     if (!Number.isFinite(diff)) return 1; // NaN/Infinity/-Infinity 가드
+     return Math.min(MAX_RETRY_AFTER_SEC, Math.max(1, Math.ceil(diff / 1000)));
+   }
+   ```
+2. 3 사용처 (`rate-limit.ts` / `export/route.ts` / `with-allowed-origin.ts` 내부) 모두 공용 함수 호출로 일원화.
+3. `with-allowed-origin.ts` 는 로컬 선언 제거 + 하위 호환 re-export (Phase 3 제거 후보).
+4. `with-allowed-origin.ts` 본문 line 154 근처에 주석 3줄 — "상호 배타, 통합 시 allowedDomains 정확성 손실" 근거 명시.
+
+**규칙** ⭐:
+
+- **server-only 는 "실제로 server-only 의존이 있는 함수에만"** — pure function (산술 / 문자열 조작 / 정렬 등) 은 `@/shared/...` 공용 위치에 두고, server-only 모듈에서 import 해서 쓰는 구조가 올바름. 파일 하나에 섞여 있으면 Client Component 체인에서 우회 없이 참조 불가. server-only 는 "이 함수가 server 전용 리소스 쓴다" 의 의미지, "이 파일에 server-only 가 섞여 있다" 가 아님.
+- **외부 SDK 응답값이 네트워크로 재노출되는 경로 (HTTP 헤더 / 응답 body / 리다이렉트 URL / 로깅 등) 에서 유효성 가드 필수** — 최소 `Number.isFinite` / `typeof` / 범위 체크. 특히 RFC 표준 헤더 (`Retry-After`, `Retry-After-Seconds`, `Cache-Control: max-age` 등) 는 클라이언트 라이브러리가 파싱하므로 비표준 문자열 삽입은 downstream 예외 유발.
+- **이월 LOW 리뷰 항목은 Plan 전 실 코드 재검토 필수** — 리뷰 시점 이후 다른 Task 에서 이미 해소됐거나 재평가 결과 "의식적 설계" 로 판명될 수 있음. "수정" 이 유일한 정답 아님 — 주석 보강으로 근거 문서화가 더 적절한 경우 많음. β-1 (formatRelative) / β-2 (as ServerEnv) / β-5 (L-1) = 세 세션 연속 자동 해소/재평가 경험 → 이월 항목 처리 표준 절차로 굳히기.
+- **pure function 위치 체크리스트** — 함수 하나 만들 때 (1) server-only 리소스 쓰나? → 예: `core/...` / 아니요: `shared/...` / (2) server+client 둘 다에서 쓰일 수 있나? → 예: `shared/` / 아니요: `core/` or `app/`. 애매하면 `shared/` 로 기본값.
+- **`pnpm check` (전체 게이트) 를 매 Task 종료 전 1회 실행** — β-3b 교훈 ("format:check 전체 실행") 이 β-5 세션 Ⅶ 에서 재발 (ADR-010 + ADR README 프리티어 drift). 수동 규칙만으로 부족. `pnpm check` = `typecheck && lint && format:check && test` 단일 명령으로 drift 자동 탐지.
+
+---

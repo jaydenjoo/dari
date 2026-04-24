@@ -8,16 +8,16 @@
 
 Dari 는 `@upstash/ratelimit` 기반으로 11 지점에 rate limit 을 적용한다.
 
-| 레이어 | 호출 지점 | 리미터 |
-| ------ | --------- | ------ |
-| API Route | `/api/chat/[botId]` | `bot-chat-limiter` |
-| API Route | `/api/widget-config/[botId]` | `bot-config-limiter` |
-| API Route | `/api/conversations/[id]/export` | `conversation-export-limiter` |
-| Server Action | `/bots/new` | `bot-create-limiter` |
+| 레이어        | 호출 지점                                    | 리미터                                                                    |
+| ------------- | -------------------------------------------- | ------------------------------------------------------------------------- |
+| API Route     | `/api/chat/[botId]`                          | `bot-chat-limiter`                                                        |
+| API Route     | `/api/widget-config/[botId]`                 | `bot-config-limiter`                                                      |
+| API Route     | `/api/conversations/[id]/export`             | `conversation-export-limiter`                                             |
+| Server Action | `/bots/new`                                  | `bot-create-limiter`                                                      |
 | Server Action | `/bots/[slug]/edit` (url/file/remove/delete) | `bot-url-ingest` / `bot-file-ingest` / `bot-source-remove` / `bot-delete` |
-| Server Action | `/bots/trash` (purge) | `bot-delete-limiter` |
-| Server Action | `/bots/[slug]/conversations/[id]` delete | `conversation-delete-limiter` |
-| Server Action | `/login` | `login-limiter` |
+| Server Action | `/bots/trash` (purge)                        | `bot-delete-limiter`                                                      |
+| Server Action | `/bots/[slug]/conversations/[id]` delete     | `conversation-delete-limiter`                                             |
+| Server Action | `/login`                                     | `login-limiter`                                                           |
 
 `checkRatelimit()` 은 `limiter.limit(key)` 를 호출하는 순간 **카운터가 1 소비**된다. 그 이후 작업(DB 쓰기 / 외부 API 호출 / Storage 업로드 등) 이 실패하면 **유저 관점에서 "작업 미완료 + 할당량 1회 손해"** 가 발생한다. Phase 2 백로그 우선 4 Task 1-0-a 후속 #2 에 "DariConfig 실패 카운터 복구" 로 기록되어 있었고, "조사 필요 분리" 로 이월되어 있던 항목이다.
 
@@ -37,15 +37,15 @@ Dari 는 `@upstash/ratelimit` 기반으로 11 지점에 rate limit 을 적용한
 
 `@upstash/ratelimit` 7.x 공식 문서 기준 지원 메서드 전수 조사:
 
-| 메서드 | 기능 | 부분 환불 가능? |
-| ------ | ---- | --------------- |
-| `limit(id)` | 카운터 1 소비 + 결과 반환 | — |
-| `resetUsedTokens(id)` | 식별자의 카운터를 **0 으로 전체 리셋** | ❌ (전체 리셋, 1회 차감 아님) |
-| `getRemaining(id)` | 남은 토큰 + 리셋 시간 조회 | ❌ (조회만) |
-| `blockUntilReady(id, timeout)` | 다음 window 까지 대기 | ❌ |
-| `setDynamicLimit / getDynamicLimit` | 동적 리밋 조작 | ❌ |
-| ~~`refund`~~ | **없음** | ❌ |
-| ~~부분 rollback~~ | **없음** | ❌ |
+| 메서드                              | 기능                                   | 부분 환불 가능?               |
+| ----------------------------------- | -------------------------------------- | ----------------------------- |
+| `limit(id)`                         | 카운터 1 소비 + 결과 반환              | —                             |
+| `resetUsedTokens(id)`               | 식별자의 카운터를 **0 으로 전체 리셋** | ❌ (전체 리셋, 1회 차감 아님) |
+| `getRemaining(id)`                  | 남은 토큰 + 리셋 시간 조회             | ❌ (조회만)                   |
+| `blockUntilReady(id, timeout)`      | 다음 window 까지 대기                  | ❌                            |
+| `setDynamicLimit / getDynamicLimit` | 동적 리밋 조작                         | ❌                            |
+| ~~`refund`~~                        | **없음**                               | ❌                            |
+| ~~부분 rollback~~                   | **없음**                               | ❌                            |
 
 **핵심 발견**: `resetUsedTokens` 는 "1회 환불" 이 아니라 **전체 초기화**. 예: `bot-create-limiter` (5 req/h) 에서 유저가 4회 성공 후 5회째 실패했을 때 `resetUsedTokens` 를 호출하면 **과거 4회 기록까지 모두 지워져** 즉시 5회 추가 가능 → **정책 우회 위험**.
 
