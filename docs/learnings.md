@@ -2329,3 +2329,89 @@ function DailyTooltip({ active, payload, label }: DailyTooltipProps) { ... }
 - **artifact (trace/video) 에 로컬 fixture service_role 키 노출 = 실 피해 0** — ephemeral Docker 컨테이너 전용 키. private repo + 1일 보존이면 sec L-2 원래 교훈 (prod 키 노출 위험) 이 이 경로에는 해당 없음. 로컬 E2E 는 여전히 prod Supabase 사용 중 = B-6b 이관 필수.
 
 ---
+
+## 2026-04-24 Task β-4 잔여 ① PSL `tldts` 도입 — 라이브러리 도입 작업이 인접 보안 결함을 동시 노출 (origin-check `@` userinfo 주입)
+
+**증상**: PSL `tldts` 강화 작업으로 `isValidOriginEntry` / `matchWildcard` 양 지점에 PSL 차단 추가. 독립 리뷰 단계에서 security-reviewer 가 **PSL 강화 자체와 무관한 기존 결함** 식별:
+
+`https://*.legit.com@evil.com` 형태 entry 입력 시:
+
+1. `WILDCARD_ENTRY_PATTERN = /^(https?):\/\/\*\.(.+)$/i` 가 `(.+)` 로 base 캡처 → `baseHostRaw = "legit.com@evil.com"`
+2. `baseHostRaw.includes("*")` false / `includes(".")` true / 숫자-only false → 통과
+3. `tldts.parse("legit.com@evil.com")` → `domain: "evil.com"` 반환 → `isPublicSuffixOnly` false → 통과
+4. `normalizeOrigin("https://legit.com@evil.com")` → URL API 가 `legit.com` 을 username 으로 해석 → hostname=`evil.com` → `"https://evil.com"` 반환 (not null) → 통과
+5. 결과: `isValidOriginEntry` true. 운영자가 의도한 `*.legit.com` 등록이 사실상 `*.evil.com` 등록으로 둔갑.
+
+**원인**:
+
+1. **WILDCARD_ENTRY_PATTERN 의 `(.+)` 가 너무 관대** — 정상 host 문자에는 `@` 가 없지만 정규식 입력 검증이 캡처 단계에서 그 가정을 강제하지 않음.
+2. **PSL 차단이 "tldts 가 정상 도메인으로 파싱하는가" 에 의존** — tldts 는 `legit.com@evil.com` 을 "evil.com 도메인" 으로 식별 → PSL 검사 자체가 우회의 일부가 됨.
+3. **normalizeOrigin 의 URL API 의존 정책** — userinfo 를 hostname 으로 정규화 (`evil.com` 추출) 은 매칭 시점 안전망이지만, **저장 시점 entry 형태 검증에서는 "운영자 의도" 와 "실 효과" 가 분리됨**. 운영자가 보는 entry 텍스트와 실제 매칭 동작이 불일치.
+4. **기존 테스트가 이 케이스 부재** — `normalizeOrigin` 의 userinfo 처리 테스트 + `matchAllowedDomain` 의 evil.com 차단 테스트는 있었으나, **`isValidOriginEntry` 단계의 entry 자체 거부** 케이스는 부재.
+
+**해결**: 3 지점 `@` 차단 + 회귀 테스트 4건.
+
+```ts
+// 1. isValidOriginEntry 진입 시점 (저장 시 strict)
+if (trimmed.includes("@")) return false;
+
+// 2. matchEntry 진입 시점 (매칭 시 robust, 이중 방어)
+if (entry.includes("@")) return false;
+```
+
+이 구조로 wildcard / non-wildcard 분기, 저장 시점 / 매칭 시점 모두 단일 가드로 커버.
+
+**규칙** ⭐:
+
+- **외부 라이브러리 도입은 "인접 코드 재검토 기회"** — 새 의존성을 기존 검증 흐름에 끼워넣을 때, 흐름 전체 가드를 한 번 더 훑어볼 것. tldts 가 `legit.com@evil.com` 을 "evil.com 도메인" 으로 파싱한다는 사실을 알게 되어 이미 잠복했던 결함이 노출됨. 라이브러리 검토 = 자연스러운 코드 감사 트리거.
+- **정규식 캡처 그룹 `(.+)` 는 의도한 문자 집합으로 좁히거나 캡처 후 명시적 거부 가드 추가** — host 캡처에 `@` 가 들어올 일 없다고 "가정" 하지 말고 명시 거부. 정상 host charset = `[a-z0-9.-]` (대소문자 무관). 보다 엄격 정규식으로 좁히는 것도 가능하나 IDN punycode 등 변형 대응을 위해 "캡처 후 거부" 패턴이 유지보수 단순.
+- **저장 시점 strict + 매칭 시점 robust 이중 방어를 표준으로** — 저장 시점 스키마/refine 검증을 우회하는 경로 (DB 직접 UPDATE, migration, 레거시 데이터, admin tool, 외부 sync) 가 항상 존재한다고 가정. 매칭 시점에 한 번 더 차단.
+- **운영자 의도와 실 효과의 불일치는 보안 결함 신호** — entry 텍스트 (`*.legit.com@evil.com`) ↔ 실 매칭 동작 (`*.evil.com`) 이 다르면 운영자가 의도하지 않은 origin 을 허용하게 됨. 정규화 로직이 "보이는 것" 과 "동작" 을 분리시키면 무조건 entry 형태 거부 가드 필요.
+- **PSL 차단 같은 "선의의 라이브러리" 가 우회의 일부가 될 수 있음** — `isPublicSuffixOnly` 는 PSL 자체 차단이 목적이지만, 입력이 username 포함이면 라이브러리가 정상 도메인 (evil.com) 으로 파싱해서 PSL 검사 자체를 통과시킴. **라이브러리 의존 검증은 그 자체가 우회 벡터가 될 수 있음** → 라이브러리 호출 전 입력 sanitize 필수.
+- **보안 리뷰 에이전트는 "PR 범위 밖 인접 결함" 을 적극 식별하도록** — 본 Task 는 PSL 강화였지만 sec H-1 은 PSL 과 무관. 리뷰 prompt 에 "변경 파일의 인접 코드 (같은 함수 내 다른 분기, 같은 파일 다른 함수) 의 결함도 보고" 명시 권장.
+
+---
+
+## 2026-04-24 Task β-4 잔여 ① — 외부 라이브러리 IResult 타입의 `string | null | undefined` nullable 처리 (code H-1, `tldts`)
+
+**증상**: `tldts` 의 `parse()` 반환 타입 `IResult` 의 `domain` / `publicSuffix` 필드가 TypeScript 상 `string | null | undefined` 인데, 초안 구현에서 `=== null` (strict equal) 만 비교 → `undefined` 케이스 통과:
+
+```ts
+// 초안 (false negative 가능):
+return result.domain === null || result.publicSuffix === baseHost;
+```
+
+`tldts` 가 파싱 불가 입력 (예: 비정상 host 형태) 을 받으면 `domain: undefined` 반환 가능 → `=== null` 비교는 false → `publicSuffix === baseHost` 분기 → `publicSuffix` 도 `undefined` 면 `undefined === "co.uk"` false → 차단 함수가 false 반환 → **PSL 차단 무력화**.
+
+**원인**:
+
+1. **TypeScript `string | null | undefined` 패턴은 흔하지만 `===` 비교는 한 쪽만 잡음** — `value === null` 은 `undefined` 를 통과시킴. 외부 라이브러리 반환 타입이 둘 다 가능하면 `==` (loose) 또는 분리 처리 필요.
+2. **TypeScript 컴파일러는 "완전 비교" 를 강제 안 함** — `===` 비교가 컴파일 통과해도 런타임 의미가 다른 케이스 놓침. strict 옵션도 이 패턴은 잡지 않음.
+3. **외부 라이브러리 .d.ts 의 nullable union 은 종종 unsafe 측에 가까움** — 실제 동작이 `null` 만 반환하더라도 타입은 `undefined` 도 허용. 미래 라이브러리 버전 변경에서 `undefined` 반환이 추가될 수 있음.
+4. **첫 코드 작성 시 "안전 측 분기" 누락** — PSL 식별 실패 = "PSL 자체로 간주 = 안전 측 차단" 이어야 하는데, 초안은 "PSL 식별 실패 = 통과" 의 역방향.
+
+**해결**:
+
+```ts
+// nullable + 안전 측 차단:
+if (result.domain == null) return true; // null + undefined 동시 처리
+if (result.publicSuffix == null) return true; // 식별 불가 = 안전 측 차단
+return result.publicSuffix === baseHost;
+```
+
+세 가지 변경:
+
+1. `==` (loose) 로 null + undefined 동시 처리
+2. `publicSuffix == null` 조기 차단 (식별 불가 입력 = PSL 자체 = 차단)
+3. 의미 명시 주석 추가 (왜 안전 측 = 차단인가)
+
+**규칙** ⭐:
+
+- **외부 라이브러리 반환 타입이 `T | null | undefined` 이면 `== null` (loose) 또는 분리 처리** — `=== null` 만 쓰면 `undefined` 가 silent 통과. 보안 검증·차단 로직에서는 false negative 직결. ESLint `eqeqeq` 규칙은 `null` 비교 예외 (`{ null: "ignore" }`) 를 허용하므로 활용 가능.
+- **"식별 불가 = 안전 측 분기" 패턴 표준** — 차단/검증 함수에서 입력이 비정상이거나 라이브러리가 식별 못 하면 **차단 (true)** 으로 분기. "통과 (false)" 는 식별 성공 + 명시적 통과 케이스만. 보안 결정에서 "모르면 통과" 는 결함.
+- **외부 라이브러리 IResult 같은 결과 타입 도입 시 모든 nullable 필드 한 번에 점검** — `IResult` 의 모든 필드 (`hostname`, `subdomain`, `domain`, `publicSuffix`, `domainWithoutSuffix`, `isIp`, `isIcann`, `isPrivate`) 가 어떤 input 에서 어떤 값을 반환하는지 .d.ts 또는 README 로 확인 후 사용. 초기 구현에서 한 필드만 보고 다른 필드 가정 위험.
+- **`undefined` 케이스 회귀 테스트 추가 시점** — 외부 라이브러리 반환 타입에 `undefined` 가 union 에 있으면 vitest 케이스에 "라이브러리가 undefined 반환하는 input" 1개 추가. 직접 mock 으로 `undefined` 강제 가능.
+- **타입 안전성 vs 런타임 안전성 분리 의식** — 타입은 컴파일 통과 시켜도 런타임 의미가 틀릴 수 있음 (특히 `===` vs `==`). 보안 코드에서는 "타입 통과" 가 "정확성" 을 보장 안 함. 코드 리뷰의 핵심 가치.
+- **리뷰어가 "타입 nullable 처리" 같은 미시 디테일을 잡는 것은 보안 코드 리뷰의 정상 기능** — code H-1 처럼 "한 줄 비교 연산자 변경" 이 PSL 차단 무력화 직결. 리뷰 prompt 에 "타입 안전성 (nullable, type narrowing, assertion)" 항목 명시 효과 큼.
+
+---

@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4** — A-1~A-5a + B-1~B-6 + β-1~β-4. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (1-0-b #1+#2 + 1-0-a #1 / 후속 3건 분리: PSL `tldts` + Upstash refund 조사 + i18n 라이브러리). `withAllowedOrigin` HOC + Retry-After 표준화 + Server Action reset UX + `allowedDomains` 저장 시 검증 + IP 직접 입력 차단.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL** — A-1~A-5a + B-1~B-6 + β-1~β-4. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (β-4 본체 5건 + 잔여 ① PSL `tldts` working tree 보류 / 잔여 ② Upstash refund + ③ i18n 미진입). `withAllowedOrigin` HOC + Retry-After 표준화 + `allowedDomains` PSL effective TLD 차단 + userinfo (@) 주입 차단.
 - Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 핵심 그룹 모두 해소. 외부 신호 대기 가능 상태 도달. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
-- 상태: **이번 세션(2026-04-24 Ⅴ) Task β-4 단독 완결**. `with-allowed-origin.ts` HOC + `rate-limit.ts` 메시지 상수 + `allowedDomains` schema refine + chat/widget-config 라우트 일원화 + 7개 Server Action reset 퍼지 표현. 독립 리뷰 2 (code Fix-then-ship + security Ship) → Fix 5건 반영 (HOC loadBot throw 처리 / isValidOriginEntry 전용 테스트 / Server Action 메시지 퍼지).
-- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 부분 ✅ (3/6 + 후속 3건 분리). β-4 잔여 = PSL/Upstash refund/i18n (외부 의존 또는 별도 사이클).
-- ⚠️ **차단**: 없음. 백로그 핵심 완료 → 외부 신호 평가 단계. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
+- 상태: **이번 세션(2026-04-24 Ⅵ) Task β-4 잔여 ① PSL `tldts` Build + 리뷰·반영 완료, ship 승인 대기**. 5 files 변경 (working tree 미커밋). 독립 리뷰 2 (code Fix-then-ship + security Fix-then-ship) → HIGH 2건 반영 (code H-1 nullable 처리 / sec H-1 @ userinfo 주입 차단 — PSL 강화 작업 중 인접 보안 결함 발견). vitest 491 → **587/587** (+96 / 본 세션 +13 + 직전 세션 누적 분), typecheck/lint/format/build 모두 clean.
+- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 부분 ✅ (β-4 본체 5건 + 잔여 ① working tree). β-4 잔여 = PSL ⏳ (ship 승인 대기) / Upstash refund / i18n.
+- ⚠️ **차단**: 없음. 본 세션 코드 변경 working tree 보류 (ship 승인 대기). 다음 세션 시작 시 (1) ship 승인 → 커밋 → 다음 잔여 진입, 또는 (2) ship 후 외부 신호 평가 단계 진입.
 
 ## 완료된 Epic
 
