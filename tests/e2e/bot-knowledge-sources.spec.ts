@@ -13,14 +13,23 @@ import { MAIN_TEST_USER } from "./support/fixtures";
  *
  * 범위:
  *   - smoke: SectionCard + empty state.
- *   - text 삭제 + 재진입 시 empty state 복귀 (revalidatePath 동작 검증).
+ *   - text 저장/삭제 + 재진입 시 empty state 복귀 (revalidatePath 동작 검증).
  *   - 삭제 취소(native confirm dismiss) → 항목 유지.
  *   - 비로그인 리디렉트.
  *
  * 제외 (비용/단위테스트 커버 영역):
  *   - URL/file 삭제 flow — Firecrawl/unpdf 외부 호출 비용. remove-source.test.ts 에서
  *     (source_type, source_identifier) 매핑 + Storage 롤백 이미 검증.
+ *
+ * Task B-6 (CI): text 저장 경로가 **실 Gemini embedding API** 를 호출한다.
+ * CI 에서 `E2E_SKIP_EXTERNAL_API=true` 설정 시 전체 파일 skip — placeholder env
+ * 로는 401/403 응답 → 봇 편집 저장 단계에서 실패 유발. 로컬은 기본 실행.
  */
+
+test.skip(
+  process.env.E2E_SKIP_EXTERNAL_API === "true",
+  "CI: Gemini embedding API 키 미설정 (E2E_SKIP_EXTERNAL_API=true)",
+);
 
 let adminClient: SupabaseClient | null = null;
 

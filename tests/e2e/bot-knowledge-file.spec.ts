@@ -13,7 +13,16 @@ import { MAIN_TEST_USER } from "./support/fixtures";
  * 전제:
  *   - `supabase/migrations/0010_create_knowledge_files_storage.sql` 적용 완료
  *     (버킷 + RLS 4정책). 미적용 시 upload 단계에서 RLS 거부.
+ *
+ * Task B-6 (CI): TXT 업로드도 **실 Gemini embedding API** 를 호출한다.
+ * CI 에서 `E2E_SKIP_EXTERNAL_API=true` 설정 시 전체 파일 skip — placeholder
+ * env 로는 embed 단계에서 401/403 → 업로드 실패. 로컬은 기본 실행.
  */
+
+test.skip(
+  process.env.E2E_SKIP_EXTERNAL_API === "true",
+  "CI: Gemini embedding API 키 미설정 (E2E_SKIP_EXTERNAL_API=true)",
+);
 
 let adminClient: SupabaseClient | null = null;
 
