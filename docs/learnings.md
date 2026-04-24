@@ -32,6 +32,105 @@
 
 ## 기록
 
+### 2026-04-24 rate limit reset 표시는 정확도와 정보 노출 사이 trade-off — Route Handler RFC 표준 vs Server Action 퍼지 표현 (Task β-4 설계 결정)
+
+**증상**: Task β-4 에서 11 지점 (Route Handler 3 + Server Action 7+) 의 rate limit reset 시간을 사용자에게 노출하는 표준 패턴 설계 필요. 초기 구현은 모든 지점에 정확한 초 ("30초 후 다시 시도") 노출. security 리뷰 (sec M-1) 에서 지적: **공격자가 자동화 도구에서 정확 초를 파싱해 rate limit 윈도우/한도 추정 가능**. 예시:
+
+- "30초 후 재시도" → 슬라이딩 윈도우가 30초 내외 = 분당 N 회 한도 역산
+- "1시간 후 재시도" → 시간당 N 회 한도 추정
+- 여러 IP 로 반복 요청 → Retry-After 패턴 분석 → 한도 정확도 점진 향상
+
+이는 brute force 도구가 적응적으로 timing 을 조정해 차단 우회 시도를 가능하게 함. 대안 검토 시 trade-off 발생.
+
+**원인**:
+
+1. **사용자 UX vs 보안 정보 노출 충돌** — 정확한 초는 사용자 행동 결정에 도움 (예: 30초만 기다리면 됨). 동시에 공격자에게도 정확한 정보.
+2. **인증된 사용자 전용 vs 공개 API 차이** — Server Action 은 dashboard 인증된 owner 만 접근 → 공격 표면 좁음. Route Handler 는 anon 접근 → 표면 넓음.
+3. **RFC 6585 표준 vs 보안 trade-off** — `Retry-After` 헤더는 RFC 6585 표준. 변경하면 클라이언트 자동 backoff (browser fetch retry 등) 깨짐.
+4. **정확도가 사용자 행동에 결정적인가?** — "30초 후" vs "1분 이내" 차이가 사용자 행동을 바꾸는가? 일반적으로 둘 다 "잠시 기다림" 으로 동일. 정확도가 결정적인 경우는 자동화 도구 (재시도 스크립트) 만 해당.
+
+**해결**: 양면 정책으로 분리.
+
+1. **Route Handler `Retry-After` 헤더**: **RFC 6585 표준 정확 초 유지**. 이유:
+   - HTTP 표준 클라이언트 (browser fetch retry, axios-retry 등) 가 자동 사용
+   - 헤더는 일반 사용자 화면에 직접 노출 안 됨 (개발자 도구 봐야 보임)
+   - 변경 시 표준 위반 + 클라이언트 동작 깨짐
+   - 공격자가 헤더 파싱은 가능하나, 표준이 그렇게 설계됨 (정보 비대칭 0)
+
+2. **Server Action 사용자 메시지**: **퍼지 표현 채택**. 변경 사항:
+   - 60초 미만 → "잠시 후 1분 이내 재시도 가능" (정확 초 미노출)
+   - 60초~1시간 → "약 N분 후 재시도 가능" (이미 분 단위 모호)
+   - 1시간 이상 → "약 N시간 후 재시도 가능" (시간 단위 모호화)
+   - 사용자 인지 부담 거의 동일 + 공격 도구에 정확 정보 차단
+
+3. **export route 의 JSON 응답 코드 (`{error: "too_many_requests"}`)**: 변경 없음. wire format 으로 사용 중. 사용자 노출 메시지 아님.
+
+**규칙** ⭐:
+
+- **Route Handler `Retry-After` 헤더 = RFC 6585 정확 초 표준 유지** — 표준 클라이언트 호환성 + 헤더 = 일반 사용자 미노출 → trade-off 무효
+- **Server Action / 사용자 화면 메시지 = 퍼지 표현 표준** — 60s 미만 "잠시 후 1분 이내" / 1h 미만 "약 N분 후" / 1h+ "약 N시간 후". `withRetryAfter()` 단일 출처 적용.
+- **새 rate-limited 지점 추가 시 위 패턴 자동 적용** — `RATE_LIMIT_MESSAGES` 상수 + `withRetryAfter()` 호출. 정확 초 노출 패턴 발견 시 즉시 fuzzy 로 변경.
+- **인증 여부 무관 적용** — 인증된 사용자 전용이라도 정보 최소화 원칙 (defense-in-depth). 계정 탈취 시나리오에서도 공격 도구가 사용 못 함.
+- **trade-off 판단 기준 명문화**:
+  1. 사용자가 정확한 시간을 알아야 행동을 결정하는가? (대부분 NO)
+  2. 공격자가 정보를 도구화 가능한가? (rate limit 정확도 = YES)
+  3. 표준 클라이언트가 자동 처리하는가? (헤더 = YES → 표준 유지, 메시지 = NO → 퍼지 OK)
+- **i18n 시드 패턴**: `RATE_LIMIT_MESSAGES` + `withRetryAfter` 분리 = 미래 다국어 지원 시 키 → locale 매핑 자연스럽게 도입 가능.
+
+---
+
+### 2026-04-24 HOC 패턴으로 라우트 횡단 검증 일원화 — `withAllowedOrigin` (Task β-4 설계 결정)
+
+**증상**: Task β-4 진입 시점, chat / widget-config 두 라우트가 동일한 4단 검증 (bot 조회 → origin 검증 → rate limit → CORS 헤더) 을 각자 코드로 중복 수행 중. 라우트 추가 시점마다 동일 패턴 복사 → 정합성 위험. 누락 시 보안 결함 (예: 한 라우트에 `Retry-After` 만 있고 다른 곳 없음 / origin 검증 누락 / CORS 헤더 형식 불일치).
+
+또한 `loadBot` 함수가 throw 하면 라우트 핸들러를 빠져나가 Next.js 기본 500 페이지 (HTML) 가 위젯 클라이언트에 전달될 수 있음 → 위젯 파서 (JSON 기대) 에서 파싱 오류 → silent fail.
+
+**원인**:
+
+1. **라우트 핸들러는 자체 로직만 담당** — Next.js Route Handler 는 단일 함수 export. 공통 검증을 추출하면 wrapper 패턴 필요.
+2. **각 라우트의 책임 경계 불명확** — chat 은 추가로 body parsing / DB / streamText, widget-config 은 단순 GET. 어디까지 공통화 가능한가 ambiguous.
+3. **에러 처리 일관성 부재** — 각 라우트가 `jsonError` 헬퍼 따로 정의. 동일 에러 코드 (`bot_not_available`) 가 다른 메시지 / 다른 헤더 가능.
+4. **throw 처리 누락** — `loadBot` 같은 내부 함수가 throw 시 catch 안 하면 Next.js 가 처리 → HTML 500 페이지. 위젯 클라이언트는 JSON 기대 → 파싱 실패 → silent fail.
+
+**해결**: Generic HOC `withAllowedOrigin<TBot extends {id, config}>` 도입.
+
+```ts
+export const POST = withAllowedOrigin<BotContext>(
+  {
+    loadBot: loadActiveBot,
+    rateLimit: checkBotChatRatelimit,
+    errorMessages: HOC_ERROR_MESSAGES,
+  },
+  async ({ bot, clientIp, corsHeaders }, req) => {
+    // 비즈니스 로직만 — bot 검증, origin, rate limit 모두 통과 후 호출됨
+    // body parsing / Anthropic / DB insert 등
+  },
+);
+```
+
+추가 안전 장치 (code M-1 Fix):
+
+```ts
+let bot: TBot | null;
+try {
+  bot = await options.loadBot(botSlug);
+} catch {
+  return jsonError("internal_error", 500, ...); // 정형 JSON 응답
+}
+```
+
+**규칙** ⭐:
+
+- **횡단 관심사 (cross-cutting concerns) 는 HOC 로 추출** — 인증 / 검증 / rate limit / CORS 등이 여러 라우트에서 중복되면 HOC 패턴 표준 채택. Generic 으로 라우트별 차이 (TBot context, limiter 함수, 에러 메시지) 를 옵션 주입.
+- **HOC 가 throw 처리도 일원화** — handler 내부에서 try/catch 부담 제거. `loadBot` / `rateLimit` 같은 옵션 함수의 throw 도 HOC 가 catch 해서 정형 응답. 라우트마다 `try/catch` 작성 안 해도 됨.
+- **handler 컨텍스트 = 통과 후 데이터** — `{bot, origin, clientIp, corsHeaders}` 처럼 검증 결과를 컨텍스트로 전달. handler 가 다시 origin 검증 / DB 재조회 안 함.
+- **에러 메시지는 호출자 주입 (i18n 시드)** — HOC 가 메시지 하드코딩 안 함. 호출자가 `errorMessages` 옵션으로 주입 → 미래 locale 분기 자연스러움.
+- **HOC 적용 후 기존 헤더 보존 검증 필수** — chat route 의 `x-conversation-id` + `Access-Control-Expose-Headers` 같은 라우트 특수 헤더는 handler 가 `corsHeaders` 와 함께 직접 반환. HOC 가 덮어쓰지 않음.
+- **Throw 가 silent fail 로 이어지는 경로 차단** — 위젯 / API 클라이언트가 JSON 기대하는데 Next.js 기본 HTML 500 응답이 가면 파싱 실패 → silent. HOC 의 try/catch + 정형 JSON 응답 (예: `{error: "...", code: "internal_error"}`) 로 처리.
+- **타입 정합성 = `errorMessages` 가 모든 코드 키 포함 필수** — `Record<AllowedOriginErrorCode, string>` 으로 컴파일 타임 강제. 새 에러 코드 추가 시 모든 호출자가 메시지 추가하지 않으면 타입 에러.
+
+---
+
 ### 2026-04-24 service_role 키 사용 standalone 스크립트의 안전 패턴 표준화 (Task β-3b 설계 결정)
 
 **증상**: Storage orphan cleanup 스크립트 (`scripts/cleanup-orphan-storage.ts`) 가 `service_role` 키로 RLS 우회 + 모든 봇의 Storage 파일 삭제 권한 보유. 잘못 설계하면:

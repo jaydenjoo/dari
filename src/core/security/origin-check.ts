@@ -20,6 +20,55 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const WILDCARD_ENTRY_PATTERN = /^(https?):\/\/\*\.(.+)$/i;
 
 /**
+ * `allowedDomains` 엔트리 형식 검증 (Task β-4: schema refine 단 검증).
+ *
+ * `matchEntry` 와 동일한 차단 로직을 **저장 시점** 에 적용 → 잘못된 entry 가
+ * config 에 침투하는 경로 차단. 매칭 시점 (`matchAllowedDomain`) 은 안전망 유지.
+ *
+ * 거부 사례:
+ *   - 빈 문자열 / 스킴 누락 (`example.com`)
+ *   - http + 외부 호스트 (로컬만 예외 — `normalizeOrigin` 정책)
+ *   - `*.com` 등 TLD 단독 와일드카드 (모든 .com 허용 위험)
+ *   - `*.*.example.com` 다중 와일드카드
+ *   - `https://192.168.1.1` IP-style
+ *   - `*.192.168` 숫자 레이블만 와일드카드
+ *
+ * 한계 (β-4 범위 밖):
+ *   - `*.co.uk` 같은 ccSLD 와일드카드는 통과 (PSL `tldts` 도입 시 차단 — Backlog)
+ */
+export function isValidOriginEntry(entry: string): boolean {
+  const trimmed = entry.trim();
+  if (trimmed.length === 0) return false;
+
+  const wildcardMatch = WILDCARD_ENTRY_PATTERN.exec(trimmed);
+  if (wildcardMatch) {
+    const scheme = wildcardMatch[1];
+    const baseHostRaw = wildcardMatch[2];
+    if (baseHostRaw.includes("*")) return false;
+    if (!baseHostRaw.replace(/\.$/, "").includes(".")) return false;
+    if (/^\d+(\.\d+)*\.?$/.test(baseHostRaw)) return false;
+    return normalizeOrigin(`${scheme}://${baseHostRaw}`) !== null;
+  }
+
+  const normalized = normalizeOrigin(trimmed);
+  if (!normalized) return false;
+
+  // 직접 IP 입력 차단 — LOCAL_HOSTS 외 IPv4/IPv6 host 는 거부.
+  // normalizeOrigin 이 LOCAL_HOSTS (localhost/127.0.0.1/[::1]) 는 이미 통과시키므로,
+  // 여기서 IP-pattern 인 host 는 외부 IP. 정상 운영 도메인은 항상 호스트네임.
+  let host: string;
+  try {
+    host = new URL(normalized).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  if (LOCAL_HOSTS.has(host)) return true;
+  if (/^\d+(\.\d+){3}$/.test(host)) return false;
+  if (host.includes(":")) return false;
+  return true;
+}
+
+/**
  * Raw Origin 헤더 / URL 문자열을 정규화해 `"<scheme>://<host>[:<port>]"` 형태로 반환.
  * 파싱 실패 · 허용 스킴 아님 · http + 외부 호스트는 null.
  *

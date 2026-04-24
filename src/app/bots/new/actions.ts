@@ -9,6 +9,10 @@ import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
 import { checkBotCreateRatelimit } from "@/core/ratelimit/bot-create-limiter";
+import {
+  RATE_LIMIT_MESSAGES,
+  withRetryAfter,
+} from "@/shared/messages/rate-limit";
 
 import { isValidSlug, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from "./slug-util";
 
@@ -103,7 +107,7 @@ export async function createBot(
   const rl = await checkBotCreateRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error: "봇 생성 한도에 도달했어요. 잠시 후 다시 시도해 주세요.",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_create, rl.reset),
     };
   }
 

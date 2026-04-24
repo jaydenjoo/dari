@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b** — A-1~A-5a + B-1~B-6 + β-1~β-3b. **우선 2 그룹 완결** (#1 redact + #2 orphan cleanup script + #4 audit + #3 조건부 이월). Storage orphan cleanup standalone script + 13 단위 테스트 + dry-run 기본 + 이중 게이트.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 우선 1·2·3 ✅, **우선 4 만 남음**. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
-- 상태: **이번 세션(2026-04-24 Ⅳ) Task β-3b 단독 완결**. `scripts/cleanup-orphan-storage.ts` (CLI entry, service_role + dry-run/apply 이중 게이트) + `src/core/knowledge/orphan-cleanup.ts` (`computeOrphans` 순수 함수) + 13 단위 테스트 + 운영 가이드. 독립 리뷰 2 (code Ship as-is + security Ship conditional) → Fix 8건 반영.
-- 확인: 백로그 진행률 = 우선 1 ✅ / 우선 2 ✅ / 우선 3 ✅ / 우선 4 ⏳ (Task 1-0 후속, 약 90~120m).
-- ⚠️ **차단**: 없음. 경로 α (백로그 우선 4 만) 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4** — A-1~A-5a + B-1~B-6 + β-1~β-4. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (1-0-b #1+#2 + 1-0-a #1 / 후속 3건 분리: PSL `tldts` + Upstash refund 조사 + i18n 라이브러리). `withAllowedOrigin` HOC + Retry-After 표준화 + Server Action reset UX + `allowedDomains` 저장 시 검증 + IP 직접 입력 차단.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 핵심 그룹 모두 해소. 외부 신호 대기 가능 상태 도달. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
+- 상태: **이번 세션(2026-04-24 Ⅴ) Task β-4 단독 완결**. `with-allowed-origin.ts` HOC + `rate-limit.ts` 메시지 상수 + `allowedDomains` schema refine + chat/widget-config 라우트 일원화 + 7개 Server Action reset 퍼지 표현. 독립 리뷰 2 (code Fix-then-ship + security Ship) → Fix 5건 반영 (HOC loadBot throw 처리 / isValidOriginEntry 전용 테스트 / Server Action 메시지 퍼지).
+- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 부분 ✅ (3/6 + 후속 3건 분리). β-4 잔여 = PSL/Upstash refund/i18n (외부 의존 또는 별도 사이클).
+- ⚠️ **차단**: 없음. 백로그 핵심 완료 → 외부 신호 평가 단계. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
 
 ## 완료된 Epic
 
@@ -1836,10 +1836,14 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 > **확장 옵션 미반영**: proxy-client 를 `proxy.ts` 외 파일에서 import 하는 것도 금지하는 규칙은 별도 설계 필요 — Phase 2 backlog 후속 이월.
 
-#### 우선 4 (Task 1-0 후속, 총 ~90~120m) — Rate Limit + Validation 보강
+#### 우선 4 (Task 1-0 후속, 총 ~90~120m) — Rate Limit + Validation 보강 🔶 **부분 완결 (2026-04-24 Ⅴ, Task β-4)**
 
-- [ ] Task 1-0-b 후속 — Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
-- [ ] Task 1-0-a 후속 — rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
+- [x] Task 1-0-b 후속 #1 `allowedDomains` 포맷 검증 — `isValidOriginEntry` schema refine + IP-style 직접 입력 차단 + IPv6 차단 (β-4)
+- [x] Task 1-0-b 후속 #2 Route Handler wrapper `withAllowedOrigin` — chat + widget-config 라우트 4단 (bot 조회 / origin / rate limit / CORS) 일원화 + Retry-After 자동 주입 (β-4)
+- [ ] Task 1-0-b 후속 #3 ccSLD PSL 차단 (`tldts` 도입) — 🚫 **외부 의존 분리** (β-4-후속 #1, ~30분 + 의존성 사이즈 평가)
+- [x] Task 1-0-a 후속 #1 rate limit reset UX — Route Handler `Retry-After` 헤더 표준화 + Server Action 7개 지점 메시지 퍼지 표현 ("잠시 후 1분 이내" / "약 N분/시간 후") (β-4)
+- [ ] Task 1-0-a 후속 #2 DariConfig 실패 카운터 복구 — 🚫 **조사 필요 분리** (β-4-후속 #2, Upstash refund API 가능성 + 보상 카운터 설계, ~1h)
+- [ ] Task 1-0-a 후속 #3 i18n 라이브러리 — 🚫 **Phase 3 분리** (β-4-후속 #3, `next-intl` 등, 다국어 지원 신호와 함께)
 
 **백로그 총 소요 추정**: 5~7시간 (3~4 세션 분량). 우선 1·2 먼저 묶어 한 Task 로 진입하는 것 권장 (범위 작고 독립).
 
@@ -1866,6 +1870,8 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - Epic C: 실사용자 3~5명 + SaaS 수익 모델 결정 (외부 영업 성과)
 
 ## 완료한 Task (누적, 최근 순)
+
+- [x] **Task β-4 (Phase 2 백로그 우선 4 부분 완결, 1-0 후속 3/6): Rate Limit + Validation 보강** — **3 신규 + 8 수정**: (신규) `src/core/security/with-allowed-origin.ts` (~145줄, HOC 4단 일원화 + `computeRetryAfterSeconds` + `internal_error` 500 catch) / `src/core/security/with-allowed-origin.test.ts` (9 케이스: bot 없음 / origin 미일치 / 429+Retry-After / 정상 통과 / Origin 헤더 부재 / 빈 allowedDomains / loadBot throw / `computeRetryAfterSeconds` 경계 2) / `src/shared/messages/rate-limit.ts` + `.test.ts` (메시지 상수 7키 + `withRetryAfter` 퍼지 표현 + 4 케이스: 60s 미만 / 60s~1h / 1h+ / 지나간 reset) · (수정) `src/core/security/origin-check.ts` (`isValidOriginEntry` export + IP 직접 입력 차단) / `src/core/security/origin-check.test.ts` (+6 isValidOriginEntry 케이스: 정상/거부/TLD/wildcard/IPv4/IPv6/ccSLD) / `src/core/config/schema.ts` (`allowedDomains` z.refine 적용) / `src/core/config/schema.test.ts` (+5 케이스: 정상/스킴누락/TLD/IP/배열) / `src/app/api/widget-config/[botId]/route.ts` (HOC 적용 전체 재작성) / `src/app/api/chat/[botId]/route.ts` (POST 만 HOC, OPTIONS 유지, LOCAL_ERROR_MESSAGES 분리) / `src/app/bots/new/actions.ts` + `bots/trash/actions.ts` + `bots/[slug]/edit/actions.ts` (4지점) + `bots/[slug]/conversations/[conversationId]/actions.ts` — Server Action 7개 지점 rate limit `withRetryAfter` 적용 · **자동 해소 점검**: TODO 6건 중 1-0-a #1 부분 자동 해소 확인 (export route 의 `Retry-After` 이미 적용 — 변경 없음) · **독립 리뷰 2 병렬** (code-reviewer Fix-then-ship + security-reviewer Ship) → **Fix 5건 반영**: code M-1 HOC `loadBot` throw 시 500 internal_error catch / code L-3 `isValidOriginEntry` 전용 테스트 6 케이스 / sec M-1 Server Action 메시지 퍼지 표현 (정확 초 → "잠시 후 1분 이내" / 분/시간 단위 모호화 — rate limit 정책 노출 최소화) · **의식적 이월**: code L-1 `buildCorsHeaders` 이중 호출 (성능 미미) / code L-2 export route inline → `computeRetryAfterSeconds` 통합 (β-5 후속) / code INFO-1 `withRetryAfter` ↔ `computeRetryAfterSeconds` 통합 (HTTP vs UX 분리 의식) / sec L-2 `loadBot` 에러 구분 (별도 설계) · vitest 554 → 580 (+26 / orphan 제외 26: schema 5 + with-allowed-origin 9 + rate-limit 4 + isValidOriginEntry 6 + loadBot throw 1 + 기타 1) · typecheck+lint+prettier+build clean (15 routes 유지)
 
 - [x] **Task β-3b (Phase 2 백로그 우선 2 #2 완결): Storage orphan cleanup standalone 스크립트** — **신규 4 + 수정 1**: (신규) `src/core/knowledge/orphan-cleanup.ts` (`computeOrphans` 순수 함수 + 7 타입, 분류 우선순위 `bot_not_found → soft_deleted_within_retention → untracked_bot → referenced → recent_ttl → unreferenced`) / `src/core/knowledge/orphan-cleanup.test.ts` (13 단위 테스트: TTL 정확 경계, custom ttlMs/retentionMs, soft-deleted+legacy 조합, 다중 봇 혼합 포함) / `scripts/cleanup-orphan-storage.ts` (CLI entry, service_role + dry-run/apply 분기, UUID regex 검증, --bot/--ttl-hours/--retention-days/--limit 옵션, Storage list pagination, 50개 batch + per-batch 실패 격리, console.error stdout/stderr 분리, maskPath UUID truncation) / `docs/scripts/cleanup-orphan-storage.md` (운영 가이드: 분류 정책 표, 3 모드 실행법, 권한/env, 출력 예시, 30d 경계 race + legacy 마이그레이션 SQL, 안전 장치 표, Phase 3 Backlog) · (수정) `package.json` (`cleanup:orphan-storage` + `:apply` 2 scripts + `tsx 4.21.0` devDependency 명시) · **이중 게이트** (`--apply` + `CONFIRM_DELETE=yes` 둘 다 필요, 한쪽만 있으면 exit(2) 즉시 abort) · **TTL 24h race window** + **soft-deleted 봇 30d retention** (B-3 정합) + **legacy 봇 (storagePaths 미기록) 전체 보존** + **`bot_not_found` 보존** · **독립 리뷰 2 병렬** (code-reviewer Ship as-is + security-reviewer Ship conditional) → **Fix 8건 반영**: code M-1 분기 단순화 + 의도 주석 / code M-2 soft-deleted+legacy 테스트 케이스 + 분류 정책 표 / sec M-1 --bot UUID regex 검증 / sec M-2 history 회피 안내 (스페이스 prefix + zsh `HIST_IGNORE_SPACE`) / sec M-3 30d 경계 race 운영 가이드 + 검증 SQL / sec M-4 `tee cleanup-YYYYMMDD-HHMMSS.log` audit trail 대용 / sec M-5 legacy 봇 마이그레이션 SQL + 3 옵션 / code INFO-2 tsx devDependency 명시 · 의식적 이월: code INFO-1 `engines`/`.nvmrc` (프로젝트 전반 결정) + code INFO-3 `--page-size` 용어 통일 (향후 옵션 추가 시) · vitest 541 → 554 (+13 / orphan-cleanup) · typecheck+lint+prettier+build clean (15 routes 유지) · gitleaks no leaks 예상
 
@@ -2638,6 +2644,99 @@ Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `compute
 
 ---
 
+## 이번 세션 (2026-04-24 Ⅴ) — Task β-4: Rate Limit + Validation 보강
+
+**맥락**: β-3b 완결 직후 백로그 우선 4 (Task 1-0-a/b 후속 6건) 진입. 학습된 교훈 적용으로 Plan 수립 전 grep/Read 검증 → 6건 중 일부 자동 해소 확인 (export route 의 `Retry-After` 이미 적용 / `login/page.tsx` 에 `resolveErrorMessage` 패턴 1곳). **β-4 = 1-0-b #1 (allowedDomains regex) + #2 (`withAllowedOrigin` HOC) + 1-0-a #1 (Retry-After 표준화 + Server Action reset UX) 묶음**. 외부 의존 (#3 PSL `tldts`) + 조사 필요 (#2 Upstash refund) + Phase 3 (#3 i18n) 는 의식적 분리.
+
+### 흐름 (~2h 30분)
+
+1. **Plan 수립 + 자동 해소 점검 (25분)** — 6건 TODO 각각 grep/Read 로 실 코드 확인. `withAllowedOrigin` 미존재 / `allowedDomains` regex 0 / PSL 라이브러리 없음 / `Retry-After` export route 1곳만 / Upstash refund API 미확인 / i18n 라이브러리 없음. 7건 결정 포인트 비교 + Risk 표 + Backlog 분리 명시. Jayden 권장안 승인.
+
+2. **Step a: schema.ts `allowedDomains` z.refine + `isValidOriginEntry` export (25분)** — `origin-check.ts` 에 신규 함수 추가 (wildcard 검증 + IP-style 차단 + 빈 entry / TLD 단독 / 다중 와일드카드 거부). `schema.ts` 의 `allowedDomains` 에 `.refine(isValidOriginEntry)` 적용. test 5 케이스 추가. **첫 검증 시 `https://192.168.1.1` 직접 IP 가 통과** → IPv4 32-bit 패턴 + IPv6 콜론 검사 추가. 통과.
+
+3. **Step b: `with-allowed-origin.ts` HOC (30분)** — Generic `withAllowedOrigin<TBot extends {id, config}>` + 4단 (loadBot → matchAllowedDomain → rateLimit → corsHeaders) + handler 콜백에 `{bot, origin, clientIp, corsHeaders}` 컨텍스트 주입. `computeRetryAfterSeconds` 헬퍼 export (Math.max 1초 보장). `Retry-After` 헤더 자동 주입 (429 시). 8 테스트 케이스: bot 없음 / origin 미일치 / 429 + Retry-After / 정상 통과 + 컨텍스트 / Origin null / allow-all / `computeRetryAfterSeconds` 경계 (양수 / 음수 → 1).
+
+4. **Step c: chat + widget-config 라우트 적용 (20분)** — widget-config 는 전체 재작성 (단순). chat 은 POST 만 HOC, OPTIONS 유지. `LOCAL_ERROR_MESSAGES` (invalid_body / upstream_error / internal_error) + `HOC_ERROR_MESSAGES` 분리. `loadActiveBot` 함수는 그대로 (옵션으로 주입). 기존 `x-conversation-id` + `Access-Control-Expose-Headers` 보존.
+
+5. **Step d + e: `messages/rate-limit.ts` 상수 + Server Action 7개 지점 적용 (35분)** — `RATE_LIMIT_MESSAGES` (7키) + `withRetryAfter()` (초기에 정확 초 표시). `bots/new` / `bots/trash` / `bots/[slug]/edit` (URL ingest / file ingest / source remove / delete = 4지점) / `conversations/[id]/actions.ts` 에 적용. 기존 한국어 하드코딩 → 단일 출처. 5 테스트 케이스. export route 는 변경 없음 (이미 RFC 6585 Retry-After 적용).
+
+6. **Step f: 검증 (10분)** — typecheck ✅ / vitest 554 → 572 (+18) / prettier ✅ (5 신규/수정 파일 자동 포맷) / lint 3 baseline / build 15 routes ✅.
+
+7. **Step g: 독립 리뷰 2 병렬 (15분)** —
+   - **code-reviewer: Fix-then-ship** — 통과 항목 9개 명시 (feature 경계 / readonly / 4단 보존 / `bot_not_available` enumeration 정합 등). MEDIUM 1 + LOW 3 + INFO 2.
+   - **security-reviewer: Ship** — A01/A02/A03/A04/A06/A07/A08 통과 항목 7개 명시 (enumeration 정확 / Origin null 차단 / IP 추출 신뢰 체인 / `x-conversation-id` 헤더 보존). MEDIUM 1 + LOW 2 + INFO 1.
+
+8. **Fix 5건 반영 (15분)**:
+   1. **code M-1**: HOC `loadBot` throw 시 try/catch + 500 `internal_error` 반환. 기존엔 throw 가 라우트 핸들러를 빠져나가 Next.js 500 HTML 페이지 가 위젯 클라이언트에 전달될 수 있었음. 정형 JSON 응답 일관 처리. 테스트 +1.
+   2. **code L-3**: `origin-check.test.ts` 에 `isValidOriginEntry` 전용 6 케이스 (정상 / 거부 / TLD 단독 / 다중 와일드카드 / IPv4 직접 / IPv6 직접 / ccSLD 한계 명시).
+   3. **sec M-1 (가장 중요)**: `withRetryAfter` 퍼지 표현으로 변경. 정확 초 ("30초 후") → "잠시 후 1분 이내 재시도 가능" / 분 단위 / 시간 단위. **rate limit 정책 노출 최소화** — 공격자가 자동화 도구에서 정확 초를 파싱해 윈도우 추정 차단. Route Handler 의 `Retry-After` 헤더는 RFC 6585 표준 유지 (정확 초 필요).
+   4. 테스트 4 케이스 업데이트 (퍼지 표현 검증).
+   5. 문서 주석 보강 (퍼지 정책 근거 명시).
+
+9. **의식적 이월 (Backlog)**:
+   - **code L-1**: `buildCorsHeaders` 이중 호출 (HOC 의 `jsonError` + `withAllowedOrigin` 양쪽) — 성능 미미 + 정확성 OK → β-5 이후
+   - **code L-2**: export route `Retry-After` 인라인 → `computeRetryAfterSeconds` 통합 → β-5 후속
+   - **code INFO-1**: `withRetryAfter` ↔ `computeRetryAfterSeconds` 통합 — 의식적 분리 (HTTP 헤더 vs 사용자 메시지, 역할 다름)
+   - **sec L-2**: `loadBot` null 의 DB 오류 vs 미존재 구분 — 별도 설계 작업 (RLS 우회 검증과 묶어 처리)
+
+### 검증 (최종)
+
+- typecheck ✅ / lint 3 baseline / prettier ✅ / **vitest 580** (554→572→580 / withAllowedOrigin 9 + isValidOriginEntry 6 + loadBot throw 1 + schema 5 + rate-limit 4 + 1) / build ✅ (15 routes 유지)
+- gitleaks no leaks 예상 (커밋 시점 hook)
+- E2E widget-embed.spec.ts 회귀 검증 = CI 위임 (로컬 Supabase Docker 환경 필요)
+
+### 주요 결정 / 교훈 (learnings.md +2 예정)
+
+1. **HOC 패턴으로 라우트 횡단 검증 일원화**:
+   - `withAllowedOrigin<TBot>(options, handler)` Generic HOC = chat + widget-config 두 라우트의 4단 검증 중복 제거
+   - handler 는 검증 통과 후 비즈니스 로직만 담당 (body parsing / DB / streamText 등)
+   - 향후 다른 위젯 라우트 (예: file upload widget API) 추가 시 표준 패턴
+   - **catch + 500 처리 추가 (Fix M-1)**: HOC 가 throw 처리도 일원화 (라우트마다 try/catch 작성 부담 제거)
+
+2. **rate limit reset 표시는 정확도와 정보 노출 사이 trade-off**:
+   - **Route Handler `Retry-After` 헤더 (RFC 6585)**: 정확한 초 필요. 표준 준수 + 클라이언트 자동 backoff 가능. 대부분 사용자가 헤더 안 봄 = 정보 노출 영향 미미.
+   - **Server Action 사용자 메시지**: 정확한 초 노출 → 공격자 도구가 파싱해 rate limit 한도 추정 가능. **퍼지 표현 ("잠시 후 1분 이내")** 채택 — 사용자 인지 부담 거의 동일 + 정보 누출 차단.
+   - 결정 기준: "사용자가 정확한 시간을 알아야 행동을 결정하는가?" + "공격자가 정보를 도구화 가능한가?"
+
+3. **schema 단 검증 + 매칭 단 검증 이중 방어**:
+   - 저장 시점 (`isValidOriginEntry` schema refine) = 잘못된 entry 가 config 에 침투하는 경로 차단
+   - 매칭 시점 (`matchEntry` 내부 함수) = 저장된 entry 가 어떤 이유로 우회됐어도 매칭 자체에서 다시 차단
+   - 동일 로직 두 곳 = 코드 중복이지만 보안 layer 의 정합성 강화. β-5 에서 단일 출처 통합 검토.
+
+### 신규 3 + 수정 8
+
+_신규_:
+
+- `src/core/security/with-allowed-origin.ts` (~145줄, HOC + computeRetryAfterSeconds)
+- `src/core/security/with-allowed-origin.test.ts` (9 케이스)
+- `src/shared/messages/rate-limit.ts` + `.test.ts` (상수 7키 + 4 케이스)
+
+_수정_:
+
+- `src/core/security/origin-check.ts` — `isValidOriginEntry` export + IP 직접 입력 차단
+- `src/core/security/origin-check.test.ts` — +6 isValidOriginEntry 케이스
+- `src/core/config/schema.ts` — `allowedDomains` z.refine
+- `src/core/config/schema.test.ts` — +5 케이스
+- `src/app/api/widget-config/[botId]/route.ts` — withAllowedOrigin 적용 (전체 재작성)
+- `src/app/api/chat/[botId]/route.ts` — POST 만 withAllowedOrigin, OPTIONS 유지
+- `src/app/bots/new/actions.ts` + `bots/trash/actions.ts` + `bots/[slug]/edit/actions.ts` (4지점) + `bots/[slug]/conversations/[conversationId]/actions.ts` — 7개 지점 withRetryAfter
+
+### Backlog (β-4 이월 / Phase 3)
+
+1. **β-4-후속 #1 (`tldts` PSL 도입)**: ccSLD 단독 (`*.co.uk`) 차단 강화. 외부 의존성 추가 → 별도 Plan. ~30분 + 의존성 사이즈 평가.
+2. **β-4-후속 #2 (Upstash refund 조사)**: API 지원 여부 확인 → 지원 시 카운터 환불 패턴 / 미지원 시 보상 카운터 설계. ~1h.
+3. **β-4-후속 #3 (i18n 라이브러리)**: `next-intl` 또는 `react-intl` 도입 → 다국어 지원. Phase 3 SaaS 신호와 함께. ~3h+.
+4. **β-5 후보**: code L-1 buildCorsHeaders 이중 호출 + code L-2 export route Retry-After 통합 + code INFO-1 withRetryAfter 단일 출처 검토 (현재 의식적 분리). 묶음 cleanup ~30분.
+5. **sec L-2**: `loadBot` 에러 구분 (DB 오류 vs 미존재) — 별도 설계 작업.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-24 Ⅴ (KST) — Task β-4 완결 = **백로그 핵심 그룹 모두 해소**, 외부 신호 평가 단계 도달
+- 브랜치: `main`
+- 차단 요소: 없음 (Epic D Kakao Business 계정 / Epic C 실사용자 신호 대기)
+
+---
+
 ## 이번 세션 (2026-04-24 Ⅳ) — Task β-3b: Storage Orphan Cleanup standalone 스크립트
 
 **맥락**: β-3a 에서 분리됐던 우선 2 #2 (Storage orphan cleanup) 를 fresh 세션 Plan 으로 진행. PROGRESS β-3a 완결 메모: "신규 스크립트 규모라 fresh 세션 Plan 수립이 설계 품질에 유리" → 본 세션 단독 Task.
@@ -2816,7 +2915,7 @@ _수정_:
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-24 Ⅳ (Task **β-3b 완결** = 백로그 우선 2 그룹 완결. Storage orphan cleanup standalone 스크립트 + 13 단위 테스트 + 이중 게이트 + 운영 가이드. 리뷰 Fix 8건. 다음: 백로그 우선 4 (β-4) 또는 외부 신호 평가)
+- 날짜: 2026-04-24 Ⅴ (Task **β-4 완결** = 백로그 우선 4 부분 완결 + 백로그 핵심 그룹 모두 해소. `withAllowedOrigin` HOC + Retry-After 표준화 + Server Action reset 퍼지 표현 + allowedDomains schema refine. 리뷰 Fix 5건. 다음: 백로그 후속 3건 또는 외부 신호 평가)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 최근 커밋: `19877d5` (β-1+β-2+β-3a docs) · `b1ae464` (β-3a) · `96e48e8` (β-2) · `0a01305` (β-1)
+- 최근 커밋: `6205e3f` (β-3b) · `19877d5` (β-1+β-2+β-3a docs) · `b1ae464` (β-3a) · `96e48e8` (β-2) · `0a01305` (β-1)

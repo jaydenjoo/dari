@@ -8,6 +8,10 @@ import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
 import { checkConversationDeleteRatelimit } from "@/core/ratelimit/conversation-delete-limiter";
 import { isValidUuid } from "@/shared/conversations/meta";
+import {
+  RATE_LIMIT_MESSAGES,
+  withRetryAfter,
+} from "@/shared/messages/rate-limit";
 
 import { isValidSlug } from "../../../new/slug-util";
 
@@ -50,8 +54,7 @@ export async function deleteConversationAction(
   const rl = await checkConversationDeleteRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (5분 안에 10회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.conversation_delete, rl.reset),
     };
   }
 

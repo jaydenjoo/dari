@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isValidOriginEntry } from "@/core/security/origin-check";
+
 /**
  * Dari Config 스키마 — "챗봇의 정체성"을 결정하는 단일 진실 공급원
  *
@@ -261,8 +263,18 @@ export const dariConfigSchema = z.object({
   behavior: behaviorSchema.default(behaviorSchema.parse({})),
   appearance: appearanceSchema.default(appearanceSchema.parse({})),
   analytics: analyticsSchema.default(analyticsSchema.parse({})),
-  // 보안: 위젯 허용 도메인 화이트리스트 (Task 1-0에서 CORS 검증에 사용)
-  allowedDomains: z.array(z.string().min(1)).default([]),
+  // 보안: 위젯 허용 도메인 화이트리스트 (Task 1-0에서 CORS 검증에 사용).
+  // Task β-4: entry 포맷 refine 추가 — 잘못된 entry 가 config 에 저장되는 경로 차단.
+  // 허용: `https://example.com` / `https://*.example.com` / `http://localhost:3000`.
+  // 차단: 빈 문자열 / 스킴 누락 / http+외부 / *.com (TLD 단독) / IP-style / 다중 와일드카드.
+  allowedDomains: z
+    .array(
+      z.string().min(1).refine(isValidOriginEntry, {
+        message:
+          "올바른 origin 형식이 아닙니다 (예: https://example.com 또는 https://*.example.com)",
+      }),
+    )
+    .default([]),
 });
 
 // ─── Types (타입 자동 추론 — 수동 유지 불필요) ───

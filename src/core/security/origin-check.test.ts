@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCorsHeaders,
+  isValidOriginEntry,
   matchAllowedDomain,
   normalizeOrigin,
 } from "./origin-check";
@@ -272,5 +273,55 @@ describe("buildCorsHeaders", () => {
       "https://any-site.example",
     );
     expect(headers["Vary"]).toBe("Origin");
+  });
+});
+
+// ─── isValidOriginEntry (Task β-4 schema refine 단 검증) ───
+describe("isValidOriginEntry", () => {
+  it("정상 https / 와일드카드 / 로컬 / port 통과", () => {
+    expect(isValidOriginEntry("https://example.com")).toBe(true);
+    expect(isValidOriginEntry("https://www.example.com:8080")).toBe(true);
+    expect(isValidOriginEntry("https://*.example.com")).toBe(true);
+    expect(isValidOriginEntry("http://localhost:3000")).toBe(true);
+    expect(isValidOriginEntry("http://127.0.0.1:4000")).toBe(true);
+    expect(isValidOriginEntry("http://[::1]:4000")).toBe(true);
+  });
+
+  it("스킴 누락 / http+외부 / 비지원 스킴 거부", () => {
+    expect(isValidOriginEntry("example.com")).toBe(false);
+    expect(isValidOriginEntry("http://example.com")).toBe(false);
+    expect(isValidOriginEntry("ftp://example.com")).toBe(false);
+    expect(isValidOriginEntry("")).toBe(false);
+    expect(isValidOriginEntry("   ")).toBe(false);
+  });
+
+  it("TLD 단독 와일드카드 거부 (`*.com`, `*.kr`)", () => {
+    expect(isValidOriginEntry("https://*.com")).toBe(false);
+    expect(isValidOriginEntry("https://*.kr")).toBe(false);
+  });
+
+  it("다중 와일드카드 거부 (`*.*.example.com`)", () => {
+    expect(isValidOriginEntry("https://*.*.example.com")).toBe(false);
+  });
+
+  it("IPv4 직접 입력 거부 (LOCAL_HOSTS 외)", () => {
+    expect(isValidOriginEntry("https://192.168.1.1")).toBe(false);
+    expect(isValidOriginEntry("https://8.8.8.8")).toBe(false);
+    // 와일드카드 base 가 IP-only 인 경우도 거부
+    expect(isValidOriginEntry("https://*.192.168")).toBe(false);
+    expect(isValidOriginEntry("https://*.10.0.0.1")).toBe(false);
+  });
+
+  it("IPv6 직접 입력 거부 (LOCAL_HOSTS 외)", () => {
+    // [2001:db8::] 같은 일반 IPv6 origin 은 운영에서 사용 안 함 → 거부
+    expect(isValidOriginEntry("https://[2001:db8::1]")).toBe(false);
+    // [::1] 은 LOCAL_HOSTS 통과
+    expect(isValidOriginEntry("https://[::1]")).toBe(true);
+  });
+
+  it("ccSLD 와일드카드는 통과 (β-4 한계, PSL 도입 Backlog)", () => {
+    // 주의: 정책상 의식적 통과. PSL (`tldts`) 도입 시 차단 예정.
+    expect(isValidOriginEntry("https://*.co.uk")).toBe(true);
+    expect(isValidOriginEntry("https://*.com.au")).toBe(true);
   });
 });

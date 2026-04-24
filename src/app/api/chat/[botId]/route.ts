@@ -14,11 +14,8 @@ import {
 import { logger } from "@/core/logging";
 import { checkBotChatRatelimit } from "@/core/ratelimit/bot-chat-limiter";
 import { sanitizeLoggableError } from "@/core/ratelimit/factory";
-import { resolveClientIp } from "@/core/ratelimit/login-limiter";
-import {
-  buildCorsHeaders,
-  matchAllowedDomain,
-} from "@/core/security/origin-check";
+import { buildCorsHeaders } from "@/core/security/origin-check";
+import { withAllowedOrigin } from "@/core/security/with-allowed-origin";
 
 // Node runtime 명시 — Supabase admin client 이 @supabase/ssr + pg 드라이버 경로
 // (Edge 런타임 비호환 가능) 를 경유할 수 있어 안정성 우선. streamText 는 양쪽 호환.
@@ -63,17 +60,18 @@ const requestSchema = z.object({
   conversationId: z.string().uuid().optional(),
 });
 
-type ErrorCode =
-  | "internal_error"
-  | "bot_not_available"
-  | "too_many_requests"
-  | "invalid_body"
-  | "upstream_error";
+// Task β-4: bot 조회 + origin + rate limit + Retry-After 는 `withAllowedOrigin` HOC 처리.
+// 본 라우트는 handler 내부에서 추가 코드 (invalid_body / upstream_error) 만 직접 발급.
+type LocalErrorCode = "invalid_body" | "upstream_error" | "internal_error";
 
-const ERROR_MESSAGES: Record<ErrorCode, string> = {
+const HOC_ERROR_MESSAGES = {
   internal_error: "잠시 후 다시 시도해 주세요.",
   bot_not_available: "해당 봇을 찾을 수 없어요.",
   too_many_requests: "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.",
+} as const;
+
+const LOCAL_ERROR_MESSAGES: Record<LocalErrorCode, string> = {
+  internal_error: "잠시 후 다시 시도해 주세요.",
   invalid_body: "요청 형식이 올바르지 않아요.",
   upstream_error: "응답을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
 };
@@ -89,14 +87,13 @@ function hashClientIp(ip: string): string {
 }
 
 function jsonError(
-  code: ErrorCode,
+  code: LocalErrorCode,
   status: number,
-  origin: string | null,
-  allowedDomains: readonly string[],
+  corsHeaders: Record<string, string>,
 ): NextResponse {
   return NextResponse.json(
-    { error: ERROR_MESSAGES[code], code },
-    { status, headers: buildCorsHeaders(origin, allowedDomains) },
+    { error: LOCAL_ERROR_MESSAGES[code], code },
+    { status, headers: corsHeaders },
   );
 }
 
@@ -138,160 +135,133 @@ async function loadActiveBot(botSlug: string): Promise<BotContext | null> {
   return { id: data.id, config: parsed.data };
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ botId: string }> },
-): Promise<Response> {
-  const { botId: botSlug } = await params;
-  const origin = req.headers.get("origin");
-  const clientIp = resolveClientIp(req.headers);
-
-  const bot = await loadActiveBot(botSlug);
-  if (!bot) {
-    return jsonError("bot_not_available", 404, origin, []);
-  }
-
-  if (!matchAllowedDomain(origin, bot.config.allowedDomains)) {
-    // origin 거부도 bot 부존재와 동일 응답으로 위장 — widget-config API (sec H-1) 와
-    // 정합성 통일. HTTP status + response code 둘 다 통일해 공격자가 응답을 파싱해도
-    // "slug 존재 하지만 origin 차단" vs "slug 부존재" 를 구분 불가 (enumeration 방지).
-    return jsonError(
-      "bot_not_available",
-      404,
-      origin,
-      bot.config.allowedDomains,
-    );
-  }
-
-  const rl = await checkBotChatRatelimit(bot.id, clientIp);
-  if (!rl.ok) {
-    return jsonError(
-      "too_many_requests",
-      429,
-      origin,
-      bot.config.allowedDomains,
-    );
-  }
-
-  let bodyJson: unknown;
-  try {
-    bodyJson = await req.json();
-  } catch {
-    return jsonError("invalid_body", 400, origin, bot.config.allowedDomains);
-  }
-  const parsed = requestSchema.safeParse(bodyJson);
-  if (!parsed.success) {
-    return jsonError("invalid_body", 400, origin, bot.config.allowedDomains);
-  }
-
-  const { message, conversationId: requestedConvId } = parsed.data;
-  const admin = createAdminClient();
-
-  const conversationId = await resolveConversationId(
-    admin,
-    bot.id,
-    requestedConvId,
-    hashClientIp(clientIp),
-  );
-  if (!conversationId) {
-    return jsonError("internal_error", 500, origin, bot.config.allowedDomains);
-  }
-
-  const { error: userMsgError } = await admin.from("messages").insert({
-    conversation_id: conversationId,
-    role: "user",
-    content: message,
-  });
-  if (userMsgError) {
-    logger.error(
-      { err: sanitizeLoggableError(userMsgError) },
-      "user message insert 실패",
-    );
-    return jsonError("internal_error", 500, origin, bot.config.allowedDomains);
-  }
-
-  // RAG: 사용자 메시지 → 임베딩 → 상위 K 청크. 실패 시 빈 배열 반환(내부 warn 로깅)
-  // → 기존 systemPrompt 로 fallback. chat 자체는 중단되지 않는다.
-  const chunks = await retrieveRelevantChunks(bot.id, message);
-  logger.debug(
-    { botId: bot.id, chunkCount: chunks.length },
-    "RAG chunks retrieved",
-  );
-
-  // Chat API 레이어에서 max_tokens clamp — 소유자 설정값과 무관하게 상한 강제 (security M-3)
-  const maxOutputTokens = Math.min(
-    bot.config.ai.maxTokens,
-    CHAT_MAX_OUTPUT_TOKENS,
-  );
-  // RAG 청크 비어있으면 원본 systemPrompt 반환 (augment 내부 분기)
-  const system = augmentSystemPromptWithKnowledge(
-    bot.config.ai.systemPrompt,
-    chunks,
-  );
-
-  const result = streamText({
-    model: getAnthropicProvider()(bot.config.ai.model),
-    system,
-    messages: [{ role: "user", content: message }],
-    maxOutputTokens,
-    temperature: bot.config.ai.temperature,
-  });
-
-  // assistant 메시지 DB insert — Vercel 서버리스 lifecycle 보장을 위해 `after()` 사용.
-  // streamText 의 `onFinish` 콜백은 응답 flush 이후 실행이 보장 안 될 수 있어
-  // (Vercel 문서 `waitUntil` 없는 Promise), Next 16 의 `after()` API 로 인프라 레벨 보장.
-  // `result.text` 는 스트림 소비 완료 후 resolve (에러 발생 시 reject → try/catch 로 흡수).
-  // 클라가 스트림 중간에 abort 해도 AI SDK 는 서버 측 파이프를 유지하므로 partial 이라도 저장.
-  // (리뷰 code H-1 / sec M-2 반영)
-  after(async () => {
+export const POST = withAllowedOrigin<BotContext>(
+  {
+    loadBot: loadActiveBot,
+    rateLimit: checkBotChatRatelimit,
+    errorMessages: HOC_ERROR_MESSAGES,
+  },
+  async ({ bot, clientIp, corsHeaders }, req) => {
+    let bodyJson: unknown;
     try {
-      const finalText = await result.text;
-      // 새 admin 인스턴스 — 기존 `admin` 이 응답 flush 시점에 이미 HTTP 연결 정리됐을 수 있음
-      // (리뷰 code M-1 반영)
-      const adminForAfter = createAdminClient();
-      const { error: assistantMsgError } = await adminForAfter
-        .from("messages")
-        .insert({
-          conversation_id: conversationId,
-          role: "assistant",
-          content: finalText,
-        });
-      if (assistantMsgError) {
+      bodyJson = await req.json();
+    } catch {
+      return jsonError("invalid_body", 400, corsHeaders);
+    }
+    const parsed = requestSchema.safeParse(bodyJson);
+    if (!parsed.success) {
+      return jsonError("invalid_body", 400, corsHeaders);
+    }
+
+    const { message, conversationId: requestedConvId } = parsed.data;
+    const admin = createAdminClient();
+
+    const conversationId = await resolveConversationId(
+      admin,
+      bot.id,
+      requestedConvId,
+      hashClientIp(clientIp),
+    );
+    if (!conversationId) {
+      return jsonError("internal_error", 500, corsHeaders);
+    }
+
+    const { error: userMsgError } = await admin.from("messages").insert({
+      conversation_id: conversationId,
+      role: "user",
+      content: message,
+    });
+    if (userMsgError) {
+      logger.error(
+        { err: sanitizeLoggableError(userMsgError) },
+        "user message insert 실패",
+      );
+      return jsonError("internal_error", 500, corsHeaders);
+    }
+
+    // RAG: 사용자 메시지 → 임베딩 → 상위 K 청크. 실패 시 빈 배열 반환(내부 warn 로깅)
+    // → 기존 systemPrompt 로 fallback. chat 자체는 중단되지 않는다.
+    const chunks = await retrieveRelevantChunks(bot.id, message);
+    logger.debug(
+      { botId: bot.id, chunkCount: chunks.length },
+      "RAG chunks retrieved",
+    );
+
+    // Chat API 레이어에서 max_tokens clamp — 소유자 설정값과 무관하게 상한 강제 (security M-3)
+    const maxOutputTokens = Math.min(
+      bot.config.ai.maxTokens,
+      CHAT_MAX_OUTPUT_TOKENS,
+    );
+    // RAG 청크 비어있으면 원본 systemPrompt 반환 (augment 내부 분기)
+    const system = augmentSystemPromptWithKnowledge(
+      bot.config.ai.systemPrompt,
+      chunks,
+    );
+
+    const result = streamText({
+      model: getAnthropicProvider()(bot.config.ai.model),
+      system,
+      messages: [{ role: "user", content: message }],
+      maxOutputTokens,
+      temperature: bot.config.ai.temperature,
+    });
+
+    // assistant 메시지 DB insert — Vercel 서버리스 lifecycle 보장을 위해 `after()` 사용.
+    // streamText 의 `onFinish` 콜백은 응답 flush 이후 실행이 보장 안 될 수 있어
+    // (Vercel 문서 `waitUntil` 없는 Promise), Next 16 의 `after()` API 로 인프라 레벨 보장.
+    // `result.text` 는 스트림 소비 완료 후 resolve (에러 발생 시 reject → try/catch 로 흡수).
+    // 클라가 스트림 중간에 abort 해도 AI SDK 는 서버 측 파이프를 유지하므로 partial 이라도 저장.
+    // (리뷰 code H-1 / sec M-2 반영)
+    after(async () => {
+      try {
+        const finalText = await result.text;
+        // 새 admin 인스턴스 — 기존 `admin` 이 응답 flush 시점에 이미 HTTP 연결 정리됐을 수 있음
+        // (리뷰 code M-1 반영)
+        const adminForAfter = createAdminClient();
+        const { error: assistantMsgError } = await adminForAfter
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            role: "assistant",
+            content: finalText,
+          });
+        if (assistantMsgError) {
+          logger.error(
+            { err: sanitizeLoggableError(assistantMsgError) },
+            "assistant message insert 실패 (after)",
+          );
+        }
+      } catch (err) {
+        // streamText 가 throw 하거나 Anthropic APIError 등 — stream `onError` 에서도
+        // 이미 logger.error 로 기록됐지만 여기선 after() 콘텍스트 추적용.
         logger.error(
-          { err: sanitizeLoggableError(assistantMsgError) },
-          "assistant message insert 실패 (after)",
+          { err: sanitizeLoggableError(err), botId: bot.id },
+          "after() 중 assistant 저장 실패 (stream 에러 경로)",
         );
       }
-    } catch (err) {
-      // streamText 가 throw 하거나 Anthropic APIError 등 — stream `onError` 에서도
-      // 이미 logger.error 로 기록됐지만 여기선 after() 콘텍스트 추적용.
-      logger.error(
-        { err: sanitizeLoggableError(err), botId: bot.id },
-        "after() 중 assistant 저장 실패 (stream 에러 경로)",
-      );
-    }
-  });
+    });
 
-  return result.toUIMessageStreamResponse({
-    headers: {
-      ...buildCorsHeaders(origin, bot.config.allowedDomains),
-      "x-conversation-id": conversationId,
-      // cross-origin 에서 JS 가 custom 헤더를 읽으려면 필수 (브라우저 CORS 정책)
-      "Access-Control-Expose-Headers": "x-conversation-id",
-    },
-    // Anthropic SDK APIError 등 stream 중 에러는 Authorization 헤더·API 키·쿼리 파편을
-    // message 에 포함할 수 있어, 클라에 내려보내는 에러 payload 는 정적 문자열로 통일.
-    // (security N-7 — 에러 enumeration 방지) logger.error 에서만 sanitize 후 전체 기록.
-    onError: (err) => {
-      logger.error(
-        { err: sanitizeLoggableError(err), botId: bot.id },
-        "stream 중 upstream 에러",
-      );
-      // 클라 파서는 이 문자열을 `upstream_error` 코드로 매핑 (chat.ts 의 화이트리스트)
-      return "upstream_error";
-    },
-  });
-}
+    return result.toUIMessageStreamResponse({
+      headers: {
+        ...corsHeaders,
+        "x-conversation-id": conversationId,
+        // cross-origin 에서 JS 가 custom 헤더를 읽으려면 필수 (브라우저 CORS 정책)
+        "Access-Control-Expose-Headers": "x-conversation-id",
+      },
+      // Anthropic SDK APIError 등 stream 중 에러는 Authorization 헤더·API 키·쿼리 파편을
+      // message 에 포함할 수 있어, 클라에 내려보내는 에러 payload 는 정적 문자열로 통일.
+      // (security N-7 — 에러 enumeration 방지) logger.error 에서만 sanitize 후 전체 기록.
+      onError: (err) => {
+        logger.error(
+          { err: sanitizeLoggableError(err), botId: bot.id },
+          "stream 중 upstream 에러",
+        );
+        // 클라 파서는 이 문자열을 `upstream_error` 코드로 매핑 (chat.ts 의 화이트리스트)
+        return "upstream_error";
+      },
+    });
+  },
+);
 
 /**
  * conversationId 결정 — 요청에 있고 소유권 일치 + 메시지 상한 미초과면 재사용, 아니면 새로 생성.

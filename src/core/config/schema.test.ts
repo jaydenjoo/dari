@@ -75,6 +75,73 @@ describe("dariConfigSchema", () => {
     expect(result.behavior.handoff.trigger).toBe("상담원 연결");
   });
 
+  // ─── allowedDomains entry 포맷 refine (Task β-4) ───
+  describe("allowedDomains entry 포맷 refine", () => {
+    it("정상 entry 통과 (https / wildcard / localhost)", () => {
+      const result = dariConfigSchema.parse({
+        ...minimalValidInput,
+        allowedDomains: [
+          "https://example.com",
+          "https://www.example.com:8080",
+          "https://*.example.com",
+          "http://localhost:3000",
+          "http://127.0.0.1:4000",
+        ],
+      });
+      expect(result.allowedDomains).toHaveLength(5);
+    });
+
+    it("스킴 누락 / http+외부 / 비지원 스킴 거부", () => {
+      for (const entry of [
+        "example.com",
+        "http://example.com",
+        "ftp://example.com",
+      ]) {
+        expect(() =>
+          dariConfigSchema.parse({
+            ...minimalValidInput,
+            allowedDomains: [entry],
+          }),
+        ).toThrow();
+      }
+    });
+
+    it("TLD 단독 / IP-style / 다중 와일드카드 거부", () => {
+      for (const entry of [
+        "https://*.com",
+        "https://*.kr",
+        "https://*.*.example.com",
+        "https://192.168.1.1",
+        "https://*.192.168",
+      ]) {
+        expect(() =>
+          dariConfigSchema.parse({
+            ...minimalValidInput,
+            allowedDomains: [entry],
+          }),
+        ).toThrow();
+      }
+    });
+
+    it("ccSLD 와일드카드는 통과 (β-4 한계, PSL 도입 Backlog)", () => {
+      // 의식적으로 통과 — Phase 2 backlog (`tldts` 도입 시 차단)
+      const result = dariConfigSchema.parse({
+        ...minimalValidInput,
+        allowedDomains: ["https://*.co.uk", "https://*.com.au"],
+      });
+      expect(result.allowedDomains).toHaveLength(2);
+    });
+
+    it("배열 내 한 entry 만 잘못되어도 전체 거부", () => {
+      expect(() =>
+        dariConfigSchema.parse({
+          ...minimalValidInput,
+          allowedDomains: ["https://example.com", "invalid-no-scheme"],
+        }),
+      ).toThrow();
+    });
+  });
+
   it("businessHours.hours 형식 위반 시 실패한다", () => {
     const invalidHoursFormats = ["9-18", "09:00 - 18:00", "0900-1800", "abc"];
     for (const hours of invalidHoursFormats) {

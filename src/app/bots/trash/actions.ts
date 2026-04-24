@@ -7,6 +7,10 @@ import { AUDIT_EVENTS, logAuditEvent } from "@/core/audit";
 import { createClient } from "@/core/db/client-server";
 import { logger } from "@/core/logging";
 import { checkBotDeleteRatelimit } from "@/core/ratelimit/bot-delete-limiter";
+import {
+  RATE_LIMIT_MESSAGES,
+  withRetryAfter,
+} from "@/shared/messages/rate-limit";
 
 import { isValidSlug } from "../new/slug-util";
 
@@ -166,8 +170,7 @@ export async function permanentDeleteBotAction(
   const rl = await checkBotDeleteRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (1시간 안에 5회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_delete, rl.reset),
     };
   }
 

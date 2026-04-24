@@ -29,6 +29,10 @@ import { checkBotDeleteRatelimit } from "@/core/ratelimit/bot-delete-limiter";
 import { checkBotFileIngestRatelimit } from "@/core/ratelimit/bot-file-ingest-limiter";
 import { checkBotSourceRemoveRatelimit } from "@/core/ratelimit/bot-source-remove-limiter";
 import { checkBotUrlIngestRatelimit } from "@/core/ratelimit/bot-url-ingest-limiter";
+import {
+  RATE_LIMIT_MESSAGES,
+  withRetryAfter,
+} from "@/shared/messages/rate-limit";
 
 import { isValidSlug } from "../../new/slug-util";
 
@@ -402,8 +406,7 @@ export async function addUrlSourceAction(
   const rl = await checkBotUrlIngestRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "URL 추가 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (10분 안에 20회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_url_ingest, rl.reset),
     };
   }
 
@@ -622,8 +625,7 @@ export async function addFileSourceAction(
   const rl = await checkBotFileIngestRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "파일 업로드 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (10분 안에 20회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_file_ingest, rl.reset),
     };
   }
 
@@ -869,8 +871,7 @@ export async function removeSourceAction(
   const rl = await checkBotSourceRemoveRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (5분 안에 10회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_source_remove, rl.reset),
     };
   }
 
@@ -1116,8 +1117,7 @@ export async function deleteBotAction(
   const rl = await checkBotDeleteRatelimit(user.id);
   if (!rl.ok) {
     return {
-      error:
-        "삭제 요청이 너무 많아요. 잠시 후 다시 시도해 주세요. (1시간 안에 5회 제한)",
+      error: withRetryAfter(RATE_LIMIT_MESSAGES.bot_delete, rl.reset),
     };
   }
 
