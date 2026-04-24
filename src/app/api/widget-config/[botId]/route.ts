@@ -159,17 +159,13 @@ export async function GET(
   );
 }
 
-export async function OPTIONS(
-  req: NextRequest,
-  { params }: { params: Promise<{ botId: string }> },
-): Promise<NextResponse> {
-  const { botId: botSlug } = await params;
+// Preflight 는 DB 조회 없이 수용 — 실 access control 은 actual GET 에서 수행한다.
+// 의도: preflight + actual 의 DB 2회 히트 제거. non-allowed origin 의 preflight 도 통과
+// 시키지만, actual GET 이 `bot_not_available` (404) 로 일관 응답하므로 정보 유출 없음.
+// `null` / 파싱 실패 origin 은 `buildCorsHeaders` 내부에서 `Allow-Origin` 미반환 → 브라우저 차단.
+export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin");
-
-  const bot = await loadActiveBot(botSlug);
-  const allowedDomains = bot?.config.allowedDomains ?? [];
-
-  const corsHeaders = buildCorsHeaders(origin, allowedDomains);
+  const corsHeaders = buildCorsHeaders(origin, []);
   return new NextResponse(null, {
     status: 204,
     headers: {

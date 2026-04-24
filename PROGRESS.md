@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + Task β-1 (1-8 후속 정돈)** — A-1~A-5a + B-1~B-6 + β-1. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2** — A-1~A-5a + B-1~B-6 + β-1 + β-2. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화 + API 응답 enumeration 일관성 + OPTIONS DB 제거 + ESLint proxy 가드.
 - Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기. 내부 가능 경로는 **Phase 2 백로그 청소 (β 시리즈)** 만.
-- 상태: **이번 세션(2026-04-24 Ⅲ) 1 커밋 예상** — Task β-1 (conversations-list.tsx animate cap 상수화 + conversations/page.tsx import 경로 B-5 규칙 일관성) + PROGRESS 다음 세션 재정의 + phase-2-plan §8 Epic 전환 결정 신설. 독립 리뷰 2 병렬 **둘 다 Ship as-is** (code MEDIUM 1건 주석 선반영 / security 권장 0건).
-- 확인: **`formatRelative` shared util 은 이미 승격 완료** — PROGRESS 백로그 1건 자동 해소 (탐색 결과로 발견).
+- 상태: **이번 세션(2026-04-24 Ⅲ) 2 커밋 예상** — β-1 + β-2. β-2 = 우선 3 그룹 5건 (#1 chat API 404 통일 / #2 OPTIONS DB 제거 / #3 env `as ServerEnv` 자동 해소 / #4 knowledge-placeholder 삭제 / #5 proxy-client ESLint 가드) + widget 측 `origin_not_allowed` dead code 일괄 제거 (sec Ship conditional → Ship as-is 전환).
+- 확인: **PROGRESS TODO drift 2회 연속 발견** — β-1 `formatRelative` + β-2 `as ServerEnv` 자동 해소. 교훈 기록 완료 (learnings.md).
 - ⚠️ **차단**: 없음. 경로 α (백로그) 는 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
 
 ## 완료된 Epic
@@ -1826,13 +1826,15 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - [ ] rate limit fail-closed 전환 (1-7-c sec LOW-1) — 🟡 **과금 모델 도입 시** 이월 (Epic C 이후 자연 트리거)
 - [ ] unpdf CVE 모니터링 (1-7-c sec INFO-1) — 월 1회 `pnpm audit` 스케줄만 기록
 
-#### 우선 3 (Phase 1 API 정합성, 총 ~60~90m) — 사소 일관성 버그
+#### 우선 3 (Phase 1 API 정합성) — 사소 일관성 버그 ✅ **완결 (2026-04-24 Ⅲ, Task β-2)**
 
-- [ ] `chat API origin_not_allowed` → 404 통일 (widget-config enumeration 일관성)
-- [ ] OPTIONS preflight DB 이중 호출 리팩터 (chat + widget-config 동시)
-- [ ] `env.ts` code M-1 `as ServerEnv` 타입 단언 개선 (ε-backlog)
-- [ ] `knowledge-placeholder.tsx` dead code 제거 (Task 1-7-a 완결 시 남은 placeholder)
-- [ ] `proxy-client.ts` ESLint `no-restricted-imports` 강제 — proxy 외 import 차단 (~15m)
+- [x] `chat API origin_not_allowed` → 404 `bot_not_available` 통일 — widget-config sec H-1 정합. ErrorCode union + ERROR_MESSAGES 정리 + POST 분기 주석 3줄. 부수적으로 widget `src/widget/chat.ts` + `stream-parser.ts` 의 동명 dead code 일괄 제거 (security Ship conditional 해소).
+- [x] OPTIONS preflight DB 이중 호출 제거 — chat + widget-config 둘 다 `loadActiveBot` 제거 + `buildCorsHeaders(origin, [])` allow-all preflight. actual POST/GET 이 실 access control 수행. 브라우저 null origin 차단 보존.
+- [x] `env.ts` code M-1 `as ServerEnv` — **자동 해소 확인** (env.server.ts 는 이미 fail-fast throw 로 개선됨. env.client.ts `as ClientEnv` 는 "서버에서는 env.server 가 진실, client 는 skip+empty fallback" 의식적 설계 — line 62-65 주석 존재).
+- [x] `knowledge-placeholder.tsx` dead code 파일 삭제 — 외부 참조 0 확인. Epic 1-7 완결로 실 편집 UI 가 대체.
+- [x] `proxy-client.ts` ESLint `no-restricted-imports` 강제 — `src/core/db/proxy-client.ts` 파일 범위로 `server-only` import 시 error. learnings.md 2026-04-17 참조 메시지. negative 검증 완료 (일시 추가 → lint error 발생 확인 → 되돌림).
+
+> **확장 옵션 미반영**: proxy-client 를 `proxy.ts` 외 파일에서 import 하는 것도 금지하는 규칙은 별도 설계 필요 — Phase 2 backlog 후속 이월.
 
 #### 우선 4 (Task 1-0 후속, 총 ~90~120m) — Rate Limit + Validation 보강
 
@@ -1864,6 +1866,8 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - Epic C: 실사용자 3~5명 + SaaS 수익 모델 결정 (외부 영업 성과)
 
 ## 완료한 Task (누적, 최근 순)
+
+- [x] **Task β-2 (Phase 2 백로그 Phase 1 API 정합성, 우선 3 완결)**: 5건 묶음 + widget 확장 — (#1) chat API `origin_not_allowed` + 403 → `bot_not_available` + 404 통일 (widget-config sec H-1 정합, enumeration 방지 강화) · (#2) chat + widget-config OPTIONS 핸들러에서 `loadActiveBot` DB 호출 제거 → `buildCorsHeaders(origin, [])` allow-all preflight (preflight DB 2회 히트 제거, actual request 에서 실 access control) · (#3) env `as ServerEnv` 자동 해소 확인 (env.server 이미 fail-fast throw, env.client 의식적 설계) · (#4) `knowledge-placeholder.tsx` dead code 파일 삭제 (외부 참조 0) · (#5) `proxy-client.ts` ESLint `no-restricted-imports` — `server-only` import 차단 (learnings 2026-04-17 참조 메시지) · **widget 확장 (sec Ship conditional 해소)**: `src/widget/chat.ts` + `stream-parser.ts` 에서 `origin_not_allowed` 일괄 제거 (`WidgetErrorCode` / `KNOWN_ERROR_CODES` / `ERROR_LABELS` / 주석) — 서버 ↔ 클라이언트 타입 drift 차단 · **독립 리뷰 2 병렬** (code Ship as-is / security Ship conditional → widget 확장 반영 후 Ship as-is) · 540/540 vitest 회귀 없음 · typecheck+lint+prettier+build clean · ESLint #5 negative 검증 통과
 
 - [x] **Task β-1 (Phase 2 백로그 1-8 후속, 우선 1 완결)**: `conversations-list.tsx` animate cap 상수화 (`ANIMATION_STAGGER_MS=40` + `ANIMATION_MAX_STAGGER_ITEMS=10` + 의도 주석 1줄) · `conversations/page.tsx` import 경로 B-5 단일 심볼 규칙 적용 (`@/shared/time` barrel → `@/shared/time/relative` 세부 경로) · **`formatRelative` shared util 이미 승격 완료 확인** (탐색 중 자동 해소) · **독립 리뷰 2 둘 다 Ship as-is** (code MEDIUM 주석 1건 선반영, security 권장 0건) · 540/540 vitest 회귀 없음 · typecheck+lint+prettier+build clean · 메타 문서 정비 동반 (PROGRESS 다음 세션 Epic A/B 완결 반영 재정의 + phase-2-plan §8 Epic 전환 결정 신설)
 

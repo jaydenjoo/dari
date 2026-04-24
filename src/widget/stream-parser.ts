@@ -26,7 +26,6 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<WidgetErrorCode>([
   "parse_error",
   "too_many_requests",
   "bot_not_available",
-  "origin_not_allowed",
   "invalid_body",
   "upstream_error",
   "internal_error",
@@ -39,7 +38,7 @@ const MAX_BUFFER_BYTES = 64 * 1024;
 // 32K 초과면 악성 서버 / 프록시 주입으로 간주, upstream_error 로 종료.
 const MAX_FULL_CHARS = 32 * 1024;
 // error 이벤트의 errorText 는 화이트리스트 정규화 후 버려지지만 대형 문자열로 메모리 소비
-// 가능. 화이트리스트 가장 긴 코드(origin_not_allowed)도 64자 이하. (sec L-1)
+// 가능. 화이트리스트 최장 코드(`too_many_requests` / `bot_not_available` 17자)도 64자 이하. (sec L-1)
 const MAX_ERROR_TEXT_CHARS = 64;
 
 export class StreamError extends Error {

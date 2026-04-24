@@ -24,7 +24,6 @@ export type WidgetErrorCode =
   | "parse_error"
   | "too_many_requests"
   | "bot_not_available"
-  | "origin_not_allowed"
   | "invalid_body"
   | "upstream_error"
   | "internal_error";
@@ -35,7 +34,6 @@ const KNOWN_ERROR_CODES: ReadonlySet<WidgetErrorCode> =
     "parse_error",
     "too_many_requests",
     "bot_not_available",
-    "origin_not_allowed",
     "invalid_body",
     "upstream_error",
     "internal_error",
@@ -139,7 +137,6 @@ export const ERROR_LABELS: Record<WidgetErrorCode, string> = {
   parse_error: "응답을 이해하지 못했어요. 잠시 후 다시 시도해 주세요.",
   too_many_requests: "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.",
   bot_not_available: "지금은 답변할 수 없어요.",
-  origin_not_allowed: "이 페이지에서는 사용할 수 없어요.",
   invalid_body: "메시지 형식을 확인해 주세요.",
   upstream_error: "답변을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
   internal_error: "일시적인 오류가 발생했어요. 잠시 후 다시 시도해 주세요.",

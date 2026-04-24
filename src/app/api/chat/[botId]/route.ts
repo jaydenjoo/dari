@@ -66,7 +66,6 @@ const requestSchema = z.object({
 type ErrorCode =
   | "internal_error"
   | "bot_not_available"
-  | "origin_not_allowed"
   | "too_many_requests"
   | "invalid_body"
   | "upstream_error";
@@ -74,7 +73,6 @@ type ErrorCode =
 const ERROR_MESSAGES: Record<ErrorCode, string> = {
   internal_error: "잠시 후 다시 시도해 주세요.",
   bot_not_available: "해당 봇을 찾을 수 없어요.",
-  origin_not_allowed: "이 도메인에서는 접근할 수 없어요.",
   too_many_requests: "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.",
   invalid_body: "요청 형식이 올바르지 않아요.",
   upstream_error: "응답을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
@@ -154,9 +152,12 @@ export async function POST(
   }
 
   if (!matchAllowedDomain(origin, bot.config.allowedDomains)) {
+    // origin 거부도 bot 부존재와 동일 응답으로 위장 — widget-config API (sec H-1) 와
+    // 정합성 통일. HTTP status + response code 둘 다 통일해 공격자가 응답을 파싱해도
+    // "slug 존재 하지만 origin 차단" vs "slug 부존재" 를 구분 불가 (enumeration 방지).
     return jsonError(
-      "origin_not_allowed",
-      403,
+      "bot_not_available",
+      404,
       origin,
       bot.config.allowedDomains,
     );
@@ -375,17 +376,14 @@ async function resolveConversationId(
   return created.id;
 }
 
-export async function OPTIONS(
-  req: NextRequest,
-  { params }: { params: Promise<{ botId: string }> },
-): Promise<NextResponse> {
-  const { botId: botSlug } = await params;
+// Preflight 는 DB 조회 없이 수용 — 실 access control 은 actual POST 에서 수행한다.
+// 의도: preflight + actual 의 DB 2회 히트 제거. non-allowed origin 의 preflight 도 통과
+// 시키지만, actual POST 에서 `matchAllowedDomain` 으로 404 차단되므로 정보 유출 없음.
+// `null` / 파싱 실패 origin 은 `buildCorsHeaders` 내부에서 `Allow-Origin` 헤더 미반환 →
+// 브라우저가 preflight 거부 (non-browser curl 은 서버 검증 없이 지나가도 actual POST 가 차단).
+export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get("origin");
-
-  const bot = await loadActiveBot(botSlug);
-  const allowedDomains = bot?.config.allowedDomains ?? [];
-
-  const corsHeaders = buildCorsHeaders(origin, allowedDomains);
+  const corsHeaders = buildCorsHeaders(origin, []);
   return new NextResponse(null, {
     status: 204,
     headers: {

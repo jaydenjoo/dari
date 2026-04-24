@@ -32,6 +32,36 @@
 
 ## 기록
 
+### 2026-04-24 Phase 2 백로그 TODO ↔ 실 코드 drift — 타 Task 에서 자동 해소된 항목이 PROGRESS 에 TODO 로 잔존 (작업 패턴 / 프로세스 개선)
+
+**증상**: Phase 2 백로그 청소 Task β-1 과 β-2 를 연속 진행하는데, 각 Task Plan 수립 단계에서 **TODO 항목이 이미 실 코드에 반영된 상태** 인 경우가 발견됨.
+
+- **β-1 (우선 1)**: PROGRESS TODO = `formatRelative shared util 승격 — src/lib/date/relative.ts 신규 + bots/page.tsx · conversations/page.tsx 중복 제거`. 실제: **이미 `src/shared/time/relative.ts` 에 단일 출처 + 테스트 파일 존재**. 3페이지 모두 import 해서 사용 중. 어느 시점 (추정: Task B-5 barrel 도입 시점) 에 자연스레 반영됐는데 TODO 체크 업데이트 누락.
+- **β-2 (우선 3 #3)**: PROGRESS TODO = `env.ts code M-1 "as ServerEnv" 타입 단언 개선 (ε-backlog)`. 실제: **`env.server.ts` 는 이미 `parseServerEnv()` + fail-fast throw 로 개선 완료**. `as ServerEnv` 캐스팅 없음. 주석 line 11 에 "`as ServerEnv` 런타임 캐스팅 대신 build-time 방어" 라고 **이미 개선된 상태를 설명** 하는 역사 주석. env.client.ts `({} as ClientEnv)` 는 의식적 설계 (line 62-65 주석).
+
+2건 모두 **Plan 수립 전 Grep/Read 탐색** 으로 사전 발견 → 실 작업 범위 자동 축소.
+
+**원인**:
+
+1. **Task 간 부산물 누적** — Task 본체 외 부수 개선 (리팩터링, 주석 보강, 파일 재배치) 이 발생해도 PROGRESS 의 TODO 섹션 엔트리를 "이번에 이것도 같이 해소됐다" 고 체크하지 않음. β 시리즈 진입 시점에는 수개월 전 TODO 도 리스트에 그대로 남아있음.
+2. **TODO 진입 프로세스 부재** — Plan 수립 시 "TODO 텍스트 → 바로 구현 범위" 로 점프하는 습관. 실 코드 상태 검증 단계가 생략되면 TODO 의 snapshot 성격 (작성 시점 기준) 이 간과됨.
+3. **학습 트리거 도달** — 2회 반복. 1회는 우연이지만 2회 연속 같은 패턴 발견 = 구조적 이슈. 기록 규칙의 "에러 2회 반복" 트리거 충족.
+
+**해결**:
+
+1. β-1, β-2 모두 Plan 수립 전 `grep -rn <키워드>` + 해당 파일 Read 로 실 코드 상태를 먼저 검증 → 자동 해소 발견 시 "TODO 체크 + 자동 해소 근거 명시" 로 Task 범위에서 제외.
+2. PROGRESS 우선 그룹별로 완결 표시 시 `[x] ~~<원 TODO 설명>~~ — 이미 반영 완료 확인 (탐색 중 자동 해소 발견, <근거 요약>)` 형태로 명시 → 미래 세션이 재확인 가능.
+
+**규칙** ⭐:
+
+- **백로그 Task 진입 시 Plan 수립 전 실 코드 상태 검증 필수** — `grep -rn <TODO 키워드>` 또는 해당 파일 Read 로 "TODO 가 여전히 유효한가" 를 먼저 확인. PROGRESS TODO 는 작성 시점 snapshot — 타 Task 에서 부수적으로 해소됐을 가능성을 항상 의식.
+- **TODO drift 발견 시 즉시 PROGRESS 업데이트 포함** — 그 Task 완결 커밋에 "TODO X 자동 해소 확인" 체크를 포함. 미발견으로 방치하면 다음 Task 진입 시 또 중복 확인 비용 발생.
+- **Task 완료 시 "의도하지 않게 같이 개선된 항목" 체크 습관** — 예: B-5 barrel 도입이 `formatRelative` 파일 위치 정돈을 포함했을 가능성. 대형 리팩터 완결 시 주변 TODO 섹션을 훑어 "덤으로 해소됐을 만한 항목" 을 체크하도록 세션 종료 프로토콜에 편입.
+- **"자동 해소" 가 반복되면 원 TODO 의 granularity 재평가** — PROGRESS 의 우선순위 그룹이 너무 세분화되어 있으면 상호 종속성으로 인한 자동 해소가 잦아진다. 백로그 30+건 이상 누적 시 주기적 sweep 으로 granularity 재조정 (현재 백로그 15건 내외, 당장 불필요).
+- **AI 방향 이탈 방지 교훈** — 내가 Plan 제시 시 "PROGRESS TODO 를 그대로 복사" 하면 자동 해소 항목을 놓침. **"TODO 텍스트" ≠ "실 작업 범위"** — 두 번 확인 습관을 Plan 수립 템플릿에 고정.
+
+---
+
 ### 2026-04-21 Supabase prod URL Configuration 누락 → OAuth redirect localhost:3000 fallback (운영 지식 / Phase 0-D 완결 기준 보강)
 
 **증상**: Task A-5a Step 2 (Jayden UI 봇 생성) 진입 직전, Jayden 이 prod (`https://dari-theta.vercel.app/login`) 에서 "Google 로 계속하기" 클릭 → `http://localhost:3000/?code=bfdc1629-...` 로 redirect. 포트 3000 ≠ Dari 4000, path `/` ≠ `/auth/callback` — **2중 불일치**. 로그인 불능 = Task A-5a Step 2 완전 블로킹.
