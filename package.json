@@ -18,6 +18,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "audit": "pnpm audit --prod",
+    "audit:full": "pnpm audit",
     "prepare": "husky"
   },
   "packageManager": "pnpm@10.28.2",

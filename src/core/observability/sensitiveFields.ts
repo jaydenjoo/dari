@@ -31,6 +31,11 @@ export const SENSITIVE_FIELD_NAMES = [
   // 클라이언트 IP — PIPA·GDPR 식별 가능 정보. 로깅 시 hash 형태(`ipHash`)로 변환할 것.
   // 'ipHash' 는 redact 대상 아님 (해시화로 PII 제거됨). 근거: security N-4 (Task 1-6-a).
   "ip",
+  // Storage 경로 — `{bot_id}/{uuid}.{ext}` 패턴. bot_id UUID 유출은 RLS 로 격리됐지만
+  // 멀티테넌시(workspace 도입) 이후 workspace/owner 추정 벡터로 전환 가능. Task 1-7-c
+  // sec LOW-2 이월 → β-3 통합. 값 확인이 꼭 필요하면 해시 형태(`storagePathHash`)로 변환.
+  "storagePath",
+  "storage_path",
   // 주의: userId / user_id 는 redact 하지 않는다.
   //   - UUID 형태의 auth.uid() 는 직접 PII 가 아니며, 요청 상관분석(incident
   //     correlation)의 핵심 키. 프로덕션에서 "어떤 유저에게 발생한 에러"를

@@ -72,6 +72,22 @@ describe("beforeSend — extra / contexts", () => {
       apiKeyPrefix: "sk-xxx",
     });
   });
+
+  it("storagePath / storage_path 를 최상위/중첩 모두 [Redacted] 로 치환한다 (Task 1-7-c sec LOW-2)", () => {
+    const out = runBeforeSend({
+      extra: {
+        storagePath: "bot-abc/uuid1.pdf",
+        storage_path: "bot-def/uuid2.md",
+        context: { storagePath: "bot-nested/uuid3.txt" },
+      },
+    });
+
+    expect(out.extra).toMatchObject({
+      storagePath: "[Redacted]",
+      storage_path: "[Redacted]",
+      context: { storagePath: "[Redacted]" },
+    });
+  });
 });
 
 describe("beforeSend — request", () => {

@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2** — A-1~A-5a + B-1~B-6 + β-1 + β-2. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화 + API 응답 enumeration 일관성 + OPTIONS DB 제거 + ESLint proxy 가드.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a** — A-1~A-5a + B-1~B-6 + β-1~β-3a. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화 + API 응답 enumeration 일관성 + OPTIONS DB 제거 + ESLint proxy 가드 + storagePath redact + 의존성 감사 script.
 - Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기. 내부 가능 경로는 **Phase 2 백로그 청소 (β 시리즈)** 만.
-- 상태: **이번 세션(2026-04-24 Ⅲ) 2 커밋 예상** — β-1 + β-2. β-2 = 우선 3 그룹 5건 (#1 chat API 404 통일 / #2 OPTIONS DB 제거 / #3 env `as ServerEnv` 자동 해소 / #4 knowledge-placeholder 삭제 / #5 proxy-client ESLint 가드) + widget 측 `origin_not_allowed` dead code 일괄 제거 (sec Ship conditional → Ship as-is 전환).
-- 확인: **PROGRESS TODO drift 2회 연속 발견** — β-1 `formatRelative` + β-2 `as ServerEnv` 자동 해소. 교훈 기록 완료 (learnings.md).
+- 상태: **이번 세션(2026-04-24 Ⅲ) 3 커밋 예상** — β-1 + β-2 + β-3a. β-3a = 우선 2 그룹 경량 2건 + 이월 확인 1건 (#1 storagePath redact 통합 / #4 pnpm audit script + 월 1회 가이드 / #3 rate limit fail-closed 조건부 이월). **#2 Storage orphan cleanup 은 β-3b 로 분리** (신규 스크립트 규모, 다음 세션).
+- 확인: **PROGRESS TODO drift 2회 연속 발견** (β-1 `formatRelative` + β-2 `as ServerEnv`). 교훈 기록 완료 (learnings.md 2026-04-24).
 - ⚠️ **차단**: 없음. 경로 α (백로그) 는 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
 
 ## 완료된 Epic
@@ -1819,12 +1819,12 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - [x] B-5 barrel 규칙 일관성 — `conversations/page.tsx` import 를 `@/shared/time` (barrel) → `@/shared/time/relative` (세부 경로, 단일 심볼) 로 통일 (Task β-1)
 - [ ] LATERAL JOIN 최적화 — **조건부 이월**: warn 빈도 임계 도달 시만. 현재는 모니터링 유지.
 
-#### 우선 2 (Task 1-7 후속 sec 이월, 총 ~90~120m) — 지식 파이프라인 보안 부채
+#### 우선 2 (Task 1-7 후속 sec 이월) — 지식 파이프라인 보안 부채 🔶 **부분 완결 (2026-04-24 Ⅲ, Task β-3a)**
 
-- [ ] `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — `sensitiveFields` 에 `storagePath` 추가
-- [ ] Storage orphan cleanup 주기 태스크 (1-7-c sec MEDIUM-3) — CRON/Edge Function 스펙 + MVP 구현
-- [ ] rate limit fail-closed 전환 (1-7-c sec LOW-1) — 🟡 **과금 모델 도입 시** 이월 (Epic C 이후 자연 트리거)
-- [ ] unpdf CVE 모니터링 (1-7-c sec INFO-1) — 월 1회 `pnpm audit` 스케줄만 기록
+- [x] `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — `SENSITIVE_FIELD_NAMES` 에 `storagePath` + `storage_path` 추가 (camelCase / snake_case 모두). `buildPinoRedactPaths()` 가 최상위 + `*.` 경로 자동 생성 → `ingest-file.ts:201, 204` 의 실 로그 자동 redact (소스 수정 불요). 회귀 테스트 3 케이스 추가 (Task β-3a).
+- [ ] **Storage orphan cleanup 주기 태스크 → β-3b 로 분리** (1-7-c sec MEDIUM-3) — 신규 스크립트 규모라 fresh 세션 Plan 수립이 설계 품질에 유리. `scripts/cleanup-orphan-storage.ts` (standalone, pnpm tsx 수동 실행 MVP) + `computeOrphans` 순수 함수 + dry-run/TTL 24h 등 설계 결정 5건 포함.
+- [ ] rate limit fail-closed 전환 (1-7-c sec LOW-1) — 🚫 **조건부 이월 확인** (Task β-3a): 과금 모델 도입 시 (Phase 3 SaaS 신호) 트리거. MVP 단계 fail-open 은 UX 우선 정책 — 설계 결정 (factory.ts 주석 + 5 limiter 파일 명시). ADR N-5 예정.
+- [x] unpdf CVE 모니터링 (1-7-c sec INFO-1) — `package.json` `scripts.audit` / `scripts.audit:full` 2 alias 추가 + `docs/security-monitoring.md` 신규 (월 1회 가이드 / 특별 주시 5 라이브러리 / 결과 기록 템플릿 / Phase 3 자동화 후보). 자동화는 외부 연동 (GH Actions) 범위 밖.
 
 #### 우선 3 (Phase 1 API 정합성) — 사소 일관성 버그 ✅ **완결 (2026-04-24 Ⅲ, Task β-2)**
 
@@ -1866,6 +1866,8 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - Epic C: 실사용자 3~5명 + SaaS 수익 모델 결정 (외부 영업 성과)
 
 ## 완료한 Task (누적, 최근 순)
+
+- [x] **Task β-3a (Phase 2 백로그 1-7 sec 이월, 우선 2 경량 2/4 + 조건부 이월 1건)**: (#1) `storagePath` redact 통합 — `SENSITIVE_FIELD_NAMES` 에 `storagePath` + `storage_path` 추가 (camelCase/snake_case 모두) + 근거 주석 3줄. `buildPinoRedactPaths()` 자동 확장으로 Pino 최상위 + 1-depth glob 4경로 생성 → `ingest-file.ts:201, 204` 실 로그 자동 redact. Sentry `beforeSend` 도 동일 sensitiveFields 모듈 참조라 단일 출처 동기화. 회귀 테스트 3케이스 추가 (최상위 camelCase / 최상위 snake_case / 중첩) · (#4) unpdf CVE 모니터링 — `package.json` `scripts.audit` (pnpm audit --prod) + `scripts.audit:full` (pnpm audit) + `docs/security-monitoring.md` 신규 (월 1회 가이드 + 특별 주시 5 라이브러리 표 + 결과 기록 템플릿 + Phase 3 자동화 후보) · (#3) rate limit fail-closed → **조건부 이월 확인**: 과금 모델 도입 시 (Phase 3 SaaS 신호) 트리거. MVP 단계 fail-open UX 우선 설계 문서화 · (#2) Storage orphan cleanup 은 β-3b 로 분리 (신규 스크립트 규모, 다음 세션 Plan) · **독립 리뷰 2 병렬 둘 다 Ship as-is** (code INFO 1건 문서 한 줄 선반영 / security OWASP A04+A06+A09 전부 INFO) · 541/541 vitest pass (540→541, redact 테스트 +1) · typecheck+lint+prettier+build clean
 
 - [x] **Task β-2 (Phase 2 백로그 Phase 1 API 정합성, 우선 3 완결)**: 5건 묶음 + widget 확장 — (#1) chat API `origin_not_allowed` + 403 → `bot_not_available` + 404 통일 (widget-config sec H-1 정합, enumeration 방지 강화) · (#2) chat + widget-config OPTIONS 핸들러에서 `loadActiveBot` DB 호출 제거 → `buildCorsHeaders(origin, [])` allow-all preflight (preflight DB 2회 히트 제거, actual request 에서 실 access control) · (#3) env `as ServerEnv` 자동 해소 확인 (env.server 이미 fail-fast throw, env.client 의식적 설계) · (#4) `knowledge-placeholder.tsx` dead code 파일 삭제 (외부 참조 0) · (#5) `proxy-client.ts` ESLint `no-restricted-imports` — `server-only` import 차단 (learnings 2026-04-17 참조 메시지) · **widget 확장 (sec Ship conditional 해소)**: `src/widget/chat.ts` + `stream-parser.ts` 에서 `origin_not_allowed` 일괄 제거 (`WidgetErrorCode` / `KNOWN_ERROR_CODES` / `ERROR_LABELS` / 주석) — 서버 ↔ 클라이언트 타입 drift 차단 · **독립 리뷰 2 병렬** (code Ship as-is / security Ship conditional → widget 확장 반영 후 Ship as-is) · 540/540 vitest 회귀 없음 · typecheck+lint+prettier+build clean · ESLint #5 negative 검증 통과
 
