@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   DEFAULT_RANGE,
   RANGE_LABEL,
+  formatUsdCents,
   type BotStats,
   type RangeKey,
 } from "./stats-util";
@@ -11,6 +12,9 @@ interface Props {
   slug: string;
   range: RangeKey;
   stats: BotStats;
+  // Task B-4: 기간 총 원가 (USD cents, 반올림). 단가는 근사치 (input/output
+  // 합산 평균) — tooltip 으로 근사 여부 명시.
+  totalUsdCents: number;
   // RPC 실패로 0 폴백된 경우 true — 배너 표시 (sec L-1: 무음 실패 가시화).
   // "실제 0" 과 "집계 실패" 를 UI 가 구분하여 운영자가 알림.
   statsError?: boolean;
@@ -23,7 +27,13 @@ function hrefFor(slug: string, key: RangeKey): string {
   return key === DEFAULT_RANGE ? `/bots/${slug}` : `/bots/${slug}?range=${key}`;
 }
 
-export function StatsSection({ slug, range, stats, statsError }: Props) {
+export function StatsSection({
+  slug,
+  range,
+  stats,
+  totalUsdCents,
+  statsError,
+}: Props) {
   const rangeLabel = RANGE_LABEL[range];
 
   return (
@@ -77,7 +87,7 @@ export function StatsSection({ slug, range, stats, statsError }: Props) {
 
       <div
         data-testid="stats-kpi-grid"
-        className="grid grid-cols-2 gap-3 sm:grid-cols-5"
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
       >
         <KpiCard
           testId="stats-kpi-conversations"
@@ -93,6 +103,13 @@ export function StatsSection({ slug, range, stats, statsError }: Props) {
           testId="stats-kpi-tokens"
           label={`${rangeLabel} 토큰`}
           value={stats.totalTokens}
+        />
+        <KpiCard
+          testId="stats-kpi-cost"
+          label={`${rangeLabel} 원가`}
+          value={totalUsdCents}
+          formatter={formatUsdCents}
+          title="토큰 기반 혼합 평균 단가 근사치 — ±15~20% 오차"
         />
         <KpiCard
           testId="stats-kpi-active"
@@ -119,6 +136,7 @@ function KpiCard({
   highlight,
   muted,
   title,
+  formatter,
 }: {
   testId: string;
   label: string;
@@ -127,10 +145,15 @@ function KpiCard({
   muted?: boolean;
   // hover tooltip — 카드 의미 보조 설명 (특히 기간 필터 영향 여부).
   title?: string;
+  // Task B-4: 값 표시 포맷 override (원가 카드의 USD cents → "$X.XX" 등).
+  // 미지정 시 `toLocaleString('ko-KR')` 으로 천단위 구분.
+  formatter?: (value: number) => string;
 }) {
   // `Number.isFinite` 가드 — jsonb 로부터 NaN/Infinity 가 직렬화 오류 등으로
   // 들어올 경우 UI 붕괴 방지 (1-8-b sec M-2 학습 재적용).
-  const display = Number.isFinite(value) ? value.toLocaleString("ko-KR") : "—";
+  const display = Number.isFinite(value)
+    ? (formatter ?? ((v: number) => v.toLocaleString("ko-KR")))(value)
+    : "—";
 
   const color = highlight
     ? "text-blue-600"

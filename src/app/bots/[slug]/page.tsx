@@ -7,18 +7,25 @@ import { dariConfigSchema, type DariConfig } from "@/core/config";
 import { createClient } from "@/core/db/client-server";
 import type { Database } from "@/core/db/types";
 import { logger } from "@/core/logging";
+import { DEFAULT_USD_PER_MILLION_TOKENS } from "@/core/pricing/claude-rates";
 import { BOT_STATUS_CLASS, BOT_STATUS_LABEL } from "@/shared/bots/status";
 import { env } from "@/shared/config/env.server";
 
 import { isValidSlug } from "../new/slug-util";
 import CopySnippet from "./copy-snippet";
+import { DailyChart } from "./daily-chart";
 import { StatsSection } from "./stats-section";
 import {
   EMPTY_STATS,
+  aggregateDailyWithCost,
+  computeUsdCents,
   parseBotStats,
+  parseBotStatsDaily,
   parseRange,
+  rangeToChartSince,
   rangeToSince,
   type BotStats,
+  type DailyChartPoint,
 } from "./stats-util";
 
 type BotRow = Database["public"]["Tables"]["bots"]["Row"];
@@ -134,19 +141,24 @@ export default async function BotDetailPage({
   // Task 1-8-c: 기간별 KPI. RPC 실패 시 페이지 렌더가 무너지지 않도록 0 지표로
   // 폴백하고 warn 로그만 남긴다 (지식 retrieval 과 동일 철학). Postgres 에러
   // 메시지는 구조적 필드만 로깅 (sec H-1 학습 재적용).
-  const since = rangeToSince(range, new Date());
-  const { data: statsRaw, error: statsErr } = await supabase.rpc("bot_stats", {
-    p_bot_id: data.id,
-    p_since: since,
-  });
+  // Task B-4: 일별 차트 RPC 를 병렬 호출. 차트는 'all' 기간을 90d 로 cap
+  // (bar 과다 방지). 두 RPC 실패는 독립적으로 폴백.
+  const now = new Date();
+  const since = rangeToSince(range, now);
+  const chartSince = rangeToChartSince(range, now);
+  const [statsResult, dailyResult] = await Promise.all([
+    supabase.rpc("bot_stats", { p_bot_id: data.id, p_since: since }),
+    supabase.rpc("bot_stats_daily", { p_bot_id: data.id, p_since: chartSince }),
+  ]);
+
   let stats: BotStats = EMPTY_STATS;
   let statsError = false;
-  if (statsErr) {
+  if (statsResult.error) {
     statsError = true;
     logger.warn(
       {
-        errCode: statsErr.code,
-        errMsg: statsErr.message,
+        errCode: statsResult.error.code,
+        errMsg: statsResult.error.message,
         slug,
         userId: user.id,
         range,
@@ -154,8 +166,39 @@ export default async function BotDetailPage({
       "bot_stats RPC 실패 — 0 지표 폴백",
     );
   } else {
-    stats = parseBotStats(statsRaw);
+    stats = parseBotStats(statsResult.data);
   }
+
+  let dailyData: DailyChartPoint[] = [];
+  let dailyError = false;
+  if (dailyResult.error) {
+    dailyError = true;
+    logger.warn(
+      {
+        errCode: dailyResult.error.code,
+        errMsg: dailyResult.error.message,
+        slug,
+        userId: user.id,
+        range,
+      },
+      "bot_stats_daily RPC 실패 — 빈 배열 폴백",
+    );
+  } else {
+    const rows = parseBotStatsDaily(dailyResult.data);
+    dailyData = aggregateDailyWithCost(
+      rows,
+      DEFAULT_USD_PER_MILLION_TOKENS,
+      new Date(chartSince),
+      now,
+    );
+  }
+
+  // 기간 총 원가 — KPI 6번째 카드용. daily 합산이 아닌 `totalTokens` × 단가
+  // 일원화 (일별 반올림 누적 오차 회피). RPC 실패 시 0 폴백.
+  const totalUsdCents = computeUsdCents(
+    stats.totalTokens,
+    DEFAULT_USD_PER_MILLION_TOKENS,
+  );
 
   // 속성명은 widget 런타임(`src/widget/config.ts`, `index.ts`) 이 찾는 `data-bot-id` 와
   // 일치해야 하며(값은 slug), `async` 로 로드해야 `document.currentScript` 가 정상 반환된다.
@@ -238,8 +281,11 @@ export default async function BotDetailPage({
           slug={data.slug}
           range={range}
           stats={stats}
+          totalUsdCents={totalUsdCents}
           statsError={statsError}
         />
+
+        <DailyChart data={dailyData} error={dailyError} />
 
         <section
           className="animate-in fade-in slide-in-from-bottom-2 mb-6 rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_4px_rgba(0,0,0,0.03)] duration-500"

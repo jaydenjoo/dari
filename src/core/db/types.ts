@@ -309,6 +309,15 @@ export type Database = {
         };
         Returns: unknown;
       };
+      // Task B-4: 일별 메시지/토큰 집계 (Asia/Seoul day bins).
+      // Returns: unknown — 앱에서 `botStatsDailySchema.safeParse` 로 배열 확정.
+      bot_stats_daily: {
+        Args: {
+          p_bot_id: string;
+          p_since: string; // timestamptz ISO
+        };
+        Returns: unknown;
+      };
     };
     Enums: Record<string, never>;
   };
