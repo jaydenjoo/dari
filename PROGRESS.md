@@ -2294,7 +2294,7 @@ Epic B 2/6 Task. `audit_logs` 테이블 + RLS (SELECT/INSERT 만 = immutable) + 
    - `types.ts`: `AUDIT_EVENTS` const + `AuditEventType` / `AuditEntityType` / `AuditEventInput`
    - `log.ts`: `logAuditEvent` — **throw 금지 계약** + `redactDeep` 2차 방어 + `server-only` 경계 주석
    - `index.ts`: barrel
-   - `log.test.ts`: 7 케이스 — 정상 snake_case 매핑 / metadata 미제공 기본값 `{}` / 민감 필드(`email`·`phone`) `[Redacted]` 마스킹 / DB error `ok:false` + `logger.error` / throw 예외 catch / `AUDIT_EVENTS` 상수가 DB CHECK 패턴 `^[a-z_]+\.[a-z_]+$` 일치 / 순환참조 label 보존 + cycle 차단
+   - `log.test.ts`: 7 케이스 — 정상 snake*case 매핑 / metadata 미제공 기본값 `{}` / 민감 필드(`email`·`phone`) `[Redacted]` 마스킹 / DB error `ok:false` + `logger.error` / throw 예외 catch / `AUDIT_EVENTS` 상수가 DB CHECK 패턴 `^[a-z*]+\.[a-z_]+$` 일치 / 순환참조 label 보존 + cycle 차단
 
 4. **5 지점 통합 (30분)** —
    - `src/app/bots/new/actions.ts` — `createBot` 에 `.select("id").single()` 추가 + `BOT_CREATE` (metadata: `{slug,name}`)
@@ -2605,6 +2605,34 @@ Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `compute
 - 차단 요소: 없음 (B-6 는 Supabase 테스트 환경 결정 선행)
 
 ---
+
+---
+
+## 이번 세션 (2026-04-24 Ⅲ) — Phase 2 백로그 β-1 + β-2 + β-3a 3연속 완결
+
+**맥락**: Epic B 완결 직후 Phase 2 Epic 전환 지점. Epic C (멀티테넌트) / Epic D (카카오톡) 둘 다 외부 신호·자원 대기 → 내부 가능 경로인 백로그 청소 (β 시리즈) 만 의미 있음. 오늘 세션은 백로그 4단 우선순위 중 우선 1 + 우선 3 + 우선 2 경량 부분 처리.
+
+**완료 Task 3건**:
+
+1. **β-1 (1-8 후속, 커밋 0a01305)** — 원래 TODO 3건 중 `formatRelative shared util 승격` 이 **이미 완료 상태 발견** (자동 해소 #1). 실 작업 = `conversations-list.tsx` animate cap 상수화 (`ANIMATION_STAGGER_MS=40` / `ANIMATION_MAX_STAGGER_ITEMS=10` + 주석) + `conversations/page.tsx` import 경로 B-5 규칙 일관성 (`@/shared/time` barrel → `@/shared/time/relative` 세부 경로, 단일 심볼). 동반 문서 정비: PROGRESS 다음 세션 재정의 (Epic A/B 완결 반영, 내부 α / 외부 차단 β·γ 분리), phase-2-plan §8 신설 (Epic C/D 진입 외부 신호 정량화 체크리스트).
+
+2. **β-2 (우선 3, 커밋 96e48e8)** — 원래 TODO 5건 중 `env.ts as ServerEnv` 도 이미 개선 완료 상태 발견 (자동 해소 #2). 실 작업 = chat API `origin_not_allowed` 403 → `bot_not_available` 404 통일 (widget-config sec H-1 정합, enumeration 방지 강화) / chat + widget-config OPTIONS 핸들러 `loadActiveBot` DB 호출 제거 (preflight DB 2회 히트 제거) / `knowledge-placeholder.tsx` dead code 파일 삭제 / `proxy-client.ts` ESLint `no-restricted-imports` 규칙 추가 (`server-only` import 차단, learnings 2026-04-17 참조 메시지, negative 검증 통과). **widget 확장**: security 리뷰 Ship conditional 해소 — `src/widget/chat.ts` + `stream-parser.ts` 에서 `origin_not_allowed` 일괄 제거 (`WidgetErrorCode` / `KNOWN_ERROR_CODES` / `ERROR_LABELS` / 주석).
+
+3. **β-3a (1-7 sec 이월 경량, 커밋 b1ae464)** — 원래 TODO 4건 중 `rate limit fail-closed` 는 Phase 3 과금 모델 트리거 조건부 이월 (의식적). `Storage orphan cleanup` 은 신규 스크립트 규모라 β-3b 로 분리 (fresh 세션 Plan). 실 작업 = `sensitiveFields.ts` 에 `storagePath` + `storage_path` 추가 (`buildPinoRedactPaths` 자동 4 경로 생성 → `ingest-file.ts:201, 204` 실 로그 자동 redact, Sentry `beforeSend` 도 동일 모듈 참조로 단일 출처 동기화) / redact 회귀 테스트 3케이스 / `package.json` `audit` + `audit:full` scripts / `docs/security-monitoring.md` 신규 (월 1회 가이드 + 특별 주시 5 라이브러리 + 결과 기록 템플릿 + Phase 3 자동화 후보).
+
+**교훈 1건 기록 (learnings.md 2026-04-24)** — "Phase 2 백로그 TODO ↔ 실 코드 drift. 2회 연속 발견 (β-1 `formatRelative` + β-2 `as ServerEnv`) → 트리거 도달. **규칙: Plan 수립 전 Grep/Read 로 실 코드 상태 검증 필수**. TODO 는 작성 시점 snapshot — 타 Task 에서 부수 해소됐을 가능성 항상 의식".
+
+**독립 리뷰 성과** (6회 = 3 Task × 2 병렬):
+
+- β-1: code Ship as-is (MEDIUM 주석 1건 선반영) / security Ship as-is
+- β-2: code Ship as-is (5건 전부) / security Ship conditional → widget 확장 반영 후 Ship as-is
+- β-3a: code Ship as-is (INFO audit:full 설명 1줄 선반영) / security Ship as-is (OWASP A04+A06+A09 전부 INFO)
+
+**검증 누적**: vitest 540 → 541 (+1 redact 테스트). typecheck + lint (0 errors) + prettier + build (15 routes) 전 세션 clean. gitleaks 3 커밋 모두 no leaks.
+
+**Phase 2 백로그 진행률**: 우선 1 ✅ / 우선 3 ✅ / 우선 2 🔶 부분 (#1+#4 완 / #3 이월 / #2 β-3b 분리) / 우선 4 ⏳ 대기.
+
+- 날짜: 2026-04-24 Ⅲ (KST) — 백로그 β-1 + β-2 + β-3a 3 Task 연속 완결, 외부 신호 대기 중 내부 정돈 집중 세션
 
 ---
 
