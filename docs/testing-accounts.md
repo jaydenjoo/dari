@@ -77,11 +77,11 @@ Playwright E2E 도입 시 사용할 **테스트 사용자 계정 + 데이터 fix
 
 ### 외부 API 처리 (`E2E_SKIP_EXTERNAL_API=true`)
 
-| Spec | 상태 | 이유 |
-|------|-----|-----|
-| `bot-knowledge-sources.spec.ts` | **CI 에서 skip** | text 저장이 실 Gemini embedding 호출 |
-| `bot-knowledge-file.spec.ts` | **CI 에서 skip** | TXT 업로드가 실 Gemini embedding 호출 |
-| 그 외 11 spec | CI 실행 | Supabase Auth/DB/Storage 만 사용 |
+| Spec                            | 상태             | 이유                                  |
+| ------------------------------- | ---------------- | ------------------------------------- |
+| `bot-knowledge-sources.spec.ts` | **CI 에서 skip** | text 저장이 실 Gemini embedding 호출  |
+| `bot-knowledge-file.spec.ts`    | **CI 에서 skip** | TXT 업로드가 실 Gemini embedding 호출 |
+| 그 외 11 spec                   | CI 실행          | Supabase Auth/DB/Storage 만 사용      |
 
 Phase 3 에서 Gemini embedding 을 `MSW` 또는 `vi.mock` 스타일로 intercept → skip 제거 가능.
 

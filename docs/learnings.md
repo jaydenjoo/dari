@@ -32,6 +32,82 @@
 
 ## 기록
 
+### 2026-04-24 service_role 키 사용 standalone 스크립트의 안전 패턴 표준화 (Task β-3b 설계 결정)
+
+**증상**: Storage orphan cleanup 스크립트 (`scripts/cleanup-orphan-storage.ts`) 가 `service_role` 키로 RLS 우회 + 모든 봇의 Storage 파일 삭제 권한 보유. 잘못 설계하면:
+
+- dev 환경의 `.env.local` 로 prod 키 의도치 않게 사용 → 실 데이터 손실
+- 스크립트 단일 실행 실수 (--apply 오타) → 광범위 삭제 + 복구 불가
+- legacy 데이터 (storagePaths 미기록 봇) 무차별 삭제 → 진짜 봇 자료 소실
+- race condition (방금 업로드 + config UPDATE 직전) → 정상 데이터 삭제
+
+대화 단위 Plan 에서 결정 포인트 7건 비교 + 권장안 + 추가 안전장치 제안을 통해 **표준 안전 패턴** 도출. 향후 retention cron / audit cleanup / 다른 standalone 스크립트의 템플릿이 됨.
+
+**원인**:
+
+1. **service_role 키의 본질** = "RLS 정책 = 운영자 신뢰 가정" 의 역설. 운영자가 곧 공격 표면. 단일 실행으로 광범위 영향 가능 → 실수 = 사고.
+2. Next.js 앱 내 admin 호출은 인증된 사용자 세션 + 단일 trigger 라 영향 범위 제한적. standalone 스크립트는 이런 경계가 없음 → 직접 설계.
+3. 실 데이터 손실 위험 vs 운영 편의성 균형 — 너무 안전 위주면 운영자가 우회 (e.g., SQL 직접 실행). 너무 편의 위주면 사고.
+4. **운영 가이드 부재** = standalone 스크립트의 흔한 약점. 복잡한 안전 게이트가 있어도 운영자가 모르면 무용.
+
+**해결**: 다음 6개 패턴을 표준으로 채택.
+
+1. **dry-run 기본** — `--apply` 명시 없으면 분석만. CLI 실수 (스크립트 이름 직접 입력 / 옵션 누락) 시 안전.
+2. **이중 게이트** — `--apply` flag + `CONFIRM_DELETE=yes` 환경변수 둘 다 필요. 한쪽만 있으면 `exit(2)` 즉시 abort. 자동화 환경에서도 의도 명확.
+3. **보수적 분류 다수** — `bot_not_found` / `untracked_bot` / `recent_ttl` / `soft_deleted_within_retention` 등 "모르면 보존" 카테고리. 분류 오류 = 데이터 보존, 분류 정확 = 정확한 삭제.
+4. **TTL race window** — 신규 업로드와 config UPDATE 사이 race 보호. 24h 가 storage 비용 미미 + race window 충분.
+5. **Data flow 격리** — DB→Storage 단방향 (DB 에서 botId 가져온 후 그 폴더만 list/delete). CLI 인자가 path 에 직접 들어가지 않음 → injection 자동 방어. CLI 인자 → DB 쿼리 (parameterized) → DB 결과 → Storage operation.
+6. **Per-batch 실패 격리** — 50개씩 batch 처리 + 1 batch 실패가 전체 중단 안 됨. failed 목록 별도 보고. audit trail 으로 부분 실패 추적.
+
+**규칙** ⭐:
+
+- **service_role 사용 standalone 스크립트는 위 6 패턴 모두 적용** — 표준 템플릿. 한 가지라도 빠지면 보안 결함.
+- **CLI 인자가 직접 destructive operation path 에 들어가는 경로 금지** — 항상 DB 라운드트립 거쳐 정합성 검증 후 사용. CLI `--bot=<id>` → DB 검증 → DB 결과 botId 만 사용.
+- **운영 가이드는 코드와 동시 작성** — `docs/scripts/<name>.md` 에 분류 정책 표 + 3 모드 실행법 + 권한·env + 안전 장치 표 + 운영자 주의사항 + Backlog. 코드 본 사람만 안전 게이트 의미를 알 수 있는 상태 = 위험.
+- **이중 게이트 (`--apply` + `CONFIRM_DELETE=yes`) 우회 방법 차단** — pnpm script 가 이미 `--apply` 포함이면 env 게이트가 마지막 방어선. 둘 다 명시적으로 사용자 입력 필요.
+- **bash history / log 보존 운영 원칙 명문화** — 스페이스 prefix + `tee log` audit trail 대용. Phase 3 까지 audit_logs 통합 못 하면 stdout 로그 파일이 유일한 추적 근거.
+- **TTL/retention 같은 시간 경계는 항상 race 가능 → 운영 가이드에 SQL 검증 절차** — `now() - deleted_at between '29 days' and '31 days'` 같은 경계 봇 식별 SQL 제공.
+- **legacy 데이터 (호환성 보존 항목) 는 영구 누적 → 마이그레이션 절차 문서화 + 정기 점검 필수** — 보수적 보존만으로는 부족, 정기적 sweep 절차 운영 가이드에 포함.
+
+---
+
+### 2026-04-24 `tsx --env-file=.env.local` standalone TypeScript 실행 패턴 (Node 20.6+ 위임, dotenv 명시 import 회피)
+
+**증상**: Next.js 외부 standalone TypeScript 스크립트 (`scripts/cleanup-orphan-storage.ts`) 실행 시 환경변수 로드 필요. 옵션 4가지:
+
+1. `dotenv` 패키지 명시 import (`import "dotenv/config"`) → `.env` 만 자동 로드, `.env.local` 은 별도 path 지정 필요
+2. ESM hoisting 으로 인해 `dotenv.config()` 가 다른 import 보다 늦게 실행될 위험 → side-effect 두 단계 진입
+3. `dotenv-cli` (`dotenv -e .env.local -- tsx ...`) → 추가 devDep 필요
+4. Node 20.6+ 의 native `--env-file` flag → tsx 4.7+ 가 위임 지원
+
+가장 깔끔하고 명료한 4번 채택. tsx 4.21.0 (Node v25.5.0) 환경에서 `tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/...` 한 줄로 해결.
+
+**원인**:
+
+1. **ESM hoisting 위험** — `import { config } from "dotenv"; config({path:".env.local"})` 가 다른 `import` 보다 먼저 실행 보장 안 됨. side-effect 분리 (`scripts/_load-env.ts` import) 패턴은 가능하나 가독성 떨어짐.
+2. **dotenv 명시 의존 시 path 관리 부담** — `.env`, `.env.local`, `.env.production` 등 우선순위 직접 처리. Node native `--env-file` 은 단일 path 명시.
+3. **tsx 4.21 의 `--env-file` 위임** — Node 20.6+ flag 를 tsx 가 직접 패스. 별도 wrapper 불요.
+4. tsconfig `paths` (`@/*` alias) 인식: tsx 4.x 는 `--tsconfig=tsconfig.json` 옵션 명시로 paths 자동 적용. 옵션 누락 시 일부 환경에서 alias 미인식 가능.
+
+**해결**: `package.json` script 에 `tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/<name>.ts` 통일.
+
+```json
+"scripts": {
+  "cleanup:orphan-storage": "tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/cleanup-orphan-storage.ts",
+  "cleanup:orphan-storage:apply": "tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/cleanup-orphan-storage.ts --apply"
+}
+```
+
+**규칙** ⭐:
+
+- **standalone TypeScript 스크립트 표준** = `tsx --env-file=.env.local --tsconfig=tsconfig.json` 두 옵션 항상 함께. dotenv 명시 import 금지 (ESM race / path 관리 부담).
+- **tsx 는 transitive 가 아닌 명시 devDependency 로 등록** — `pnpm add -D tsx`. Phase 0 인프라 의존성에 포함. transitive 만으로는 다른 dep 변경 시 미설치 가능.
+- **Node version 의존성 명시** — `--env-file` 은 Node 20.6+ 전용. `package.json` `engines: { node: ">=20.6" }` + `.nvmrc` 권장. CI runner / Vercel 환경 확인 + Backlog 등록.
+- **tsconfig `paths` alias 사용 시 `--tsconfig` 옵션 필수** — `@/core/...` import 가 정상 resolve 되려면 tsx 가 tsconfig.json 위치 알아야 함. 옵션 누락 시 일부 환경에서 silent 실패.
+- **각 script `package.json` 에 alias 등록** — `pnpm tsx <path>` 직접 입력은 옵션 누락 위험. `pnpm <alias>` 로 표준화.
+
+---
+
 ### 2026-04-24 Phase 2 백로그 TODO ↔ 실 코드 drift — 타 Task 에서 자동 해소된 항목이 PROGRESS 에 TODO 로 잔존 (작업 패턴 / 프로세스 개선)
 
 **증상**: Phase 2 백로그 청소 Task β-1 과 β-2 를 연속 진행하는데, 각 Task Plan 수립 단계에서 **TODO 항목이 이미 실 코드에 반영된 상태** 인 경우가 발견됨.

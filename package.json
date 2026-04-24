@@ -20,6 +20,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "audit": "pnpm audit --prod",
     "audit:full": "pnpm audit",
+    "cleanup:orphan-storage": "tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/cleanup-orphan-storage.ts",
+    "cleanup:orphan-storage:apply": "tsx --env-file=.env.local --tsconfig=tsconfig.json scripts/cleanup-orphan-storage.ts --apply",
     "prepare": "husky"
   },
   "packageManager": "pnpm@10.28.2",
@@ -73,6 +75,7 @@
     "prettier-plugin-tailwindcss": "^0.7.2",
     "server-only": "^0.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.4"
   }

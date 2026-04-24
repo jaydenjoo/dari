@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a** — A-1~A-5a + B-1~B-6 + β-1~β-3a. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화 + API 응답 enumeration 일관성 + OPTIONS DB 제거 + ESLint proxy 가드 + storagePath redact + 의존성 감사 script.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기. 내부 가능 경로는 **Phase 2 백로그 청소 (β 시리즈)** 만.
-- 상태: **이번 세션(2026-04-24 Ⅲ) 3 커밋 예상** — β-1 + β-2 + β-3a. β-3a = 우선 2 그룹 경량 2건 + 이월 확인 1건 (#1 storagePath redact 통합 / #4 pnpm audit script + 월 1회 가이드 / #3 rate limit fail-closed 조건부 이월). **#2 Storage orphan cleanup 은 β-3b 로 분리** (신규 스크립트 규모, 다음 세션).
-- 확인: **PROGRESS TODO drift 2회 연속 발견** (β-1 `formatRelative` + β-2 `as ServerEnv`). 교훈 기록 완료 (learnings.md 2026-04-24).
-- ⚠️ **차단**: 없음. 경로 α (백로그) 는 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b** — A-1~A-5a + B-1~B-6 + β-1~β-3b. **우선 2 그룹 완결** (#1 redact + #2 orphan cleanup script + #4 audit + #3 조건부 이월). Storage orphan cleanup standalone script + 13 단위 테스트 + dry-run 기본 + 이중 게이트.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 우선 1·2·3 ✅, **우선 4 만 남음**. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
+- 상태: **이번 세션(2026-04-24 Ⅳ) Task β-3b 단독 완결**. `scripts/cleanup-orphan-storage.ts` (CLI entry, service_role + dry-run/apply 이중 게이트) + `src/core/knowledge/orphan-cleanup.ts` (`computeOrphans` 순수 함수) + 13 단위 테스트 + 운영 가이드. 독립 리뷰 2 (code Ship as-is + security Ship conditional) → Fix 8건 반영.
+- 확인: 백로그 진행률 = 우선 1 ✅ / 우선 2 ✅ / 우선 3 ✅ / 우선 4 ⏳ (Task 1-0 후속, 약 90~120m).
+- ⚠️ **차단**: 없음. 경로 α (백로그 우선 4 만) 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
 
 ## 완료된 Epic
 
@@ -1819,10 +1819,10 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - [x] B-5 barrel 규칙 일관성 — `conversations/page.tsx` import 를 `@/shared/time` (barrel) → `@/shared/time/relative` (세부 경로, 단일 심볼) 로 통일 (Task β-1)
 - [ ] LATERAL JOIN 최적화 — **조건부 이월**: warn 빈도 임계 도달 시만. 현재는 모니터링 유지.
 
-#### 우선 2 (Task 1-7 후속 sec 이월) — 지식 파이프라인 보안 부채 🔶 **부분 완결 (2026-04-24 Ⅲ, Task β-3a)**
+#### 우선 2 (Task 1-7 후속 sec 이월) — 지식 파이프라인 보안 부채 ✅ **완결 (2026-04-24 Ⅲ + Ⅳ, Task β-3a + β-3b)**
 
 - [x] `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — `SENSITIVE_FIELD_NAMES` 에 `storagePath` + `storage_path` 추가 (camelCase / snake_case 모두). `buildPinoRedactPaths()` 가 최상위 + `*.` 경로 자동 생성 → `ingest-file.ts:201, 204` 의 실 로그 자동 redact (소스 수정 불요). 회귀 테스트 3 케이스 추가 (Task β-3a).
-- [ ] **Storage orphan cleanup 주기 태스크 → β-3b 로 분리** (1-7-c sec MEDIUM-3) — 신규 스크립트 규모라 fresh 세션 Plan 수립이 설계 품질에 유리. `scripts/cleanup-orphan-storage.ts` (standalone, pnpm tsx 수동 실행 MVP) + `computeOrphans` 순수 함수 + dry-run/TTL 24h 등 설계 결정 5건 포함.
+- [x] **Storage orphan cleanup 주기 태스크** (1-7-c sec MEDIUM-3) — **Task β-3b 완결**: `scripts/cleanup-orphan-storage.ts` (standalone, `tsx --env-file=.env.local`) + `src/core/knowledge/orphan-cleanup.ts` (`computeOrphans` 순수 함수) + 13 단위 테스트 + 운영 가이드. dry-run 기본 + `--apply` + `CONFIRM_DELETE=yes` 이중 게이트. TTL 24h race window / soft-deleted 봇 30d retention / legacy 봇 (storagePaths 미기록) 보수적 보존 / bot_not_found 보존. 50개 batch + per-batch 실패 격리. 독립 리뷰 2 → Fix 8건 반영 (UUID 검증 / 분기 단순화 / soft-deleted+legacy 테스트 케이스 + 운영 가이드 30d 경계 / legacy 마이그레이션 / tee 로그 / history 회피 / tsx devDependency 명시).
 - [ ] rate limit fail-closed 전환 (1-7-c sec LOW-1) — 🚫 **조건부 이월 확인** (Task β-3a): 과금 모델 도입 시 (Phase 3 SaaS 신호) 트리거. MVP 단계 fail-open 은 UX 우선 정책 — 설계 결정 (factory.ts 주석 + 5 limiter 파일 명시). ADR N-5 예정.
 - [x] unpdf CVE 모니터링 (1-7-c sec INFO-1) — `package.json` `scripts.audit` / `scripts.audit:full` 2 alias 추가 + `docs/security-monitoring.md` 신규 (월 1회 가이드 / 특별 주시 5 라이브러리 / 결과 기록 템플릿 / Phase 3 자동화 후보). 자동화는 외부 연동 (GH Actions) 범위 밖.
 
@@ -1866,6 +1866,8 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 - Epic C: 실사용자 3~5명 + SaaS 수익 모델 결정 (외부 영업 성과)
 
 ## 완료한 Task (누적, 최근 순)
+
+- [x] **Task β-3b (Phase 2 백로그 우선 2 #2 완결): Storage orphan cleanup standalone 스크립트** — **신규 4 + 수정 1**: (신규) `src/core/knowledge/orphan-cleanup.ts` (`computeOrphans` 순수 함수 + 7 타입, 분류 우선순위 `bot_not_found → soft_deleted_within_retention → untracked_bot → referenced → recent_ttl → unreferenced`) / `src/core/knowledge/orphan-cleanup.test.ts` (13 단위 테스트: TTL 정확 경계, custom ttlMs/retentionMs, soft-deleted+legacy 조합, 다중 봇 혼합 포함) / `scripts/cleanup-orphan-storage.ts` (CLI entry, service_role + dry-run/apply 분기, UUID regex 검증, --bot/--ttl-hours/--retention-days/--limit 옵션, Storage list pagination, 50개 batch + per-batch 실패 격리, console.error stdout/stderr 분리, maskPath UUID truncation) / `docs/scripts/cleanup-orphan-storage.md` (운영 가이드: 분류 정책 표, 3 모드 실행법, 권한/env, 출력 예시, 30d 경계 race + legacy 마이그레이션 SQL, 안전 장치 표, Phase 3 Backlog) · (수정) `package.json` (`cleanup:orphan-storage` + `:apply` 2 scripts + `tsx 4.21.0` devDependency 명시) · **이중 게이트** (`--apply` + `CONFIRM_DELETE=yes` 둘 다 필요, 한쪽만 있으면 exit(2) 즉시 abort) · **TTL 24h race window** + **soft-deleted 봇 30d retention** (B-3 정합) + **legacy 봇 (storagePaths 미기록) 전체 보존** + **`bot_not_found` 보존** · **독립 리뷰 2 병렬** (code-reviewer Ship as-is + security-reviewer Ship conditional) → **Fix 8건 반영**: code M-1 분기 단순화 + 의도 주석 / code M-2 soft-deleted+legacy 테스트 케이스 + 분류 정책 표 / sec M-1 --bot UUID regex 검증 / sec M-2 history 회피 안내 (스페이스 prefix + zsh `HIST_IGNORE_SPACE`) / sec M-3 30d 경계 race 운영 가이드 + 검증 SQL / sec M-4 `tee cleanup-YYYYMMDD-HHMMSS.log` audit trail 대용 / sec M-5 legacy 봇 마이그레이션 SQL + 3 옵션 / code INFO-2 tsx devDependency 명시 · 의식적 이월: code INFO-1 `engines`/`.nvmrc` (프로젝트 전반 결정) + code INFO-3 `--page-size` 용어 통일 (향후 옵션 추가 시) · vitest 541 → 554 (+13 / orphan-cleanup) · typecheck+lint+prettier+build clean (15 routes 유지) · gitleaks no leaks 예상
 
 - [x] **Task β-3a (Phase 2 백로그 1-7 sec 이월, 우선 2 경량 2/4 + 조건부 이월 1건)**: (#1) `storagePath` redact 통합 — `SENSITIVE_FIELD_NAMES` 에 `storagePath` + `storage_path` 추가 (camelCase/snake_case 모두) + 근거 주석 3줄. `buildPinoRedactPaths()` 자동 확장으로 Pino 최상위 + 1-depth glob 4경로 생성 → `ingest-file.ts:201, 204` 실 로그 자동 redact. Sentry `beforeSend` 도 동일 sensitiveFields 모듈 참조라 단일 출처 동기화. 회귀 테스트 3케이스 추가 (최상위 camelCase / 최상위 snake_case / 중첩) · (#4) unpdf CVE 모니터링 — `package.json` `scripts.audit` (pnpm audit --prod) + `scripts.audit:full` (pnpm audit) + `docs/security-monitoring.md` 신규 (월 1회 가이드 + 특별 주시 5 라이브러리 표 + 결과 기록 템플릿 + Phase 3 자동화 후보) · (#3) rate limit fail-closed → **조건부 이월 확인**: 과금 모델 도입 시 (Phase 3 SaaS 신호) 트리거. MVP 단계 fail-open UX 우선 설계 문서화 · (#2) Storage orphan cleanup 은 β-3b 로 분리 (신규 스크립트 규모, 다음 세션 Plan) · **독립 리뷰 2 병렬 둘 다 Ship as-is** (code INFO 1건 문서 한 줄 선반영 / security OWASP A04+A06+A09 전부 INFO) · 541/541 vitest pass (540→541, redact 테스트 +1) · typecheck+lint+prettier+build clean
 
@@ -2636,6 +2638,102 @@ Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `compute
 
 ---
 
+## 이번 세션 (2026-04-24 Ⅳ) — Task β-3b: Storage Orphan Cleanup standalone 스크립트
+
+**맥락**: β-3a 에서 분리됐던 우선 2 #2 (Storage orphan cleanup) 를 fresh 세션 Plan 으로 진행. PROGRESS β-3a 완결 메모: "신규 스크립트 규모라 fresh 세션 Plan 수립이 설계 품질에 유리" → 본 세션 단독 Task.
+
+### 흐름 (~2h 30분)
+
+1. **Plan 수립 (25분)** — 학습된 교훈 적용으로 Plan 전 grep/Read 사전 검증 (자동 해소 0 — Storage cleanup 관련 코드 없음 확인). 7건 결정 포인트 비교표 (TTL 24h / soft-deleted 30d 보존 / dry-run 기본 / service_role + 이중 게이트 / stdout + JSON / 파일 구조 src+scripts 분리 / 봇 폴더 단위 list) + 3건 Risk + Mitigation. Jayden 승인.
+
+2. **신규 4 + 수정 1 작성 (~1h 30분)**:
+   - `src/core/knowledge/orphan-cleanup.ts` (~140줄) — `computeOrphans` 순수 분류 함수 + 7 타입. 분류 우선순위 = `bot_not_found → soft_deleted_within_retention → untracked_bot → referenced → recent_ttl → unreferenced(orphan)`. ttlMs/retentionMs 인자화 (테스트 가능성).
+   - `src/core/knowledge/orphan-cleanup.test.ts` (12+1=13 단위 테스트) — TTL 정확 경계 / custom ttlMs/retentionMs / soft-deleted+legacy 조합 / 다중 봇 혼합 / bot_not_found.
+   - `scripts/cleanup-orphan-storage.ts` (~410줄) — CLI entry. service_role + dry-run/apply 분기. 옵션 5종 (`--apply` / `--ttl-hours=N` / `--retention-days=N` / `--bot=<UUID>` / `--limit=N`). 이중 게이트 (`--apply` + `CONFIRM_DELETE=yes`). Storage list pagination (offset/limit). 50개 batch + per-batch 실패 격리. console.error 로 stderr 분리 (stdout 비움 — 파이프 친화). UUID 검증 + maskPath truncation.
+   - `docs/scripts/cleanup-orphan-storage.md` (~190줄) — 운영 가이드. 분류 정책 표 + 우선순위 / 3 모드 실행법 / 권한·env / 출력 예시 / 30d 경계 race + legacy 마이그레이션 SQL / 안전 장치 표 / Phase 3 Backlog.
+   - `package.json` — 2 scripts (`cleanup:orphan-storage` + `:apply`) + `tsx 4.21.0` devDependency 명시 (transitive → explicit).
+
+3. **검증 (10분)** — typecheck ✅ / vitest 541 → 553 (+12) ✅ / prettier ✅ (5 파일 자동 포맷, unrelated 2 파일 docs/phase-2-plan.md + docs/testing-accounts.md 의 column padding drift 도 일괄 fix — 기존 세션 prettier 통과 누락 발견) / lint 3 baseline warnings (무관) / build ✅ (15 routes 유지).
+
+4. **독립 리뷰 2 병렬 (code + security) (12분)**:
+   - **code-reviewer: Ship as-is** — 통과 항목 11개 명시 (feature 경계 / readonly / 이중 게이트 / pagination 종료 조건 / pure function mutation 패턴 등). MEDIUM 2건 + INFO 4건 권장.
+   - **security-reviewer: Ship conditional** — A01/A02/A03/A04/A05/A06/A08 통과 항목 8개 명시. service_role 정당성 확인 (data flow DB→Storage 격리). MEDIUM 5건 권장 (1건 코드 1줄 수정).
+
+5. **Fix 8건 반영 (10분, 모두 비용 0~1줄)**:
+   1. **code M-1**: `extractBotInputs` 동일 분기 단일화 + 의도 주석 (legacy 버전별 차등 처리는 향후 분기)
+   2. **code M-2**: `orphan-cleanup.test.ts` soft-deleted 30d 경과 + legacy 봇 케이스 추가 → 분류 순서 검증 (untracked 우선 보존). 분류 정책 표 보강.
+   3. **sec M-1**: `cleanup-orphan-storage.ts` `--bot=<id>` UUID regex 검증 (`/^[0-9a-f]{8}-...{12}$/i`) + 운영자 실수 조기 차단.
+   4. **sec M-2**: 운영 가이드에 history 회피 안내 (스페이스 prefix + zsh `HIST_IGNORE_SPACE` / bash `HISTCONTROL=ignorespace`).
+   5. **sec M-3**: 30d 경계 race 운영 가이드 + 검증 SQL (`now() - deleted_at > interval '29 days' and < '31 days'` → 발견 시 `--retention-days=35` 등으로 여유).
+   6. **sec M-4**: 운영 가이드 audit trail 대용 패턴 (`tee cleanup-$(date +%Y%m%d-%H%M%S).log`).
+   7. **sec M-5**: 운영 가이드 legacy 봇 마이그레이션 SQL + 3 옵션 (재업로드 / 수동 마이그레이션 / 영구 보존 수용).
+   8. **code INFO-2**: `package.json` `tsx 4.21.0` devDependency 명시 (transitive → explicit).
+
+6. **의식적 이월 (Backlog)**:
+   - **code INFO-1**: `engines: { node: ">=20.6" }` + `.nvmrc` — 프로젝트 전반 결정 (Phase 3 또는 별도 인프라 Task)
+   - **code INFO-3**: `--page-size` 용어 통일 — 향후 옵션 추가 시 일관 검토
+   - **Phase 3 Backlog (운영 가이드 명시)**: GitHub Actions cron / `audit_logs` 통합 (`STORAGE_ORPHAN_CLEANUP` 신규 이벤트) / Storage RLS `deleted_at IS NULL` 추가 (retention cron 동반) / 1000+ 봇 streaming 출력
+
+### 검증 (최종)
+
+- typecheck ✅ / lint 3 baseline / prettier ✅ / **vitest 554** (541→553→554 / orphan-cleanup 12 + Fix M-2 케이스 +1) / build ✅ (15 routes 유지)
+- gitleaks no leaks 예상 (커밋 시점 hook)
+- 단위 테스트만 검증 (smoke = service_role + prod env → Jayden 환경 별도 진행)
+
+### 주요 결정 / 교훈 (learnings.md +2 예정)
+
+1. **service_role 키 사용 standalone 스크립트의 안전 패턴 표준화**:
+   - dry-run 기본 + 이중 게이트 (`--apply` + `CONFIRM_DELETE=yes`)
+   - 데이터 분류 우선순위에 보수적 보존 카테고리 다수 (`bot_not_found` / `untracked_bot` / `recent_ttl`) — 모르면 보존
+   - data flow 격리 (DB→Storage 단방향) → CLI 인자 인젝션 방어 자동
+   - 향후 retention cron / audit_logs cleanup 등 유사 스크립트의 표준 템플릿
+
+2. **`tsx --env-file=.env.local` 패턴 (Node 20.6+ 위임)**:
+   - Next 외 standalone TypeScript 실행 시 dotenv 명시 import 회피
+   - tsx 4.7.0+ 부터 Node `--env-file` 위임 → `.env.local` 자동 로드
+   - tsconfig `paths` (`@/*` alias) 도 `--tsconfig=tsconfig.json` 옵션으로 인식
+   - 단점: Node < 20.6 환경 미지원 → `engines` 명시 권장 (Backlog)
+
+3. **prettier check 가 누락된 unrelated 파일 (docs/phase-2-plan.md / docs/testing-accounts.md) 동반 fix**:
+   - 이전 세션 (β-1, B-6) 에서 markdown table column padding 미적용 commit
+   - prettier --check 가 `pnpm check` 에 포함됐어야 하는데 부분 검증으로 누락
+   - 본 세션에서 발견 → 일괄 fix (의미 변경 0, CI 통과 위해 필요)
+   - 규칙: 매 Task 검증 단계에 `pnpm format:check` 전체 실행 (특정 파일만 보지 말 것)
+
+### 신규 4 + 수정 1
+
+_신규_:
+
+- `src/core/knowledge/orphan-cleanup.ts` (~140줄, 순수 함수)
+- `src/core/knowledge/orphan-cleanup.test.ts` (13 케이스)
+- `scripts/cleanup-orphan-storage.ts` (~410줄, CLI entry)
+- `docs/scripts/cleanup-orphan-storage.md` (~190줄, 운영 가이드)
+
+_수정_:
+
+- `package.json` — 2 scripts + tsx devDependency 명시
+- `docs/phase-2-plan.md` + `docs/testing-accounts.md` — prettier 자동 포맷 (unrelated, 의미 변경 0)
+- `docs/learnings.md` — 본 Task 교훈 (예정)
+- `PROGRESS.md` — 현재 위치 + 본 세션 기록
+
+### Backlog (β-3b 이월 / Phase 3)
+
+1. **GitHub Actions cron** (월 1회 dry-run + 결과 알림) — `docs/security-monitoring.md` 패턴 정합. 외부 자동화 단계.
+2. **`audit_logs` 통합** — `STORAGE_ORPHAN_CLEANUP` 신규 이벤트. 삭제 audit trail 자동화.
+3. **Storage RLS `deleted_at IS NULL` 조건 추가** — retention cron 과 동반.
+4. **1000+ 봇 streaming 출력** — 현재는 메모리 누적 후 1회 출력.
+5. **Legacy 봇 마이그레이션 스크립트** — Storage 파일 ↔ files[] 매칭 후 storagePaths 채움 (운영 가이드 옵션 2).
+6. **`engines` 명시 + `.nvmrc`** — Node 20.6+ 의존성 명시 (code INFO-1).
+7. **Task β-4 (우선 4)** — Rate Limit + Validation 보강 (Task 1-0 후속, ~90~120m). **백로그 마지막 미완 그룹**.
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-24 Ⅳ (KST) — Task β-3b 완결 = **백로그 우선 2 그룹 완결**
+- 브랜치: `main`
+- 차단 요소: 없음 (다음 후보 = β-4 우선 4 그룹 또는 외부 신호 평가)
+
+---
+
 ## 이번 세션 (2026-04-24 Ⅱ) — Task B-6: Playwright E2E CI (로컬 Supabase Docker, 비용 0)
 
 **Epic B 6/6 최종 Task 완료 = Epic B 전체 완결** 🎉. Jayden 조건 "현재 지불 중인 서비스 외 추가 비용 없이 + 단순화" → **경로 C 로컬 Supabase Docker on CI** 선택.
@@ -2718,7 +2816,7 @@ _수정_:
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-24 Ⅱ (Epic B Task B-6 완결 = **Epic B 6/6 전체 완결 🎉** — Playwright E2E CI (로컬 Supabase Docker, 비용 0) + 리뷰 Fix 7건, Phase 2 Epic B 종료. 다음: Epic C 멀티테넌트 or Epic D 카카오톡)
+- 날짜: 2026-04-24 Ⅳ (Task **β-3b 완결** = 백로그 우선 2 그룹 완결. Storage orphan cleanup standalone 스크립트 + 13 단위 테스트 + 이중 게이트 + 운영 가이드. 리뷰 Fix 8건. 다음: 백로그 우선 4 (β-4) 또는 외부 신호 평가)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 커밋: `5d14476` (B-2 audit) · `09ea01d` (B-1 save) · `bd38558` (B-1 feat)
+- 최근 커밋: `19877d5` (β-1+β-2+β-3a docs) · `b1ae464` (β-3a) · `96e48e8` (β-2) · `0a01305` (β-1)
