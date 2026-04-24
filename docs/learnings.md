@@ -32,6 +32,36 @@
 
 ## 기록
 
+### 2026-04-25 외부 제공자 AI 모델 버전의 silent deprecation — 모델명 상수 고정은 미래 시한폭탄 (Gemini `text-embedding-004` 사례)
+
+**증상**: Task A-5b-① Step 2 진입 직전 Jayden 이 prod 대시보드에서 지식 저장 시도 → 모두 실패. text + URL 크롤링 동시 고장. 조사 결과 Server Action 이 "지식 저장에 실패했어요..." 에러 배너 렌더. 내부 로그: `[404 Not Found] models/text-embedding-004 is not found for API version v1beta`. 로컬 E2E 재현 시도 → 동일 증상. prod env / Vercel 설정 / Supabase RLS / owner_id 모두 정상. **원인 = Google 이 우리가 쓰던 embedding 모델을 deprecate**. 코드는 멀쩡한데 외부 API 계약이 바뀌어 조용히 prod 가 고장.
+
+**원인**:
+
+1. **AI 모델 명시적 버전 고정의 역설** — Task 1-7-a 구현 당시 (2026-04-19) Google 공식 추천 모델 `text-embedding-004` 를 하드코딩. 이후 Google 은 `gemini-embedding-001` 을 신 권장으로 전환하며 구 모델을 v1beta API 에서 제외. 클라이언트에 공지는 있었겠지만 **운영자가 공식 공지 채널을 구독하지 않으면 놓침**.
+2. **CI 에서 외부 API 포함 smoke test 부재** — `E2E_SKIP_EXTERNAL_API=true` 가 CI 에 설정돼있어 외부 API 의존 spec 은 skip. 로컬 E2E 는 명시 요청 시에만 실행. 따라서 Google 의 모델 변경이 **CI 녹색 상태에서 조용히 prod 에 반영되지 않음** (prod 와 실 호출 경로가 CI 와 괴리).
+3. **모델 버전 drift 는 의존성 업그레이드와 성격이 다름** — SDK 버전은 package.json + Renovate 같은 도구로 관리 가능. **모델명은 코드 내 문자열 상수** 이라 dependency tool 로 추적 불가. 외부 deprecation 공지 + 수동 교체 외엔 방법 없음.
+4. **로컬 Vercel prod env == `.env.local` 공유** — 본 세션 중 발견된 별도 이슈지만 맥락 관련: `.env.local` 이 prod Supabase 를 직접 참조했기에 로컬 E2E 도 prod 와 같은 증상 재현 가능 (이게 원인 확정에 도움이 됨, 우연). 정상 환경에서는 dev ≠ prod 라 로컬 재현 불가 가능성.
+
+**해결**:
+
+1. `@google/generative-ai 0.24.1` → `@google/genai 1.50.1` (신 SDK) + `text-embedding-004` → `gemini-embedding-001` + `outputDimensionality: 768` 명시 (128~3072 지원 중 DB `vector(768)` 유지).
+2. API signature 변경: `model.batchEmbedContents({ requests })` → `ai.models.embedContent({ model, contents, config })`. `response.embeddings[].values` 구조 유지.
+3. env 변수명 유지 (`GOOGLE_GENERATIVE_AI_API_KEY`) — 신 SDK 는 생성자에 `{apiKey}` 명시 전달하므로 env 교체 불요.
+4. 테스트 mock 전면 재작성 — class 내부 `models.embedContent` 프로퍼티 구조로 신 SDK 인스턴스 모방.
+5. security review MEDIUM 반영: `new GoogleGenAI({apiKey})` 에 `httpOptions` 의도적 미사용 주석 — 신 SDK 는 `httpOptions.baseUrl` 로 endpoint 오버라이드 가능 (SSRF 벡터), 생성자 호출 지점을 "잠금".
+
+**규칙** ⭐:
+
+- **AI 모델 버전을 코드 상수로 박을 때 "2년 뒤 이 문자열이 아직 유효한가?" 를 주석에 명시** — `GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"` 같은 상수 옆에 "Migration YYYY-MM-DD" 주석 + 다음 재확인 권고 시점. 미래 재마이그레이션 시 발견 단서.
+- **외부 API 의존 스모크 테스트를 CI 에 최소 주 1회 실행 (Phase 3 이월)** — `E2E_SKIP_EXTERNAL_API=false` 로 주간 cron. 무료 tier 가 허용하는 소량 호출로 충분 (Gemini embedding = 무료, Anthropic = 최소 메시지 1건, Firecrawl = 무료 tier 소량). **"CI 녹색 + prod 조용히 고장"** 시나리오 조기 감지.
+- **모델 deprecation 보다 빠르게 알 수 있는 경로는 `/api/health` 확장** — DB ping 만 하지 말고 AI SDK 가벼운 호출 (short text 1건 embedding) 추가. 외부 모니터링 (Sentry / Uptime Robot) 이 health 엔드포인트 긁으면 deprecation = health fail = 즉시 알림.
+- **증상이 "UI 에 일반적 실패 메시지만 보임" 이면 root cause 는 외부 서비스 응답일 확률 높음** — Server Action 이 정적 메시지로 내부 에러 마스킹하는 패턴은 보안 원칙상 맞지만, 운영 진단 시 서버 로그 (`logger.error` 의 `err.message`) 가 유일한 단서. prod 에서 로그 접근 가능한 채널 (Sentry / Vercel Logs) 반드시 확보.
+- **SDK 메이저 전환 시 기존 SDK 가 deprecated 경고 또는 breaking 변경 주는지 확인** — `@google/generative-ai` 도 `@google/genai` 이전에 `@google/generative-ai@0.24+` 에서 deprecation 경고 있었을 가능성. `pnpm outdated` 주기적 실행 + 메시지 확인 프로세스 필요.
+- **근본 원인 확정까지 탐색 순서**: UI 에러 메시지 → Server Action 로그 → 외부 API 응답 → (외부 API 변경 확인) — **"env 누락"** 가설은 앱 부팅 성공한 상태에서는 우선순위 낮게. 실제 본 세션에서는 env 가설로 Jayden 에게 시간 낭비 유도한 측면 있음. 내부 로그 먼저 확인하는 습관 필요.
+
+---
+
 ### 2026-04-24 rate limit reset 표시는 정확도와 정보 노출 사이 trade-off — Route Handler RFC 표준 vs Server Action 퍼지 표현 (Task β-4 설계 결정)
 
 **증상**: Task β-4 에서 11 지점 (Route Handler 3 + Server Action 7+) 의 rate limit reset 시간을 사용자에게 노출하는 표준 패턴 설계 필요. 초기 구현은 모든 지점에 정확한 초 ("30초 후 다시 시도") 노출. security 리뷰 (sec M-1) 에서 지적: **공격자가 자동화 도구에서 정확 초를 파싱해 rate limit 윈도우/한도 추정 가능**. 예시:

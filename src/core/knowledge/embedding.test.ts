@@ -16,18 +16,19 @@ vi.hoisted(() => {
     "fake-supabase-anon-test-placeholder";
 });
 
-// @google/generative-ai 의 class 를 모킹. `new GoogleGenerativeAI(apiKey)` 호출이
+// `@google/genai` 의 class 를 모킹. `new GoogleGenAI({ apiKey })` 호출이
 // constructor 로 동작해야 하므로 class 선언이 안전. `vi.hoisted` 로 mock 함수를 올려
 // `vi.mock` factory 가 outer 변수 접근 시 발생하는 hoisting race 를 회피.
-const { mockBatchEmbedContents } = vi.hoisted(() => ({
-  mockBatchEmbedContents: vi.fn(),
+//
+// Migration 2026-04-25: 신 SDK 는 `ai.models.embedContent` 패턴 — class 내부의
+// `models` 프로퍼티가 `{ embedContent }` 객체를 노출한다.
+const { mockEmbedContent } = vi.hoisted(() => ({
+  mockEmbedContent: vi.fn(),
 }));
 
-vi.mock("@google/generative-ai", () => ({
-  GoogleGenerativeAI: class {
-    getGenerativeModel() {
-      return { batchEmbedContents: mockBatchEmbedContents };
-    }
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = { embedContent: mockEmbedContent };
   },
 }));
 
@@ -39,7 +40,7 @@ function makeEmbedding(seed = 0): number[] {
 
 describe("embedBatch", () => {
   beforeEach(() => {
-    mockBatchEmbedContents.mockReset();
+    mockEmbedContent.mockReset();
   });
 
   it("빈 배열 입력 → throw (호출자 책임)", async () => {
@@ -53,7 +54,7 @@ describe("embedBatch", () => {
   });
 
   it("정상 3개 → 단일 배치 호출 + 768차원 배열 반환", async () => {
-    mockBatchEmbedContents.mockResolvedValueOnce({
+    mockEmbedContent.mockResolvedValueOnce({
       embeddings: [
         { values: makeEmbedding(0) },
         { values: makeEmbedding(1) },
@@ -62,7 +63,7 @@ describe("embedBatch", () => {
     });
 
     const result = await embedBatch(["a", "b", "c"]);
-    expect(mockBatchEmbedContents).toHaveBeenCalledTimes(1);
+    expect(mockEmbedContent).toHaveBeenCalledTimes(1);
     expect(result).toHaveLength(3);
     expect(result[0]).toHaveLength(768);
     expect(result[0][0]).toBeCloseTo(0);
@@ -71,7 +72,7 @@ describe("embedBatch", () => {
 
   it("101개 입력 → 100 + 1 두 번 호출 (배치 분할)", async () => {
     const inputs = Array.from({ length: 101 }, (_, i) => `text-${i}`);
-    mockBatchEmbedContents
+    mockEmbedContent
       .mockResolvedValueOnce({
         embeddings: Array.from({ length: 100 }, (_, i) => ({
           values: makeEmbedding(i),
@@ -82,12 +83,12 @@ describe("embedBatch", () => {
       });
 
     const result = await embedBatch(inputs);
-    expect(mockBatchEmbedContents).toHaveBeenCalledTimes(2);
+    expect(mockEmbedContent).toHaveBeenCalledTimes(2);
     expect(result).toHaveLength(101);
   });
 
   it("응답 차원 불일치 → throw", async () => {
-    mockBatchEmbedContents.mockResolvedValueOnce({
+    mockEmbedContent.mockResolvedValueOnce({
       embeddings: [{ values: Array(512).fill(0) }], // 512차원 (잘못됨)
     });
 
@@ -95,11 +96,16 @@ describe("embedBatch", () => {
   });
 
   it("응답 개수 불일치 → throw", async () => {
-    mockBatchEmbedContents.mockResolvedValueOnce({
+    mockEmbedContent.mockResolvedValueOnce({
       embeddings: [{ values: makeEmbedding() }],
     });
 
     // 2개 요청했는데 1개만 옴
     await expect(embedBatch(["a", "b"])).rejects.toThrow(/count mismatch/);
+  });
+
+  it("embeddings 필드 null/undefined → throw (신 SDK 응답 가드)", async () => {
+    mockEmbedContent.mockResolvedValueOnce({});
+    await expect(embedBatch(["a"])).rejects.toThrow(/count mismatch/);
   });
 });

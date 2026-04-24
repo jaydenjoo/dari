@@ -4,11 +4,12 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + 잔여 ①·② + β-5 ✅** — A-1~A-5a + B-1~B-6 + β-1~β-5. **백로그 우선 1·2·3·4 + 이월 cleanup 모두 완결**. β-4 이월 code L-1/L-2/INFO-1 3건 β-5 에서 클로즈. 내부 경로 α 전면 종결 → 외부 신호 평가 단계 유지.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 내부 가능 항목 모두 해소 + PSL 강화 + rate limit refund ADR-010 + `Retry-After` 계산 단일 출처 + DoS 가드. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
-- 상태: **이번 세션(2026-04-24 Ⅷ) Task β-5 완결** — `computeRetryAfterSeconds` 를 `core/security/with-allowed-origin.ts` (server-only) → `shared/time/retry-after.ts` (Client/Server 공용) 로 분리 이동 + NaN/Infinity 가드 + 24h 상한 (sec DoS) + 3 사용처 공용 함수 일원화 + L-1 `buildCorsHeaders` 상호 배타 근거 주석. 리뷰 Fix 4건. vitest 587 → 589 / tsc clean / lint 0 errors / build 15 routes clean.
-- 확인: 백로그 β-4 이월 3건 (code L-1 주석 / code L-2 공용 함수 / code INFO-1 내부 DRY) 모두 클로즈. `shared/time/` barrel 일관성 반영.
-- ⚠️ **차단**: 없음. Phase 2 내부 경로 α 완전 종결 + 이월 cleanup 완결. 다음 세션 후보 = 외부 신호 평가 (Kakao / 실사용자 / 포트폴리오 사이트) 또는 γ/δ 백로그 재검토.
+- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 진행 중 (Gemini SDK hot fix 완료, dairect 봇 embed 대기)**. 외부 신호 평가 단계 진입.
+- Epic: **Task A-5b-① dairect 봇 → dairect.kr 공식 embed** (Dari 첫 실사용 사례 1호). Step 1 완료 (브랜드 색상 `#4F46E5` / systemPrompt 원문 / knowledge text 초안 작성). Step 2 진입 직전 **지식 저장 prod 장애 발견** → Gemini embedding 모델 `text-embedding-004` API 지원 종료 (404 Not Found).
+- 상태: **이번 세션(2026-04-25 Ⅰ) Gemini SDK 마이그레이션 완료** — `@google/generative-ai 0.24.1` (deprecated) → `@google/genai 1.50.1` / `text-embedding-004` → `gemini-embedding-001` + `outputDimensionality: 768` / API `batchEmbedContents` → `embedContent` / env 이름 (`GOOGLE_GENERATIVE_AI_API_KEY`) 유지 / 독립 리뷰 2 병렬 → code Ship + security Ship conditional (sec MEDIUM 1건 httpOptions 주석 fix 반영). vitest 589 → 590 / typecheck clean / lint 3 baseline / prettier clean / build 15 routes clean.
+- 확인: 로컬 E2E 로 prod 증상 재현 → 근본 원인 확정 (Google API 모델 deprecation). 단위 테스트 590 + mock 재작성으로 검증.
+- ⚠️ **차단**: Jayden `git push` 대기 → Vercel 자동 재배포 → Jayden prod 실 저장 재시도 검증 → 통과 시 A-5b-① Step 2 재개.
+- 🚨 **별도 Task 이월 (중대)**: `.env.local` 이 prod Supabase (`pxdopzlaffjcxqfrqidq`) 를 직접 참조 — dev/prod 분리 부재. 로컬 E2E + `pnpm dev` 가 prod DB 에 실 데이터 쓰는 구조. **Task "dari-dev 프로젝트 별도 생성" 긴급도 상승**. + E2E 잔재 계정 `e2e-main@dari.test` prod 에 존재 — 수동 정리 필요.
 
 ## 완료된 Epic
 
