@@ -2047,3 +2047,55 @@ logger.warn({ ipHash: hashClientIp(clientIp), ... }, "...");
 - **리뷰에서 code 와 security 판단이 엇갈리면 "비용 0 으로 둘 다 수용 가능한 defense-in-depth" 를 우선** — 이번 경우 barrel 에 `import "server-only"` 추가는 런타임 비용 0 + 미래 위험 차단.
 
 ---
+
+## 2026-04-24 — Task B-4: RPC vs 앱 레이어 원가 계산 / Recharts 3.x TooltipProps
+
+**상황**: phase-2-plan §B-4 원 스펙은 "`bot_stats` RPC 확장: `usd_cents bigint` 필드 추가". 즉 Claude 단가를 SQL 내부에서 곱해 반환하도록 설계되어 있었음. Task B-4 구현 단계에서 재검토 결과 다음 2 가지가 문제:
+
+1. Claude 단가 변경 주기 = Anthropic 가격 정책 변경 시마다 = 예측 불가능 (월~분기 단위 가능성).
+2. RPC 내부 계산이면 단가 변경 = 마이그레이션 작성 + prod 배포 = 과도한 운영 비용.
+
+**판단**: 스펙 문구보다 운영 편의성이 상위. Plan 단계에서 Jayden 에게 결정 포인트 6건 중 하나로 명시 (6번 결정, "usd_cents 계산 위치") + 권장안 B (앱 레이어) + 스펙 수정 제안. Jayden 승인 후 반영.
+
+**구현**: RPC (`bot_stats_daily`) 는 raw tokens 만 반환 + `src/core/pricing/claude-rates.ts` 하드코딩 상수 + `computeUsdCents(tokens, rate)` 앱 유틸. 단가 변경 = 코드 1 줄 수정. Phase 3 에 env 이관 예정.
+
+**규칙** ⭐:
+
+- **phase-2-plan / PRD / 설계 문서의 문구는 "가이드" 이지 "절대 규율" 이 아님** — 구현 단계에서 운영 편의성 / 변경 비용 관점으로 재평가. 스펙 수정 제안이 정당하면 Plan 단계에서 명시 후 Jayden 결정.
+- **"데이터 레이어 = raw 수치, 비즈니스 로직 = 앱 레이어" 원칙** — 단가·세율·비율 등 자주 변경될 수 있는 상수는 DB 레이어 외부. DB 는 집계·필터·조인 등 데이터 변환만 책임.
+- **마이그레이션 없이 변경 가능한 값 vs 마이그레이션 필요한 값 구분** — 스키마/제약/인덱스 = 마이그 / 단가/정책/라벨 = 코드 상수 → Phase 후반 env.
+
+---
+
+## 2026-04-24 — Task B-4: Recharts 3.x `TooltipProps` 런타임 속성 미노출 → element form 우회
+
+**상황**: Recharts 3.8.1 의 `TooltipProps<ValueType, NameType>` 타입이 `active` / `payload` / `label` 속성을 공개 타입에 노출하지 않음 (Recharts 2.x 와 다른 동작). 커스텀 Tooltip 컴포넌트 시그니처에 `TooltipProps` 적용 시 TS2339 "Property 'payload' does not exist" 컴파일 에러.
+
+**오답 경로**:
+
+- `any` 캐스팅 — CLAUDE.md 금지 규칙 위반.
+- `@ts-ignore` — 타입 안전성 포기.
+
+**정답 경로**: Recharts 공식 API 는 2 가지 content 형태를 지원 — 함수 `content={(props) => ...}` / element `content={<CustomTooltip />}`. element form 을 사용하면 Recharts 가 내부에서 `React.cloneElement` 로 `active` / `payload` / `label` 을 주입 → 컴포넌트 시그니처는 **커스텀 interface** 로 받으면 됨.
+
+```tsx
+interface DailyTooltipProps {
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload?: DailyChartPoint }>;
+  label?: string | number;
+}
+
+function DailyTooltip({ active, payload, label }: DailyTooltipProps) { ... }
+
+// JSX:
+<Tooltip content={<DailyTooltip />} />
+```
+
+**규칙** ⭐:
+
+- **외부 라이브러리가 런타임에 주입하는 속성은 라이브러리 공개 타입에 노출되지 않을 수 있음** — 이때 공개 타입을 강제로 `import` 하지 말고, 런타임 계약(주입 속성의 구조)만 담은 **로컬 interface** 를 정의. any 없이 타입 안전 유지.
+- **`cloneElement` / HOC / render prop 기반 라이브러리는 element form 을 우선 고려** — 타입 호환 이슈 회피 + 라이브러리 공식 API 존중.
+- **메이저 버전 업 시 TooltipProps 등 내부 타입 형태 변경 가능성 염두** — 다음 Recharts 업데이트 시 이 우회가 여전히 필요한지 재확인 (Backlog).
+- **Asia/Seoul 일별 집계는 SQL + JS 양쪽 동일 포맷 생성이 핵심** — SQL `date_trunc('day', ts AT TIME ZONE 'Asia/Seoul')::date` + `to_char('YYYY-MM-DD')` ↔ JS `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })` 둘 다 `YYYY-MM-DD` 반환 → Map 매칭 가능. KR 사용자 "오늘/어제" 직관과 일치 (UTC day 사용 시 KST 자정 근처 메시지가 다음 날로 묶임).
+
+---

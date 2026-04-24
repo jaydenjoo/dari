@@ -4,10 +4,10 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic A 완결 + Epic B 4/6 Task 완료** (A-1~A-5a + B-1 + B-2 + B-3 + B-5). env 분리 + CI 현대화 + barrel refactor 반영. Epic B 남은 2 Task = B-4 (원가/차트) + B-6 (Playwright E2E CI).
-- Epic: **Phase 2 Epic B (운영 품질 Hardening)** — Task B-5 (코드 품질 sweep: shared barrel + server-only 경계) 완료. 다음: **B-4** (원가/차트, 🟢 독립) → **B-6** (E2E CI, Supabase 테스트 환경 선결 필요).
-- 상태: **B-5 완결 = 이번 세션(2026-04-22) 2 커밋 예상** (코드 + 문서). vitest 507 유지 (기능 변화 0), build 15 routes 유지, 독립 리뷰 2 병렬 (code Ship + security Ship) 후 defense-in-depth Fix 1건 반영 (barrel 에 `import "server-only"` 락 + 경계 주석). A-5b (사이트 embed) 는 Dairect 5개 사이트 개발 완료 후 이월 유지.
-- ⚠️ **차단**: 없음. B-4 바로 진행 가능 / B-6 는 Supabase 테스트 환경 결정 선행 필요 / 각 Task 별 Plan→Approve→Build 엄격 준수.
+- Phase: **2 Epic A 완결 + Epic B 5/6 Task 완료** (A-1~A-5a + B-1 + B-2 + B-3 + B-5 + B-4). env 분리 + CI 현대화 + barrel refactor + 원가/차트 반영. Epic B 남은 1 Task = **B-6 (Playwright E2E CI)**.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening)** — Task B-4 (원가 환산 + 일별 차트) 완료. 다음: **B-6** (E2E CI, Supabase 테스트 환경 선결 필요).
+- 상태: **B-4 완결 = 이번 세션(2026-04-24) 2 커밋 예상** (코드 + 문서). Recharts 3.8.1 설치, `bot_stats_daily` RPC 신규 (Asia/Seoul day bins), 앱 레이어 `computeUsdCents` (단가 변경 시 마이그 회피), `/bots/[slug]` 6번째 KPI (원가) + 이중축 차트 (bar: 메시지, line: 원가). vitest 507 → **540** (+33), build 15 routes 유지, 독립 리뷰 2 병렬 (code Ship as-is + security Ship) 후 Fix 3건 반영 (SQL 주석 인덱스 정확성 / 차트 delay 시각 순서 / tooltip 단가 노출 🟡 대외비).
+- ⚠️ **차단**: 없음. **B-6 는 Supabase 테스트 환경 결정 선행 필요** (별도 설계 세션 가치) / 각 Task 별 Plan→Approve→Build 엄격 준수.
 
 ## 완료된 Epic
 
@@ -2483,9 +2483,86 @@ _수정_
 
 ---
 
+---
+
+## 이번 세션 (2026-04-24) — Task B-4: 원가 환산 + 일별 차트
+
+Epic B 5/6 Task. Recharts 3.8.1 + `bot_stats_daily` RPC + 앱 레이어 `computeUsdCents` + 6번째 KPI (원가) + 이중축 차트. 리뷰 Fix 3건 반영. 스펙 수정 판단 1건 (RPC 내부 vs 앱 레이어).
+
+### 흐름
+
+1. **Plan + 결정 포인트 6건 비교 (20분)** — 원가 모델(A/B/C) / 차트 lib(Recharts/Chart.js/Tremor/visx) / 차트 범위(14d 고정 vs 기간 동기화 vs 2차트) / 마이그 구조(2 RPC vs 1 RPC) / 단가 저장(하드코딩 vs env vs DB) / **usd_cents 계산 위치** (RPC 내부 vs 앱 레이어 — 원 스펙 수정 제안). 타임존 Asia/Seoul + Recharts 설치 선결 조건 체크리스트 포함 → Jayden 전체 승인.
+
+2. **스펙 수정 결정 — RPC 는 raw tokens 만, 원가는 앱 계산** — phase-2-plan §B-4 원문은 "RPC 확장 `usd_cents bigint`" 였으나 Claude 단가 변경 시 마이그레이션 회피 목적으로 앱 레이어 계산 채택. `src/core/pricing/claude-rates.ts` 단일 수정 지점.
+
+3. **Build (~1h 45분)** —
+   - _신규 3_: `supabase/migrations/0015_create_bot_stats_daily_rpc.sql` (Asia/Seoul day bins, security invoker + search_path='') / `src/core/pricing/claude-rates.ts` (Haiku 4.5 blended $3.50/1M 하드코딩 + Phase 3 env 이관 Backlog) / `src/app/bots/[slug]/daily-chart.tsx` (Recharts `ComposedChart` bar+line 이중축 + 디자인 시스템 v2 + `EmptyChart` + 커스텀 `DailyTooltipProps`)
+   - _수정 5_: `src/core/db/types.ts` (RPC 시그니처 추가) / `src/app/bots/[slug]/stats-util.ts` (7 신규 export + `DailyChartPoint` 타입) / `src/app/bots/[slug]/stats-section.tsx` (`totalUsdCents` prop + `formatter` prop + 그리드 5→6 lg:grid-cols-6) / `src/app/bots/[slug]/page.tsx` (2 RPC `Promise.all` + 차트 배치) / `src/app/bots/[slug]/stats-util.test.ts` (+34 테스트)
+   - _설치_: `recharts 3.8.1` (pnpm, Turbopack 호환 확인 완료)
+
+4. **검증** —
+   - typecheck ✅ (초기 Recharts 3.x `TooltipProps` 타입 이슈 → element form 우회로 해결)
+   - prettier ✅ / lint 3 warnings baseline (무관)
+   - **vitest 507 → 540 (+33)**: rangeToChartSince / parseBotStatsDaily / computeUsdCents / koreanDayLabel / enumerateKoreanDays / aggregateDailyWithCost / formatUsdCents 각 3~6 케이스 (반올림 엣지 / 월 경계 / KST 자정 경계 / since>now 역전)
+   - build ✅ (15 routes 유지, Recharts + Turbopack 호환)
+   - Supabase `apply_migration` 성공 / `get_advisors` 신규 이슈 0 (기존 WARN/INFO 만) / RPC smoke `bot_stats_daily('chatsio bot', 14d)` → `[]` 반환 (정상, 14d 내 메시지 없음)
+
+5. **독립 리뷰 2 병렬 (code + security)** —
+   - **code-reviewer: Ship as-is** (CRITICAL/HIGH 0). MEDIUM-1 SQL 주석 인덱스 명세 오류 / LOW 3건 / INFO 2건.
+   - **security-reviewer: Ship** (CRITICAL/HIGH 0). LOW 3건 모두 Phase 3 이관 / INFO-1 tooltip 단가 노출 🟡 대외비 고려 / INFO-2 esbuild dev 취약점.
+
+6. **Fix 3건 반영 (비용 0 + 리스크 0)** —
+   1. SQL 주석 인덱스 명세 수정 (0015: 실 인덱스는 단일 컬럼 2개, Phase 3 복합 인덱스 Backlog 명시)
+   2. DailyChart 애니메이션 delay 280→240ms (시각 순서 개선, 기본 정보 섹션과 겹침 해소)
+   3. tooltip 단가 문구에서 "Claude Haiku 4.5 blended 단가($3.50/1M) 기준" → "토큰 기반 혼합 평균 단가 근사치" (🟡 대외비 — 2 지점)
+
+7. **문서 갱신** — learnings.md +2 (RPC vs 앱 레이어 원가 / Recharts 3.x TooltipProps + Asia/Seoul 일관) + PROGRESS.md 현재 위치 + 세션 기록.
+
+### 주요 결정 / 교훈 (learnings.md +2)
+
+1. **phase-2-plan §B-4 원 스펙 수정 판단 — RPC 내부 계산 (원 스펙) → 앱 레이어 계산 (수정)**: 단가 변경 시 마이그레이션 회피. 스펙 문구보다 운영 편의성 상위. Plan 단계에서 결정 포인트 6건 중 하나로 명시 + Jayden 승인. 규칙 ⭐: "**스펙 문서는 가이드, 절대 규율 아님**" / "**데이터 레이어 = raw 수치, 비즈니스 로직 = 앱 레이어**" / "**마이그 없이 변경 가능한 값 (단가/정책) ≠ 마이그 필요한 값 (스키마/제약)**".
+
+2. **Recharts 3.x `TooltipProps` 런타임 속성 미노출 → element form 우회**: Recharts 3.8.1 의 `TooltipProps` 가 `active`/`payload`/`label` 을 공개 타입에 노출하지 않음. 해결 = `content={<DailyTooltip />}` element form + 커스텀 interface (any 없음). 규칙 ⭐: "**외부 라이브러리 런타임 주입 속성은 공개 타입에 없을 수 있음 → 로컬 interface 로 받기**" / "**cloneElement/HOC/render prop 기반 라이브러리는 element form 우선**".
+
+3. **Asia/Seoul 일별 집계 SQL + JS 양쪽 동일 포맷**: SQL `date_trunc + to_char` ↔ JS `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' })` → 동일 `YYYY-MM-DD` → Map 매칭. KR 사용자 직관 (UTC 자정 근처 메시지 분리 방지).
+
+### 신규 3 / 수정 5 / 설치 1
+
+- _신규_: `supabase/migrations/0015_create_bot_stats_daily_rpc.sql` / `src/core/pricing/claude-rates.ts` / `src/app/bots/[slug]/daily-chart.tsx`
+- _수정_: `src/core/db/types.ts` / `src/app/bots/[slug]/stats-util.ts` / `src/app/bots/[slug]/stats-section.tsx` / `src/app/bots/[slug]/page.tsx` / `src/app/bots/[slug]/stats-util.test.ts`
+- _설치_: `recharts 3.8.1` (+ 34 transitive)
+- _문서_: `docs/learnings.md` +2 / `PROGRESS.md`
+
+### 검증 (최종)
+
+- typecheck ✅ / lint 3 baseline / prettier ✅ / **vitest 540** (507→540, +33) / build ✅ (15 routes 유지)
+- Supabase apply_migration 성공 / advisors 신규 이슈 0 / RPC smoke 빈 배열 정상
+- 리뷰 2 병렬 → code Ship as-is + security Ship / Fix 3건 반영 후 재검증 clean
+
+### Backlog (B-4 이월 / 다음 세션 후보)
+
+1. **Task B-6** Playwright E2E CI job — Supabase 테스트 환경 결정 선행 (별도 설계 세션). 🟡, ~1.5h.
+2. **단가 env 이관** — `CLAUDE_USD_PER_1M_TOKENS` Vercel env (Phase 3). 이관 시 tooltip 에서 구체 수치 완전 제거.
+3. **`messages.input_tokens` / `output_tokens` 분리 마이그레이션** — 실 단가 정확도 ±5% 이내 (Phase 3). 현 ±15~20% 근사치 해소.
+4. **복합 인덱스 `(conversation_id, created_at)`** — 대용량 시 `bot_stats` / `bot_stats_daily` 성능 개선 (Phase 3).
+5. **bot-stats-limiter rate limit** — `?range=` 고빈도 호출 방어 (sec LOW, Phase 3).
+6. **CSP 기본 정책** — Recharts SVG 고려한 `script-src 'self'` + `img-src data:` (ADR-009 Open Q 선결).
+7. **HSTS 명시 헤더** — `next.config.ts` 에 `Strict-Transport-Security` (Vercel 자동 처리 백업).
+8. **연말 경계 차트 tick 연도 표시** — 90일 범위가 연을 넘을 때 `01/01` 구분 (code INFO).
+9. **factory.ts ↔ claude-rates.ts 모델 동기화 경보** — 모델 상수 co-locate 검토 (code INFO).
+10. **esbuild (drizzle-kit) 업데이트** — dev 전용 취약점 (sec INFO).
+
+### 마지막 업데이트
+
+- 날짜: 2026-04-24 (KST) — Epic B Task B-4 완결
+- 브랜치: `main`
+- 차단 요소: 없음 (B-6 는 Supabase 테스트 환경 결정 선행)
+
+---
+
 ## 마지막 업데이트
 
-- 날짜: 2026-04-21 Ⅵ (Epic B Task B-3 완결 — soft delete + 휴지통 + 복구/영구 삭제 분리 + 조회 필터 13곳 + RLS 9/9 + 리뷰 Fix 3건, **Phase 2 Epic B 3/6 진행**, 다음: B-4 원가/차트 또는 B-6 Playwright CI)
+- 날짜: 2026-04-24 (Epic B Task B-4 완결 — 원가 환산 + 일별 차트 + Recharts 3.8.1 + 스펙 수정 판단 + 리뷰 Fix 3건, **Phase 2 Epic B 5/6 진행**, 다음: B-6 Playwright CI)
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
 - 커밋: `5d14476` (B-2 audit) · `09ea01d` (B-1 save) · `bd38558` (B-1 feat)
