@@ -215,6 +215,62 @@ describe("matchAllowedDomain", () => {
     ).toBe(false);
   });
 
+  it("PSL effective TLD 와일드카드 차단 — 매칭 시점 이중 방어 (Task β-4 잔여 ①)", () => {
+    // 레거시 데이터·테스트 직접 호출 등으로 isValidOriginEntry 우회 시에도
+    // matchWildcard 가 한 번 더 차단. ICANN ccSLD + Private PSL 모두 검사.
+    expect(
+      matchAllowedDomain("https://attacker.co.uk", ["https://*.co.uk"]),
+    ).toBe(false);
+    expect(
+      matchAllowedDomain("https://attacker.com.br", ["https://*.com.br"]),
+    ).toBe(false);
+    expect(
+      matchAllowedDomain("https://my-bucket.s3.amazonaws.com", [
+        "https://*.s3.amazonaws.com",
+      ]),
+    ).toBe(false);
+    expect(
+      matchAllowedDomain("https://my-app.vercel.app", ["https://*.vercel.app"]),
+    ).toBe(false);
+    expect(
+      matchAllowedDomain("https://my-page.github.io", ["https://*.github.io"]),
+    ).toBe(false);
+  });
+
+  it("PSL 위 1단계 와일드카드는 매칭 정상 동작", () => {
+    // PSL 자체는 차단하되, 정상 도메인 와일드카드는 영향 없음
+    expect(
+      matchAllowedDomain("https://api.example.co.uk", [
+        "https://*.example.co.uk",
+      ]),
+    ).toBe(true);
+    expect(
+      matchAllowedDomain("https://www.my-bucket.s3.amazonaws.com", [
+        "https://*.my-bucket.s3.amazonaws.com",
+      ]),
+    ).toBe(true);
+  });
+
+  it("userinfo (@) 주입 entry 매칭 시점 이중 방어 (sec H-1 Fix)", () => {
+    // DB 직접 UPDATE / 레거시 데이터로 schema 우회한 entry 도 매칭 시점 차단.
+    // entry 자체에 `@` 가 있으면 wildcard / non-wildcard 무관 거부.
+    expect(
+      matchAllowedDomain("https://sub.evil.com", [
+        "https://*.legit.com@evil.com",
+      ]),
+    ).toBe(false);
+    expect(
+      matchAllowedDomain("https://evil.com", ["https://legit.com@evil.com"]),
+    ).toBe(false);
+    // 정상 entry 와 섞여도 잘못된 entry 만 skip, 정상 entry 는 동작
+    expect(
+      matchAllowedDomain("https://example.com", [
+        "https://attacker.com@evil.com",
+        "https://example.com",
+      ]),
+    ).toBe(true);
+  });
+
   it("userinfo(@) 공격 — allowedDomains 에 있어도 실 host 는 evil.com 이라 차단", () => {
     expect(
       matchAllowedDomain("https://example.com@evil.com", [
@@ -319,9 +375,38 @@ describe("isValidOriginEntry", () => {
     expect(isValidOriginEntry("https://[::1]")).toBe(true);
   });
 
-  it("ccSLD 와일드카드는 통과 (β-4 한계, PSL 도입 Backlog)", () => {
-    // 주의: 정책상 의식적 통과. PSL (`tldts`) 도입 시 차단 예정.
-    expect(isValidOriginEntry("https://*.co.uk")).toBe(true);
-    expect(isValidOriginEntry("https://*.com.au")).toBe(true);
+  it("PSL effective TLD 와일드카드 차단 — ccSLD (`*.co.uk`, `*.com.au`)", () => {
+    // ICANN PSL 등록 effective TLD — 모든 ccSLD 도메인 허용 차단 (Task β-4 잔여 ①)
+    expect(isValidOriginEntry("https://*.co.uk")).toBe(false);
+    expect(isValidOriginEntry("https://*.com.au")).toBe(false);
+    expect(isValidOriginEntry("https://*.co.kr")).toBe(false);
+    expect(isValidOriginEntry("https://*.com.br")).toBe(false);
+  });
+
+  it("PSL effective TLD 와일드카드 차단 — Private PSL (SaaS 호스팅)", () => {
+    // Private PSL — 임의 SaaS 호스팅에 위젯 무차별 허용 차단
+    expect(isValidOriginEntry("https://*.s3.amazonaws.com")).toBe(false);
+    expect(isValidOriginEntry("https://*.vercel.app")).toBe(false);
+    expect(isValidOriginEntry("https://*.github.io")).toBe(false);
+    expect(isValidOriginEntry("https://*.appspot.com")).toBe(false);
+  });
+
+  it("PSL 위 1단계 와일드카드는 정상 통과 — `*.example.co.uk`, `*.my-bucket.s3.amazonaws.com`", () => {
+    // PSL 자체는 차단하지만, PSL 위에 한 레이블 추가된 정상 도메인은 통과
+    expect(isValidOriginEntry("https://*.example.co.uk")).toBe(true);
+    expect(isValidOriginEntry("https://*.my-bucket.s3.amazonaws.com")).toBe(
+      true,
+    );
+    expect(isValidOriginEntry("https://*.my-app.vercel.app")).toBe(true);
+  });
+
+  it("userinfo (@) 주입 차단 — wildcard / non-wildcard 모두 (sec H-1 Fix)", () => {
+    // wildcard base 가 `legit.com@evil.com` 으로 통과되면 PSL/IP 검사가 우회됨.
+    // entry 진입 시점에 `@` 차단 → 모든 분기에서 거부.
+    expect(isValidOriginEntry("https://*.legit.com@evil.com")).toBe(false);
+    expect(isValidOriginEntry("https://legit.com@evil.com")).toBe(false);
+    expect(isValidOriginEntry("https://user:pass@example.com")).toBe(false);
+    // `@` 가 path / query 에 있어도 entry 형태로는 비정상 → 차단
+    expect(isValidOriginEntry("https://example.com/@user")).toBe(false);
   });
 });

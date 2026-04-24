@@ -12,7 +12,36 @@
  * server-only 불필요 — 순수 함수 (네트워크·DB 접근 없음). 필요 시 클라이언트에서도 import 가능.
  */
 
+import { parse as parseTld } from "tldts";
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/**
+ * baseHost 가 Public Suffix List 의 effective TLD 자체인지 판정.
+ *
+ * 일치하면 와일드카드(`https://*.<baseHost>`) 가 effective TLD 전체를 허용하는 셈
+ * → 사실상 allow-all 과 동일한 위험. 양 검증 지점에서 차단한다.
+ *
+ * ICANN + Private 도메인 모두 검사:
+ *   - "com", "co.uk" → ICANN PSL → true
+ *   - "s3.amazonaws.com", "vercel.app", "github.io" → Private PSL → true
+ *   - "example.com", "api.example.co.uk" → 정상 도메인 → false
+ *
+ * 판정 기준: `domain === null` (PSL 자체이면 domain 추출 불가) 또는
+ * `publicSuffix === baseHost` (정확 일치).
+ */
+function isPublicSuffixOnly(baseHost: string): boolean {
+  const result = parseTld(baseHost, {
+    allowPrivateDomains: true,
+    allowIcannDomains: true,
+  });
+  // tldts IResult 의 domain / publicSuffix 는 string | null | undefined.
+  // == null 로 null + undefined 동시 처리 (코드 리뷰 H-1).
+  // 파싱 불가 / publicSuffix 식별 불가 시 안전 측 = 차단 (PSL 자체로 간주).
+  if (result.domain == null) return true;
+  if (result.publicSuffix == null) return true;
+  return result.publicSuffix === baseHost;
+}
 
 // `i` 플래그 유지 사유: entry 가 `HTTPS://...` 대문자 스킴으로 저장된 레거시·수기
 // 입력을 허용한다. 정규화 레이어(`normalizeOrigin`)와 역할 일부 중복이지만
@@ -29,16 +58,21 @@ const WILDCARD_ENTRY_PATTERN = /^(https?):\/\/\*\.(.+)$/i;
  *   - 빈 문자열 / 스킴 누락 (`example.com`)
  *   - http + 외부 호스트 (로컬만 예외 — `normalizeOrigin` 정책)
  *   - `*.com` 등 TLD 단독 와일드카드 (모든 .com 허용 위험)
+ *   - `*.co.uk`, `*.s3.amazonaws.com`, `*.vercel.app` 등 PSL effective TLD 와일드카드
+ *     (PSL `tldts` 도입 — ICANN + Private 모두 차단)
  *   - `*.*.example.com` 다중 와일드카드
  *   - `https://192.168.1.1` IP-style
  *   - `*.192.168` 숫자 레이블만 와일드카드
- *
- * 한계 (β-4 범위 밖):
- *   - `*.co.uk` 같은 ccSLD 와일드카드는 통과 (PSL `tldts` 도입 시 차단 — Backlog)
  */
 export function isValidOriginEntry(entry: string): boolean {
   const trimmed = entry.trim();
   if (trimmed.length === 0) return false;
+
+  // userinfo (@) 주입 차단 — `https://*.legit.com@evil.com` 형태 입력 시 URL parser 가
+  // `legit.com` 을 username 으로 해석해 hostname 이 evil.com 이 됨. 와일드카드 base 가
+  // userinfo + host 결합 문자열로 평가되면서 PSL/IP/multi-label 검사 우회 가능.
+  // 정상 origin 에는 `@` 가 절대 출현하지 않으므로 entry 자체에서 차단. (sec H-1 Fix)
+  if (trimmed.includes("@")) return false;
 
   const wildcardMatch = WILDCARD_ENTRY_PATTERN.exec(trimmed);
   if (wildcardMatch) {
@@ -47,6 +81,7 @@ export function isValidOriginEntry(entry: string): boolean {
     if (baseHostRaw.includes("*")) return false;
     if (!baseHostRaw.replace(/\.$/, "").includes(".")) return false;
     if (/^\d+(\.\d+)*\.?$/.test(baseHostRaw)) return false;
+    if (isPublicSuffixOnly(baseHostRaw.replace(/\.$/, ""))) return false;
     return normalizeOrigin(`${scheme}://${baseHostRaw}`) !== null;
   }
 
@@ -140,6 +175,9 @@ export function matchAllowedDomain(
 function matchEntry(normalizedOrigin: string, rawEntry: string): boolean {
   const entry = rawEntry.trim();
   if (entry.length === 0) return false;
+  // userinfo (@) 주입 차단 — 매칭 시점 이중 방어. DB 직접 UPDATE / migration /
+  // 레거시 데이터 등 isValidOriginEntry 우회 경로에서 들어온 entry 도 막는다.
+  if (entry.includes("@")) return false;
 
   const wildcardMatch = WILDCARD_ENTRY_PATTERN.exec(entry);
   if (wildcardMatch) {
@@ -162,16 +200,18 @@ function matchWildcard(
   // TLD 단독 와일드카드 방어 — `https://*.com` 을 등록하면 모든 `.com` 도메인이
   // 허용되어 사실상 allow-all 과 동일한 효과가 난다. base 에 최소 1개의 점을
   // 요구해 "2+ 레이블" 을 강제한다. (security HIGH 반영, OWASP A01)
-  //
-  // 한계: `*.co.uk` 같은 ccSLD 와일드카드는 여전히 "모든 .co.uk" 를 허용한다.
-  // 완전 방어는 Public Suffix List(`tldts` 등) 가 필요하나 MVP 범위를 벗어남.
-  // Phase 2 편집 UI 배포 시 schema 레벨 검증과 함께 강화 예정 (backlog).
   if (!baseHostRaw.replace(/\.$/, "").includes(".")) return false;
 
   // IP-style base 차단 — `*.192.168` / `*.192.168.1.1` 등 숫자 레이블로만 구성된
   // base 는 사실상 IP 대역 와일드카드로 오용될 수 있어 거부. 정상 도메인은 최소
   // 하나의 비숫자 레이블을 가진다 (예: example.com 의 `example`). (sec 재리뷰 LOW)
   if (/^\d+(\.\d+)*\.?$/.test(baseHostRaw)) return false;
+
+  // PSL effective TLD 와일드카드 차단 — `*.co.uk` / `*.s3.amazonaws.com` /
+  // `*.vercel.app` 등은 effective TLD 전체를 허용하는 셈이라 사실상 allow-all.
+  // ICANN + Private PSL 모두 검사. 저장 시점(`isValidOriginEntry`) 과 매칭 시점
+  // 이중 방어 — 레거시 entry / 테스트 직접 호출 우회 차단. (Task β-4 잔여 ①)
+  if (isPublicSuffixOnly(baseHostRaw.replace(/\.$/, ""))) return false;
 
   const baseOrigin = normalizeOrigin(
     `${scheme.toLowerCase()}://${baseHostRaw}`,

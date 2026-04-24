@@ -4,11 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL** — A-1~A-5a + B-1~B-6 + β-1~β-4. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (β-4 본체 5건 + 잔여 ① PSL `tldts` working tree 보류 / 잔여 ② Upstash refund + ③ i18n 미진입). `withAllowedOrigin` HOC + Retry-After 표준화 + `allowedDomains` PSL effective TLD 차단 + userinfo (@) 주입 차단.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 핵심 그룹 모두 해소. 외부 신호 대기 가능 상태 도달. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기.
-- 상태: **이번 세션(2026-04-24 Ⅵ) Task β-4 잔여 ① PSL `tldts` Build + 리뷰·반영 완료, ship 승인 대기**. 5 files 변경 (working tree 미커밋). 독립 리뷰 2 (code Fix-then-ship + security Fix-then-ship) → HIGH 2건 반영 (code H-1 nullable 처리 / sec H-1 @ userinfo 주입 차단 — PSL 강화 작업 중 인접 보안 결함 발견). vitest 491 → **587/587** (+96 / 본 세션 +13 + 직전 세션 누적 분), typecheck/lint/format/build 모두 clean.
-- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 부분 ✅ (β-4 본체 5건 + 잔여 ① working tree). β-4 잔여 = PSL ⏳ (ship 승인 대기) / Upstash refund / i18n.
-- ⚠️ **차단**: 없음. 본 세션 코드 변경 working tree 보류 (ship 승인 대기). 다음 세션 시작 시 (1) ship 승인 → 커밋 → 다음 잔여 진입, 또는 (2) ship 후 외부 신호 평가 단계 진입.
+- Phase: **2 Epic B 완결 (6/6) + 백로그 β-1 + β-2 + β-3a + β-3b + β-4 + β-4 잔여 ① PSL ✅** — A-1~A-5a + B-1~B-6 + β-1~β-4 + 잔여 ①. **백로그 우선 1·2·3 ✅ + 우선 4 부분 ✅** (β-4 본체 5건 + 잔여 ① PSL `tldts` Ship ✅ / 잔여 ② Upstash refund 진입 예정 / ③ i18n Phase 3 분리). `withAllowedOrigin` HOC + Retry-After 표준화 + `allowedDomains` PSL effective TLD 차단 + userinfo (@) 주입 차단.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉 + 백로그 핵심 그룹 모두 해소 + PSL 강화까지 완결. 다음: β-4 잔여 ② Upstash refund (본 세션 Ⅶ 진입) → 완결 시 외부 신호 평가 단계 도달.
+- 상태: **이번 세션(2026-04-24 Ⅶ) Task β-4 잔여 ① Ship 완료 + 잔여 ② Upstash refund 진입**. 패키지 3 (Ship A + Plan/Build B) 구조. Ship 완료: 5 files 커밋 (PSL `tldts` 7.0.28 + `@` 차단 + 회귀 +13). vitest 587/587 / tsc clean / lint 0 errors / build 14 routes clean.
+- 확인: 백로그 진행률 = 우선 1·2·3 ✅ / 우선 4 = β-4 본체 + 잔여 ① ✅. β-4 잔여 = ② Upstash refund (본 세션 Ⅶ Plan 예정) / ③ i18n (Phase 3).
+- ⚠️ **차단**: 없음. 잔여 ② 본 세션 Plan→Approve→Build 진행 중.
 
 ## 완료된 Epic
 

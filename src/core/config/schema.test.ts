@@ -106,13 +106,15 @@ describe("dariConfigSchema", () => {
       }
     });
 
-    it("TLD 단독 / IP-style / 다중 와일드카드 거부", () => {
+    it("TLD 단독 / IP-style / 다중 와일드카드 / userinfo 주입 거부", () => {
       for (const entry of [
         "https://*.com",
         "https://*.kr",
         "https://*.*.example.com",
         "https://192.168.1.1",
         "https://*.192.168",
+        "https://*.legit.com@evil.com", // sec H-1 — userinfo 주입
+        "https://user:pass@example.com", // sec H-1 — credentials 포함
       ]) {
         expect(() =>
           dariConfigSchema.parse({
@@ -123,11 +125,32 @@ describe("dariConfigSchema", () => {
       }
     });
 
-    it("ccSLD 와일드카드는 통과 (β-4 한계, PSL 도입 Backlog)", () => {
-      // 의식적으로 통과 — Phase 2 backlog (`tldts` 도입 시 차단)
+    it("PSL effective TLD 와일드카드 거부 — ccSLD + Private (Task β-4 잔여 ① PSL `tldts` 도입)", () => {
+      // ICANN ccSLD + Private PSL — schema refine 자동 적용 (isValidOriginEntry 호출)
+      for (const entry of [
+        "https://*.co.uk",
+        "https://*.com.au",
+        "https://*.co.kr",
+        "https://*.s3.amazonaws.com",
+        "https://*.vercel.app",
+        "https://*.github.io",
+      ]) {
+        expect(() =>
+          dariConfigSchema.parse({
+            ...minimalValidInput,
+            allowedDomains: [entry],
+          }),
+        ).toThrow();
+      }
+    });
+
+    it("PSL 위 1단계 와일드카드는 정상 통과 — `*.example.co.uk`, `*.my-app.vercel.app`", () => {
       const result = dariConfigSchema.parse({
         ...minimalValidInput,
-        allowedDomains: ["https://*.co.uk", "https://*.com.au"],
+        allowedDomains: [
+          "https://*.example.co.uk",
+          "https://*.my-app.vercel.app",
+        ],
       });
       expect(result.allowedDomains).toHaveLength(2);
     });
