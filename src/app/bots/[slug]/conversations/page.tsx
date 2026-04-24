@@ -12,7 +12,7 @@ import {
   CONVERSATION_STATUS_LABEL,
   visitorLabelOf,
 } from "@/shared/conversations";
-import { formatRelative } from "@/shared/time";
+import { formatRelative } from "@/shared/time/relative";
 
 import { isValidSlug } from "../../new/slug-util";
 import {

@@ -1,5 +1,9 @@
 import Link from "next/link";
 
+// 리스트 아이템 순차 등장: 40ms 간격 × 최대 10번째(400ms)에서 cap → 이후 동일 delay
+const ANIMATION_STAGGER_MS = 40;
+const ANIMATION_MAX_STAGGER_ITEMS = 10;
+
 export interface ConversationListItem {
   id: string;
   preview: string;
@@ -24,7 +28,7 @@ export function ConversationsList({ botSlug, items }: Props) {
           key={item.id}
           className="animate-in fade-in slide-in-from-bottom-2 duration-500"
           style={{
-            animationDelay: `${Math.min(idx, 10) * 40}ms`,
+            animationDelay: `${Math.min(idx, ANIMATION_MAX_STAGGER_ITEMS) * ANIMATION_STAGGER_MS}ms`,
             animationFillMode: "both",
           }}
         >

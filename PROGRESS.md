@@ -4,10 +4,11 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B 완결 (6/6)** — A-1~A-5a + B-1 + B-2 + B-3 + B-4 + B-5 + B-6. env 분리 + CI 현대화 + barrel + 원가/차트 + **Playwright E2E CI (로컬 Supabase Docker)**.
-- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — Phase 2 Epic 전환 신호 평가 필요.
-- 상태: **B-6 완결 = 이번 세션(2026-04-24 Ⅱ) 2 커밋 예상**. 경로 C (로컬 Supabase Docker on CI) 로 추가 비용 0. `supabase/setup-cli@v1` + `supabase start` + `.env.local` 동적 생성 + Gemini 의존 spec 2개 `E2E_SKIP_EXTERNAL_API=true` skip. 독립 리뷰 2 병렬 (code Fix-then-ship HIGH 1 + security Ship conditional MEDIUM 3/LOW 3) 후 **Fix 7건 반영**: jq 파싱 → env 파싱 (HIGH) / timeout 20→25분 / site_url 3000→4000 / minimum_password_length 6→8 / api_url 포트 명시 / .gitignore volumes / testing-accounts 체크리스트.
-- ⚠️ **차단**: 없음. Epic C/D 결정은 실사용자/SI 계약 등 외부 신호 필요 (phase-2-plan §B-6 다음 Epic 표).
+- Phase: **2 Epic B 완결 (6/6) + Task β-1 (1-8 후속 정돈)** — A-1~A-5a + B-1~B-6 + β-1. env 분리 + CI 현대화 + barrel + 원가/차트 + Playwright E2E CI + animate cap 상수화.
+- Epic: **Phase 2 Epic B (운영 품질 Hardening) 완료** 🎉. 다음 Epic: C (멀티테넌트) 또는 D (카카오톡) — 둘 다 외부 신호/자원 대기. 내부 가능 경로는 **Phase 2 백로그 청소 (β 시리즈)** 만.
+- 상태: **이번 세션(2026-04-24 Ⅲ) 1 커밋 예상** — Task β-1 (conversations-list.tsx animate cap 상수화 + conversations/page.tsx import 경로 B-5 규칙 일관성) + PROGRESS 다음 세션 재정의 + phase-2-plan §8 Epic 전환 결정 신설. 독립 리뷰 2 병렬 **둘 다 Ship as-is** (code MEDIUM 1건 주석 선반영 / security 권장 0건).
+- 확인: **`formatRelative` shared util 은 이미 승격 완료** — PROGRESS 백로그 1건 자동 해소 (탐색 결과로 발견).
+- ⚠️ **차단**: 없음. 경로 α (백로그) 는 즉시 진입 가능. 경로 β(Epic D)/γ(Epic C) 는 Kakao Business 계정 + 실사용자 신호 대기.
 
 ## 완료된 Epic
 
@@ -1780,52 +1781,91 @@ Epic 1-6 위젯 런타임 완결 후, Task 1-6-c RAG 연결의 선행 조건인 
 
 ## 다음 세션 할 일
 
-### 🎯 경로 선택
+> **맥락**: Phase 2 Epic A (위젯) + Epic B (운영 품질) 전부 완결. 남은 Phase 2 후보는 Epic C (멀티테넌트) / Epic D (카카오톡) — 둘 다 **외부 신호** 또는 **외부 서비스 계정** 선결 필요. 현시점 Jayden 가용 자원만으로 즉시 진입 가능한 경로는 **내부 백로그 청소 (α)** 가 유일.
 
-**경로 α (권장): Task A-4 — 스트리밍 전환 (Vercel AI SDK Data Stream Protocol)**
+### 🎯 경로 선택 (Epic B 완결 후 재정의, 2026-04-24)
 
-- `@ai-sdk/anthropic` + `ai` 의존성 추가
-- `/api/chat/[botId]` → `streamText()` + `.toUIMessageStreamResponse()` (내부 Anthropic `messages.stream()`)
-- `widget/chat.ts` → vanilla `fetch` + `ReadableStream` + `TransformStream` 으로 SSE 포맷 수동 파싱 (useChat 훅은 React 전용)
-- 응답 헤더: `Content-Type: text/event-stream` + `x-vercel-ai-ui-message-stream: v1`
-- **Vercel 복구 독립** — 로컬 검증 + 커밋. 복구 후 자동 배포 반영.
-- 소요: 1~2일 (의존성 도입 + 서버·위젯 양쪽 전환 + 회귀 테스트)
+**경로 α (권장, 내부 만으로 즉시 가능): Phase 2 백로그 청소 — "Epic B 부채 + Phase 1 잔존"**
 
-**경로 β: Jayden Vercel 복구 → Task A-5 Dairect 5개 배포**
+- 총 15건 내외 작은 작업을 **3~4 Task** 로 그룹화 (우선순위 표 아래 §Phase 2 백로그 참조)
+- 각 Task 60~120m · 독립 리뷰 2 병렬 (code+security) 포함
+- Epic C/D 진입 대기 기간 동안 **기반 견고화 + 리뷰 부채 청산** 효과
+- 세션당 1 Task 기준 약 3~4 세션 분량
 
-- 선결: Vercel Dashboard → 최신 Deployment 상태 확인 + Redeploy (또는 빌드 로그 공유)
-- Chatsio / OnboardKit / SellKit / InterviewGenie / PayLoom Config 작성 + embed smoke
-- 소요: Vercel 복구 + 0.5~1일 (Config 5종)
+**경로 β (외부 차단 중): Epic D — 카카오톡 채널 연동 (PRD Task 2-1, 2주)**
 
-**경로 γ (보조): Phase 1 잔존 백로그 청소**
+- 🚫 **선결 미충족 (2026-04-24 Jayden 확인)**: Kakao Business 계정 미보유 → 채널 ID + API 키 발급 불가
+- 해소 경로: Jayden 이 Kakao 비즈니스 채널 개설 + API 키 발급 → 그 후 Task D-1 Plan 진입
+- 해소 시 우선순위 **α 다음**
 
-- `storagePath` 로그 redact 통합 (1-7-d sec LOW-2)
-- orphan Storage 수거 스크립트 (1-7-c sec MEDIUM-3)
-- `formatRelative` shared util 승격 / conversations-list.tsx animate cap 상수화 (1-8-a 후속)
-- 소요: 60~120m
+**경로 γ (외부 차단 중): Epic C — 멀티테넌트 기초 (PRD Task 2-3 일부, 3~4주)**
 
-**경로 권장 이유**: α 는 Vercel 복구와 독립 + Epic A 의 기술 깊이 최대(AI SDK 도입). α → Vercel 복구(병렬) → β 순서가 총 소요 최소.
+- 🚫 **선결 미충족**: 실사용자 N명 미확보 → 멀티테넌트 착수 시 YAGNI / overkill 위험 (phase-2-plan §2-C)
+- 해소 경로: 실사용자 3~5명 확보 + SaaS 수익 모델 결정 → 그 후 Task C-1 Plan 진입
+- 해소 시점은 **외부 영업/마케팅** 결과에 종속 — Jayden Dari 외부 활동 신호 대기
 
-### 그 외 대기
+**경로 권장 이유**: β/γ 는 둘 다 Jayden 외부 조치 (Kakao 계정 / 실사용자 획득) 선결 → **현 세션 Build 불가**. α 는 내부만으로 완결 가능하며, α 완료 후 Epic C/D 진입 시 기반 정비 상태로 시작 가능.
 
-- **🔴 Vercel 실배포 복구** (Jayden 수동) — `dari-theta.vercel.app` 현재 `DEPLOYMENT_NOT_FOUND`. Dashboard → Deployments → Redeploy 트리거 또는 빌드 로그 공유. A-5 진입 필수 선결.
-- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월) + `NEXT_PUBLIC_WIDGET_CDN_URL` Preview/Production (A-2 권장, default fallback 있어 optional)
-- **iOS 실기기 virtual keyboard smoke** (Task A-5 동반) — device emulation 에서 재현 불가. ADR-009 Open Q #3 실기기 이월.
-- **chat API `origin_not_allowed` → 404 통일** (widget-config enumeration 일관성)
-- **OPTIONS preflight DB 이중 호출 리팩터** (chat + widget-config 동시)
-- **env.ts code M-1** `as ServerEnv` 타입 단언 개선 (ε-backlog)
-- **knowledge-placeholder.tsx dead code 제거** (PR 정리 시점)
-- **`proxy-client.ts` ESLint no-restricted-imports**: proxy 외 import 강제 차단 (~15m)
-- **Task 1-0-b 후속**: Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
-- **Task 1-0-a 후속**: rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
-- **🟡 Task 1-7-c 후속 (sec 이월)**: Storage orphan cleanup 주기 태스크 (MEDIUM-3) / rate limit fail-closed 전환 (LOW-1, 과금 모델 도입 시) / unpdf CVE 모니터링 (INFO-1)
-- **Task 1-8-a 후속 (사소)**: `formatRelative` shared util 승격 (bots/page.tsx 중복 제거) / `conversations-list.tsx` animate cap 상수화 / LATERAL JOIN 최적화 (warn 빈도 임계 도달 시)
+---
+
+### Phase 2 백로그 (경로 α 상세) — 우선순위 4단 그룹화
+
+> 각 항목 독립 커밋 1건 기준. 그룹 단위 Task 로 묶어 Plan→Approve→Build 사이클 적용.
+
+#### 우선 1 (Task 1-8 후속) — 대화 로그 페이지 정돈 ✅ **완결 (2026-04-24 Ⅲ)**
+
+- [x] ~~`formatRelative` shared util 승격~~ — **이미 반영 완료 확인** (`src/shared/time/relative.ts` + `.test.ts` 존재, 3페이지 모두 import 사용 중). 탐색 과정에서 자동 해소 발견.
+- [x] `conversations-list.tsx` animate cap 상수화 — `ANIMATION_STAGGER_MS = 40` + `ANIMATION_MAX_STAGGER_ITEMS = 10` (Task β-1, 2026-04-24)
+- [x] B-5 barrel 규칙 일관성 — `conversations/page.tsx` import 를 `@/shared/time` (barrel) → `@/shared/time/relative` (세부 경로, 단일 심볼) 로 통일 (Task β-1)
+- [ ] LATERAL JOIN 최적화 — **조건부 이월**: warn 빈도 임계 도달 시만. 현재는 모니터링 유지.
+
+#### 우선 2 (Task 1-7 후속 sec 이월, 총 ~90~120m) — 지식 파이프라인 보안 부채
+
+- [ ] `storagePath` 로그 redact 통합 (1-7-d sec LOW-2) — `sensitiveFields` 에 `storagePath` 추가
+- [ ] Storage orphan cleanup 주기 태스크 (1-7-c sec MEDIUM-3) — CRON/Edge Function 스펙 + MVP 구현
+- [ ] rate limit fail-closed 전환 (1-7-c sec LOW-1) — 🟡 **과금 모델 도입 시** 이월 (Epic C 이후 자연 트리거)
+- [ ] unpdf CVE 모니터링 (1-7-c sec INFO-1) — 월 1회 `pnpm audit` 스케줄만 기록
+
+#### 우선 3 (Phase 1 API 정합성, 총 ~60~90m) — 사소 일관성 버그
+
+- [ ] `chat API origin_not_allowed` → 404 통일 (widget-config enumeration 일관성)
+- [ ] OPTIONS preflight DB 이중 호출 리팩터 (chat + widget-config 동시)
+- [ ] `env.ts` code M-1 `as ServerEnv` 타입 단언 개선 (ε-backlog)
+- [ ] `knowledge-placeholder.tsx` dead code 제거 (Task 1-7-a 완결 시 남은 placeholder)
+- [ ] `proxy-client.ts` ESLint `no-restricted-imports` 강제 — proxy 외 import 차단 (~15m)
+
+#### 우선 4 (Task 1-0 후속, 총 ~90~120m) — Rate Limit + Validation 보강
+
+- [ ] Task 1-0-b 후속 — Route Handler wrapper `withAllowedOrigin` + schema allowedDomains 포맷 검증 + ccSLD PSL 차단
+- [ ] Task 1-0-a 후속 — rate limit reset UX 노출 / DariConfig 실패 카운터 복구 / i18n
+
+**백로그 총 소요 추정**: 5~7시간 (3~4 세션 분량). 우선 1·2 먼저 묶어 한 Task 로 진입하는 것 권장 (범위 작고 독립).
+
+---
+
+### 🚫 외부 종속 대기 (외부 신호/자원 확보 시 재평가)
+
+이 섹션의 항목들은 **현 시점 Jayden 외부 조치 필요** → 내부 Build 불가. 해소 시 경로 선택 재평가.
+
+- **🟡 Kakao Business 계정 개설** — Epic D 진입 선결. 채널 ID + API 키 + 월 사용료 정책 확인. Jayden 의사결정 대기.
+- **🟡 실사용자 확보** — Epic C 진입 선결. 최소 3~5명 + 사용 패턴 2~4주 관찰. Jayden Dari 외부 마케팅/영업 신호 대기.
+- **🟡 5개 포트폴리오 사이트 embed + prod smoke (Task A-5b)** — 각 사이트 개발 완료 후 진입. `chatsio` / `findably` / `dairect` / `interviewgenie` / `dari` 5개 사이트 각각 `<head>` 스니펫 + Playwright MCP smoke.
+- **🟡 5개 봇 Config 정교화 (dairect-bot-configs.md §2)** — 사이트 개발과 병렬 일괄 처리 효율. 현재 default config 로 동작은 함.
+- **🟡 iOS 실기기 virtual keyboard smoke (ADR-009 Open Q #3)** — iPhone 실기기 확보 시. device emulation 한계로 영구 이월 가능성.
+- **🟡 Vercel 환경변수 등록** — `NEXT_PUBLIC_SENTRY_ENVIRONMENT` Preview/Production (γ-3 이월) + `NEXT_PUBLIC_WIDGET_CDN_URL` Preview/Production (A-2 권장, default fallback 있어 optional). Jayden Vercel Dashboard 접속 필요.
 
 ## 차단 요소
 
-**없음** — Task 1-8-a 완결, Task 1-8-b 진입 가능.
+**내부 경로 α 는 차단 없음** — 즉시 진입 가능.
+
+**외부 종속 β/γ 는 아래 신호 확보 전 진입 불가**:
+
+- Epic D: Kakao Business 계정 + 채널 + API 키 (Jayden 개설)
+- Epic C: 실사용자 3~5명 + SaaS 수익 모델 결정 (외부 영업 성과)
 
 ## 완료한 Task (누적, 최근 순)
+
+- [x] **Task β-1 (Phase 2 백로그 1-8 후속, 우선 1 완결)**: `conversations-list.tsx` animate cap 상수화 (`ANIMATION_STAGGER_MS=40` + `ANIMATION_MAX_STAGGER_ITEMS=10` + 의도 주석 1줄) · `conversations/page.tsx` import 경로 B-5 단일 심볼 규칙 적용 (`@/shared/time` barrel → `@/shared/time/relative` 세부 경로) · **`formatRelative` shared util 이미 승격 완료 확인** (탐색 중 자동 해소) · **독립 리뷰 2 둘 다 Ship as-is** (code MEDIUM 주석 1건 선반영, security 권장 0건) · 540/540 vitest 회귀 없음 · typecheck+lint+prettier+build clean · 메타 문서 정비 동반 (PROGRESS 다음 세션 Epic A/B 완결 반영 재정의 + phase-2-plan §8 Epic 전환 결정 신설)
 
 - [x] **Task 1-8-a (Epic 1-8 진입 1/N): 대화 로그 목록 페이지** — `/bots/[slug]/conversations` Server Component · RLS 3중 방어 + `isValidSlug` 검증 · bot/count/conversations/messages 4쿼리 + 메모리 join · offset pagination (`?page=N`, Zod `coerce.number().int().min(1).catch(1)`, limit 50) · messages `.limit(1000)` DoS 가드 + 상한 도달 시 `logger.warn` · `maskEmail` 3단계 마스킹 · preview-util 9 단위 테스트 · E2E 3 케이스 (smoke / 비로그인 / page param) · 독립 리뷰 2 Fix 4건 반영 (sec M-1 DoS 가드 / sec L-1 정적 에러 4지점 / sec L-2 maskEmail local=1 / code MED canonical URL 주석) · 인프라 부산물 1건 (eslint `playwright-report/**` + `test-results/**` ignore) · vitest 380→389 (+9)
 
