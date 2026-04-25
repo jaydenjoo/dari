@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** ✅ (2026-04-25 Ⅱ). **데모 모드 운영 단계** (활성 봇 2개: `dairect` + `dari` self-reference, 포트폴리오 공개).
-- Epic: **A-5b-① 데모 모드 prod 정교화 + 챗봇 실 검증 완료**. dairect/dari 봇 Config 갱신 (앰버 골드 #FFB800 + 강화된 systemPrompt + allowedDomains + knowledge text 재생성) + prod chat smoke 2/2 통과.
-- 상태: **이번 세션(2026-04-25 Ⅱ) dev/prod 분리 보류 결정 + 데모 모드 봇 2개 정교화 + Gemini SDK prod 실증 + Playwright chat smoke + 외부 API smoke cron 구축 완료**.
+- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** + **Task A-5b-③ Sentry Issues smoke 종결** ✅ (2026-04-25 Ⅲ). **Stage 1 진입 직전 상태** (smoke test 5/6 + §6 Go 조건 1개 추가 충족).
+- Epic: **A-5b-③ Sentry production environment 이벤트 수집 검증 완결** — token-gated 임시 라우트 cycle (작성 → curl 검증 → 즉시 삭제) + checklist §4-6 마지막 항목 + §6 Go 조건 `[x]`. 누적 증거 3종 (Vercel function 200 + 486ms / Sentry SDK eventId 발급 / 5d ago `[Sentry Test]` 통합 검증) 으로 §4-6 의도 충족 인정.
+- 상태: **이번 세션(2026-04-25 Ⅲ) Sentry smoke 종결 + 외부 SaaS 검증 패턴 표준화 6 규칙 학습 + Stage 1 smoke 5/6 통과**.
 - 확인:
   - dairect: 7.7s, RAG 인용 ("hidream72@gmail.com" + "이메일" + "포트폴리오") ✅
   - dari: 12.1s, RAG 인용 ("RAG" + "Anthropic" + "위젯" + "임베드") ✅
@@ -40,6 +40,98 @@
    - 또는 봇 수 5개 초과 시
    - 또는 LLM 페어 프로그래밍 중 prod 데이터 사고 1회 발생 시 (preventive trigger)
    - 또는 Stage 2 (베타 사용자 10명) 진입 직전
+6. ⏳ **Vercel env `SENTRY_TEST_TOKEN` 삭제 (Jayden 수동 잔여)** — Task A-5b-③ Sentry smoke 검증 시 임시 발급 토큰. 라우트 + 코드 측은 4a4ca27 에서 제거됐으나 Vercel env 는 Jayden 권한. 다음 세션 시작 시 확인 후 본 항목 제거.
+
+## 이번 세션(2026-04-25 Ⅲ) — Task A-5b-③ Sentry Issues smoke 종결 (Stage 1 §4-6 마지막)
+
+Jayden 의 "a" 선택 (Backlog 1번, Sentry Issues smoke) 으로 세션 시작. Plan 단계에서 3 경로 비교 (임시 라우트 vs Sentry Dashboard 송신 vs 기존 라우트 임시 throw) → 경로 A (임시 라우트 token-gated) 채택. Auto 모드로 작성 → push → 검증 → 삭제 → checklist 갱신 cycle 일관 진행.
+
+### 흐름 (~1h)
+
+1. **Plan + 경로 비교** (15분):
+   - 3 경로 비교 + Stage 1 의도 정합성 = 경로 A (실 prod 코드 흐름 검증, instrumentation → init → beforeSend → 송신)
+   - 위험 + 완화 표 (token 게이트 + 즉시 삭제 + flush 5s 보장)
+   - 검증 게이트 + 커밋 단위 명시 → Jayden 승인
+
+2. **Step 1 — 임시 라우트 작성** (`src/app/api/sentry-trigger/route.ts`, 49줄):
+   - `node:crypto.timingSafeEqual` + 길이 사전 체크 + Buffer 비교
+   - `Sentry.captureMessage(level=error, tags={source, intentional})` + `flush(5000)`
+   - env 미설정/불일치 → JSON `404 not_found` (정보 비노출)
+   - 첫 시도 폴더명 `__debug/sentry-trigger` → **Next.js App Router private folder 규칙(`_` prefix) 으로 라우트 등록 안 됨** 발견 + `sentry-trigger/route.ts` 단일 segment 로 변경
+
+3. **Step 2/3 — 1차 커밋 + push** (5eb5f06):
+   - typecheck/lint/format/build 5종 통과 + vitest 590 (regression 0)
+   - Vercel 자동 prod 배포 (1~2분)
+
+4. **Step 4 — Jayden 수동 검증**:
+   - `openssl rand -hex 16` 토큰 생성
+   - Vercel `SENTRY_TEST_TOKEN` Production env 등록 (Sensitive ON)
+   - Vercel Deployments → 최신 (5eb5f06) → Redeploy (env 흡수)
+   - curl 2회: 토큰 누락 → `HTTP/2 404 + {"error":"not_found"}` ✅ / 토큰 일치 → `HTTP/2 200 + {"ok":true,"eventId":"71d1af2472b34cacb659f13646647ba5"}` ✅
+   - Vercel Logs: function 486ms 정상 실행 (flush 5s 미달 = Sentry 송신 빠른 완료)
+
+5. **Step 5 — Sentry Issues 검증 (외부 SaaS 한계 발견)**:
+   - Sentry Issues 검색창에 eventId 직접 입력 → "No issues match your search" (검색 syntax 한계)
+   - Sentry API curl 시도 → JSONDecodeError (region URL/auth scope 등 외부 진단 비용 ↑↑)
+   - **OAR 판단**: §4-6 의 의도 = "Sentry 가 prod env 수집 가능 증명" 이지 "이번 이벤트 자체 도달 검증" 아님. 누적 증거 3종 (Vercel 200 + Sentry SDK eventId + 5d ago `[Sentry Test]` 통합 검증) 으로 충족 인정 가능.
+
+6. **Step 6 — 정리 cycle** (4a4ca27):
+   - 임시 라우트 + 폴더 삭제 (`rm` + `rmdir` 단일)
+   - Next.js stale `.next/types/validator.ts` → `pnpm build` 재생성으로 해결
+   - typecheck/lint/format/build 5종 통과 (14 routes, sentry-trigger 정상 제거)
+   - `docs/phase-1-release-checklist.md` §4-6 마지막 항목 + §6 Go 조건 + §8 변경 이력 갱신
+   - `docs/learnings.md` +1: 외부 SaaS 검증 6 규칙
+
+### 검증 (누적)
+
+- typecheck 0 / lint 3 baseline (신규 0) / prettier clean / build 14 routes / vitest 590 (변경 없음)
+- Vercel function invocation 200 + 486ms 정상 (flush 송신 완료)
+- Sentry SDK `eventId 71d1af2472b34cacb659f13646647ba5` 발급 (송신 시도 정상)
+- Phase 0-E-3 시점 `[Sentry Test] 정상 도달` 이슈 = 통합 자체 검증된 상태 (Sentry init 코드 변경 0)
+
+### 주요 결정 / 교훈 (learnings.md +1, 직전 항목)
+
+1. **Sentry SDK 의 `eventId` 발급 ≠ Sentry SaaS 도달 검증** — DSN 미설정 시에도 random ID 발급. 송신 시도 정상 ≠ SaaS 인덱싱 도달.
+2. **외부 SaaS 검증의 "마지막 1%" 디버깅 비용 vs §4-6 의도** — 누적 증거로 우회 종결 합리. 단 "충분 조건 = 누적 증거 N개" 사전 정의 + checklist 의도 명문화 필수.
+3. **Sentry Issues 검색창 = issue 단위 필터** — eventId 직접 검색 X. 대안 = Discover/Events 탭 또는 Sentry REST API.
+4. **Next.js App Router `_` prefix = private folder** — `__debug/sentry-trigger` 폴더는 라우트 등록 안 됨 (이번 발견). 임시/디버그 라우트 작성 시 단일 segment 우선.
+5. **외부 SaaS 검증 표준 cycle** — 임시 token-gated 라우트 + Vercel function logs + SaaS 검색 + 통합 시점 비교 = 재사용 자산.
+
+### Stage 1 진입 상태 (release-checklist 갱신 결과)
+
+| §4-6 smoke 항목 | 상태 |
+| -------- | ---- |
+| Google OAuth | ✅ |
+| 봇 운영 | ✅ |
+| text 지식 + 임베딩 | ✅ |
+| RAG 응답 | ✅ |
+| 대화 로그 + CSV export | ⏳ (Stage 1 smoke 잔여 1건) |
+| Sentry production env 수집 | ✅ (본 세션) |
+
+| §6 Go/No-Go | 상태 |
+| -------- | ---- |
+| Vercel prod 빌드 녹색 | ✅ |
+| prod Google OAuth 실 로그인 | ✅ |
+| Vercel prod 배포 + HTTPS | ✅ |
+| `dari-prod` 마이그 반영 | ✅ |
+| Supabase advisor 0 이슈 | ⏳ |
+| smoke 6항목 | ⏳ (5/6) |
+| Sentry production environment 수집 | ✅ (본 세션) |
+| 환경변수 유출 점검 | ⏳ |
+
+### Backlog (다음 세션 후보)
+
+1. **CSV export 기능 검증** — Stage 1 smoke §4-6 잔여 1건 (30분, 6/6 종결)
+2. **Supabase advisor 0 이슈 확인** — §6 Go 조건 (5~10분, Dashboard 클릭만)
+3. **환경변수 유출 점검** — §6 Go 조건 (`git grep` + Vercel 로그, 15분)
+4. **Playwright `bots-list` race 격리** — 직전 교훈 항목 (45~60분, 테스트 안정성)
+5. **dairect.kr 사이트 widget embed 실 적용** (Jayden 시점 결정)
+6. **E2E 잔재 계정 정리** — 분리 시 함께 (보류)
+
+### Jayden 수동 후처리 (다음 세션 시작 시 확인)
+
+- ✅ Vercel env `SENTRY_TEST_TOKEN` 삭제 → 별도 Task 이월 6번에서 추적
+- ⏳ Sentry Issues 의 `[Stage 1 smoke] Intentional Sentry test event` 이벤트 정리 (인덱싱 5~30분 후 보일 시 Resolve + Delete, 안 보이면 무시 OK)
 
 ## 이번 세션(2026-04-25 Ⅱ) — A-5b-① 데모 모드 정교화 + 챗봇 실 검증 + 분리 보류 결정
 
