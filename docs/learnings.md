@@ -32,6 +32,64 @@
 
 ## 기록
 
+### 2026-04-25 `.env.local` 이 prod Supabase 를 직접 참조 — dev/prod 분리 의도와 어긋난 채 운영 (긴급도 상승 발견)
+
+**증상**: Gemini SDK 마이그레이션 검증을 위해 로컬 E2E `bot-knowledge-sources.spec.ts` 실행. globalSetup 의 `createTestUser('e2e-main@dari.test')` 가 "이미 등록됨" 으로 실패. 잔재 계정 정리 위해 dari-dev 프로젝트를 찾으려 했으나 **Supabase 프로젝트 목록에 dari-dev 가 없고 `dari` (prod ref `pxdopzlaffjcxqfrqidq`) 만 존재**. `.env.local` 의 `NEXT_PUBLIC_SUPABASE_URL` 이 prod 를 가리킴 → **로컬 E2E + `pnpm dev` 가 prod DB 에 실 데이터 쓰는 구조** 였음. 이전에 Playwright 가 만든 잔재 계정 + 봇이 prod 에 그대로 잔재.
+
+**원인**:
+
+1. **Phase 0 초기 setup 시 dev/prod 분리 미실행** — `environments.md` 는 dev (`dari-dev`) / prod (`dari-prod`) 2개 환경으로 분리한다고 기술하지만 실제는 dari (1개) 만 생성하고 그것을 prod 로 승격. `.env.local` 은 그대로 같은 프로젝트 가리킴.
+2. **로컬에서 prod 인 줄 인지 못함** — Jayden 이 "로컬은 dev, prod 는 Vercel env" 로 인식하고 작업. 사실은 둘 다 같은 DB. 이 사실이 **이번 fix 검증 시점에 우연히 발견** — 그 전까지는 모르고 운영.
+3. **부산물**: 로컬 E2E 실행 → prod 에 e2e 봇/계정 생성. PROGRESS 에서 본 `e2e-main@dari.test` + 자동 생성 봇 (`기간 전환 x-hq2h`, `파일 TXT u-bu95` 등) 이 prod 에 잔재. teardown 실패로 누적.
+4. **봇 3개 삭제 미스터리도 같은 원인** — 2026-04-24 세션에 chatsio/findably/interviewgenie 봇이 soft-delete 되었는데 Jayden 은 자기 의도였다고 답변 (테스트 차원). 근본 원인은 **로컬에서 prod 봇을 직접 다룬 결과**.
+
+**해결** (긴급, 별도 Task):
+
+1. Supabase 에 **`dari-dev` 신규 프로젝트 생성** (free tier 또는 pro 의 무료 추가 슬롯).
+2. 12개 마이그레이션 apply (`supabase link --project-ref <dari-dev-ref> && supabase db push`).
+3. Auth Google OAuth + Site URL + Redirect URLs 등록 (로컬 4000).
+4. `.env.local` 모든 Supabase env 를 dari-dev 로 교체 (URL, anon, service_role).
+5. 잔재 e2e 계정 + 봇 prod 에서 영구 정리 (Jayden 봇 5개만 보존).
+6. 검증: `pnpm dev` + E2E 실행 시 dari-dev 에만 데이터 생성, prod 영향 0.
+
+**규칙** ⭐:
+
+- **로컬 `.env.local` Supabase URL 은 prod 와 절대 같으면 안 된다** — 1인 운영 프로젝트라도 dev/prod 분리는 필수. 비용 0 (free tier) + 안전 ↑↑.
+- **Phase 0 setup 체크리스트에 "Supabase 프로젝트 2개 (dev + prod) 분리 확인" 명시 항목 추가** — 그냥 "Supabase 프로젝트 생성" 으로 두면 1개로 끝나고 prod 승격 시 dev 가 사라짐.
+- **`.env.local` 의 SUPABASE_URL 이 어떤 프로젝트인지 주석으로 명시** — 예: `NEXT_PUBLIC_SUPABASE_URL=... # dari-dev (NOT prod!)`. Phase 1 release checklist 에 "환경변수 값 주석 점검" 단계 추가.
+- **로컬 dev 가 prod DB 사용하는 구조의 위험** = (a) `pnpm dev` 첫 시동 시 의도 없이 schema migration 적용 위험, (b) 디버깅 중 무심코 `DELETE FROM bots` 실행 가능, (c) 테스트 데이터가 prod 에 누적, (d) 다른 개발자 합류 시 prod 키 공유 강제. 이 4가지가 모두 1인 프로젝트에서도 사고 가능 시나리오.
+- **운영 시점 환경 점검 SQL 한 줄 표준화**: `select current_database(), current_user, version();` + 결과를 PROGRESS 에 기록. dev/prod 헷갈릴 때 즉시 확인.
+- **이번 발견의 우연성에 의존 불가**: 다음 silent drift 도 우연히 발견될 보장 없음. **Phase 0-D 완결 기준에 "prod URL ≠ 로컬 SUPABASE_URL 검증"** 추가 필요 (release-checklist 보강).
+
+---
+
+### 2026-04-25 Playwright `fullyParallel: true` + workers=5 체제에서 "빈 상태" 검증 spec 은 race 로 실패 (테스트 격리 설계 결함)
+
+**증상**: Gemini SDK fix 검증 후 추가 spec 실행. `bots-list:15` ("로그인 후 /bots → 빈 상태") 가 fail. 스크린샷에서 봇 목록에 `기간 전환 x-hq2h` (bot-stats spec 의 봇), `파일 TXT u-bu95` (bot-knowledge-file spec 의 봇) 가 보임. 이 두 spec 이 같은 worker 또는 다른 worker 에서 봇을 만들고 cleanup 전에 `bots-list` spec 이 진입 → 빈 상태 expect 실패.
+
+**원인**:
+
+1. **`playwright.config.ts` `fullyParallel: true` + `workers: 5`** — 로컬 dev 에서 5개 spec 이 병렬 실행. 모든 spec 이 같은 `MAIN_TEST_USER` 로 로그인 (단일 globalSetup) → 같은 owner_id → RLS 가 모든 봇을 보여줌.
+2. **`bots-list` spec 의 "빈 상태" expect** — 단일 worker 격리가 가정된 설계. 다른 spec 의 finally cleanup 이 실행되기 전에 진입 가능.
+3. **finally cleanup 의 race** — `await deleteBotBySlug(slug)` 가 spec 종료 시 실행되지만, `bots-list` 가 그 사이 진입 가능.
+4. **단일 테스트 계정 = 모든 spec 공유** — 격리하려면 spec 마다 별도 계정 필요 (createTestUser 호출당 1개). 현재는 globalSetup 에서 1개만 생성.
+
+**해결** (별도 Task 이월):
+
+1. **`bots-list` spec 에 `test.describe.serial`** 적용 — 이 파일만은 다른 spec 과 절대 동시 실행 안 됨.
+2. 또는 **spec 별 격리 계정** — 각 spec 의 `test.beforeAll` 에서 `createTestUser` 호출, `afterAll` 에서 cleanup. Globalsetup 은 widget build 만.
+3. 또는 `bots-list` 의 expect 를 "빈 상태" 가 아닌 "테스트 봇이 보이지 않음" 으로 약화 — 다른 spec 영향 흡수.
+
+**규칙** ⭐:
+
+- **Playwright `fullyParallel: true` 환경에서 "전체 상태 expect" (예: "X 가 N 개", "비어있음") 는 worker 격리 가정** — 다른 spec 이 만든 데이터가 동일 사용자 view 에 들어오면 fail. `test.describe.serial` 또는 spec 별 user 격리 필수.
+- **단일 globalSetup 사용자 모델은 단순하지만 race 위험** — spec 수가 늘면 cross-spec interference 증가. Phase 2 이상에서는 spec 별 user 권장.
+- **finally cleanup 은 race 보장 안 함** — Playwright 의 finally 는 spec 끝에 실행되지만 다른 spec 의 진입을 막지 않음. cleanup 으로 race 해결 시도 X.
+- **테스트 spec 검증 시 첫 실행 (cold start) 와 재실행 (warm) 차이 인지** — race 는 빈도 의존적. CI 에서는 워커 수가 다르면 다른 결과 가능.
+- **Playwright spec 의 expect 작성 시 다른 spec 과의 데이터 격리 가정 명시** — 코멘트로 "이 spec 은 격리된 user 를 가정. 공유 user 에서는 race 가능".
+
+---
+
 ### 2026-04-25 외부 제공자 AI 모델 버전의 silent deprecation — 모델명 상수 고정은 미래 시한폭탄 (Gemini `text-embedding-004` 사례)
 
 **증상**: Task A-5b-① Step 2 진입 직전 Jayden 이 prod 대시보드에서 지식 저장 시도 → 모두 실패. text + URL 크롤링 동시 고장. 조사 결과 Server Action 이 "지식 저장에 실패했어요..." 에러 배너 렌더. 내부 로그: `[404 Not Found] models/text-embedding-004 is not found for API version v1beta`. 로컬 E2E 재현 시도 → 동일 증상. prod env / Vercel 설정 / Supabase RLS / owner_id 모두 정상. **원인 = Google 이 우리가 쓰던 embedding 모델을 deprecate**. 코드는 멀쩡한데 외부 API 계약이 바뀌어 조용히 prod 가 고장.

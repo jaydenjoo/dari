@@ -6,10 +6,14 @@
 
 - Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 진행 중 (Gemini SDK hot fix 완료, dairect 봇 embed 대기)**. 외부 신호 평가 단계 진입.
 - Epic: **Task A-5b-① dairect 봇 → dairect.kr 공식 embed** (Dari 첫 실사용 사례 1호). Step 1 완료 (브랜드 색상 `#4F46E5` / systemPrompt 원문 / knowledge text 초안 작성). Step 2 진입 직전 **지식 저장 prod 장애 발견** → Gemini embedding 모델 `text-embedding-004` API 지원 종료 (404 Not Found).
-- 상태: **이번 세션(2026-04-25 Ⅰ) Gemini SDK 마이그레이션 완료** — `@google/generative-ai 0.24.1` (deprecated) → `@google/genai 1.50.1` / `text-embedding-004` → `gemini-embedding-001` + `outputDimensionality: 768` / API `batchEmbedContents` → `embedContent` / env 이름 (`GOOGLE_GENERATIVE_AI_API_KEY`) 유지 / 독립 리뷰 2 병렬 → code Ship + security Ship conditional (sec MEDIUM 1건 httpOptions 주석 fix 반영). vitest 589 → 590 / typecheck clean / lint 3 baseline / prettier clean / build 15 routes clean.
-- 확인: 로컬 E2E 로 prod 증상 재현 → 근본 원인 확정 (Google API 모델 deprecation). 단위 테스트 590 + mock 재작성으로 검증.
-- ⚠️ **차단**: Jayden `git push` 대기 → Vercel 자동 재배포 → Jayden prod 실 저장 재시도 검증 → 통과 시 A-5b-① Step 2 재개.
-- 🚨 **별도 Task 이월 (중대)**: `.env.local` 이 prod Supabase (`pxdopzlaffjcxqfrqidq`) 를 직접 참조 — dev/prod 분리 부재. 로컬 E2E + `pnpm dev` 가 prod DB 에 실 데이터 쓰는 구조. **Task "dari-dev 프로젝트 별도 생성" 긴급도 상승**. + E2E 잔재 계정 `e2e-main@dari.test` prod 에 존재 — 수동 정리 필요.
+- 상태: **이번 세션(2026-04-25 Ⅰ) Gemini SDK hot fix 완료 + prod 배포 + E2E 핵심 16/16 검증 완료**. dairect.kr 재디자인 발견 (보라 → 앰버 골드 `#FFB800`) → 봇 Config 갱신본 작성. **A-5b-① Step 2 (Jayden prod 실 시도) 대기 중**.
+- 확인: push 후 Vercel 새 빌드 도달 (`x-vercel-id: icn1::d5xfw-1777102580094-...`, last-modified 2026-04-25 07:36:20 UTC). 로컬 dev + Playwright E2E 32 spec 중 핵심 16/16 통과 (text 저장 + 봇 등록 + 편집 + 상세 + smoke). 부수 13건은 fullyParallel workers=5 race + cleanup 누락 (코드 버그 아님).
+- ⚠️ **차단**: Jayden prod 실 시도 결과 대기 — `/bots/dairect/edit` 에서 ① 텍스트 저장 ② URL 추가 둘 다 검증.
+- 🚨 **별도 Task 이월 (중대, 긴급도 상승)**:
+  1. **`.env.local` 이 prod Supabase (`pxdopzlaffjcxqfrqidq`) 를 직접 참조** — dev/prod 분리 부재. 로컬 E2E + `pnpm dev` 가 prod DB 에 실 데이터 쓰는 구조. **Task "dari-dev 프로젝트 별도 생성" 긴급 (현재 위험)**.
+  2. E2E 잔재 계정 `e2e-main@dari.test` 매 globalTeardown 마다 잔재 — Supabase auth.users delete API 가 dependent FK 로 실패. 별도 정리 cron 또는 deleteTestUserByEmail 강화 필요.
+  3. CI 외부 API smoke (주 1회 cron) — Google 모델 deprecation 같은 silent failure 조기 감지.
+  4. Playwright spec serial vs parallel 정합성 — `bots-list` 같은 "빈 상태" 검증 spec 은 `test.describe.serial` 또는 isolated worker 필요.
 
 ## 완료된 Epic
 
