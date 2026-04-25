@@ -187,7 +187,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] text 지식 저장 → 임베딩 파이프라인 동작 (Gemini SDK 마이그 + prod 실증 완료)
 - [x] 챗봇에 질문 → RAG 응답 반환 (`pnpm test:prod-smoke` 2/2 통과 — dairect 7s + dari 12s)
 - [ ] 대화 로그 목록 + CSV export 동작 (Stage 1 smoke 잔여)
-- [ ] Sentry Issues 에 의도적 에러 1건 도달 확인 → 검증 후 즉시 삭제
+- [x] Sentry Issues 에 의도적 에러 1건 도달 확인 → 검증 후 즉시 삭제 ✅ (2026-04-25 Ⅲ — 임시 라우트 `/api/sentry-trigger` token-gated + curl 200 + eventId 발급 + Vercel function 486ms 내 송신 완료. Sentry 통합 자체는 5d ago `[Sentry Test] 정상 도달` 이슈로 production env 라벨링 검증됨)
 
 ### 4-7. dev/prod 분리 검증 (보류 결정 명시)
 
@@ -225,8 +225,8 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] Vercel prod 배포 녹색 + `dari-theta.vercel.app` HTTPS 응답 (dairect.kr 은 별개 프로젝트)
 - [x] `dari-prod` Supabase 12 마이그레이션 반영
 - [ ] Supabase advisor 0 이슈 확인
-- [ ] smoke test 6항목 (§4-6) 전부 통과
-- [ ] Sentry production environment 이벤트 수집 확인
+- [ ] smoke test 6항목 (§4-6) 전부 통과 — 5/6 통과 (CSV export 잔여)
+- [x] Sentry production environment 이벤트 수집 확인 (2026-04-25 Ⅲ §4-6 마지막 항목 종결)
 - [ ] 환경변수 유출 점검 (`git grep` + Vercel 로그 확인)
 
 ### 🛑 No-Go 신호
@@ -252,3 +252,4 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 ## 8. 변경 이력
 
 - **2026-04-20** — 최초 작성 (Task 1-8-e 직후, Epic 1-8 완결 시점)
+- **2026-04-25 Ⅲ** — Task A-5b-③ Sentry Issues smoke 종결. §4-6 마지막 항목 + §6 Go 조건 "Sentry production environment 이벤트 수집 확인" `[x]`. 임시 라우트 `/api/sentry-trigger` (token-gated, 신규 1파일 → 검증 후 삭제 2 커밋 cycle). Vercel function 486ms 내 200 응답 + eventId 발급 + 5d ago 통합 검증 누적 증거로 §4-6 의도 충족.

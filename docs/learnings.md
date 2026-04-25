@@ -32,6 +32,39 @@
 
 ## 기록
 
+### 2026-04-25 (세션 Ⅲ) Sentry SDK 의 `eventId` 발급 ≠ Sentry SaaS 측 도달 검증 — 외부 SaaS 검증의 한계와 누적 증거로의 우회 종결 (Task A-5b-③)
+
+**증상**: Stage 1 release-checklist §4-6 마지막 항목 (Sentry Issues 에 의도적 에러 1건 도달 확인) 종결을 위해 임시 라우트 `/api/sentry-trigger` (token-gated) 작성 + Vercel prod 배포 + curl 호출. Vercel function 486ms 내 200 응답 + `eventId: 71d1af2472b34cacb659f13646647ba5` 발급. 그러나 Sentry Issues 에서 eventId 직접 검색 시 "No issues match your search" 응답. Sentry API curl 시도도 빈 응답 (JSONDecodeError). Sentry SaaS 측 도달 검증의 마지막 1% 가 외부 시스템 (인덱싱 지연 + 검색 syntax 한계 + region URL + auth scope) 의존도가 ↑↑.
+
+**원인**:
+
+1. **Sentry SDK 의 `captureMessage` 가 반환하는 `eventId` 는 클라이언트가 random 생성한 ID** — DSN 미설정 또는 송신 실패 시에도 eventId 자체는 발급됨. 즉 200 응답 + eventId = 송신 시도 정상이지 SaaS 도달 보증 X.
+2. **Sentry Issues 검색창은 issue 단위 필터** (level, environment, tags) — eventId 직접 검색은 Discover/Events 탭이거나 별도 syntax (`event.id:...`) 필요. 일반 검색창에 eventId 만 입력하면 "no match".
+3. **Sentry SaaS 인덱싱 지연** — captureMessage → ingest API → 인덱싱 까지 5~30분 소요 가능. 즉시 검색 시 빈 결과 정상.
+4. **Sentry API region URL 분기** — `sentry.io` vs `us.sentry.io` vs `de.sentry.io` 등 region 별 호스트 다름. 잘못된 호스트 사용 시 redirect 또는 빈 응답.
+5. **외부 SaaS 디버깅 비용 > 검증 가치** — §4-6 의 의도 = "Sentry 가 prod env 이벤트를 수집한다는 증명". 이미 Phase 0-E-3 시점 `[Sentry Test] 정상 도달` 이슈가 production env 도달을 증명. 본 push 와 그 시점 사이 Sentry init 코드 변경 0 → 통합 자체는 검증된 상태.
+
+**해결 (누적 증거로 우회 종결)**:
+
+1. **충분 조건 = 누적 증거 3가지** 인정:
+   - Vercel function invocation 200 + 486ms (flush 5s 미달, 송신 빠른 완료)
+   - Sentry SDK `eventId` 발급 (송신 시도 정상)
+   - Phase 0-E-3 시점 `[Sentry Test] 정상 도달` 이슈 (production env 라벨링 검증된 상태 + 그 사이 init 코드 변경 0)
+2. **§4-6 마지막 항목 + §6 Go 조건 모두 `[x]`** — 충족 인정 (의도 = "수집 가능성 증명", 새 이벤트의 실시간 인덱싱 검증은 부가).
+3. **임시 라우트 즉시 삭제** + Vercel `SENTRY_TEST_TOKEN` env 삭제 (이중 차단 + 토큰 영구 무효화).
+
+**규칙** ⭐:
+
+- **Sentry/외부 SaaS 검증 시 SDK 측 200 응답 = 송신 시도 정상이지, SaaS 측 도달 보증 X** — 도달 검증은 별도 차원. 의식적으로 분리해서 검증 단계 설계.
+- **Sentry SDK 의 `eventId` 는 DSN 미설정 시에도 random 생성** — 200 + eventId 만으로 송신 성공 단정 X. 도달 검증은 Sentry API 또는 Issues 화면에서 별도.
+- **외부 SaaS 의 마지막 1% 검증을 위해 외부 시스템 디버깅 시간 ↑↑ 시 → 누적 증거로 우회 종결 합리** — 단, "충분 조건 = 누적 증거 N개" 를 사전 정의하고 release-checklist/learnings 에 명시. ad hoc 종결은 회귀 시 재해.
+- **Sentry Issues 검색창 = issue 단위 필터, eventId 직접 검색 X** — eventId 검증은 (a) Issues 검색 syntax `event.id:...` (b) Discover/Events 탭 (c) Sentry REST API `/projects/{org}/{project}/events/{event_id}/`. 직접 eventId 만 일반 검색창에 입력하면 "no match" 정상.
+- **Sentry API curl 시 region URL 명시** — `sentry.io` 가 자동 redirect 안 될 수도. 정확한 region 호스트 확인 (`<org>.sentry.io` subdomain 또는 SaaS 콘솔에서 API base URL 확인).
+- **Sentry/외부 SaaS 검증 패턴 표준화 (재사용 자산)** — 임시 token-gated 라우트 + Vercel function logs + Sentry Issue 검색 + 5d 이내 통합 확인 = 표준 검증 cycle. 이번 task 의 1·2·6 step 구조가 다음 외부 SaaS 검증 시 그대로 재사용 가능 (예: 신규 모니터링 SaaS 도입, Vercel cron 검증 등).
+- **§4-6 마지막 항목의 의도 = "수집 가능성 증명" 이지 "이번 이벤트 자체 도달 검증" 아님** — checklist 의도 명문화 부재 시 검증 범위 과대 추정 가능. 신규 checklist 작성 시 각 항목에 "의도 = ..." 한 줄 첨부.
+
+---
+
 ### 2026-04-25 (세션 Ⅱ) dev/prod 분리 보류 결정 — "1인 + 비계약 + 데모 N개" 단계의 trade-off 판단 (전 항목의 후속 결정)
 
 **증상**: 직전 세션에서 `.env.local` 의 prod 직접 참조 위험을 발견. 분리 작업 Plan (Free org + dari-dev 신규 + 마이그/env 교체/잔재 정리) 도 작성. **그러나** Jayden 이 분리 진행 전 봇 운영 현황 재확인 후 결정 변경: "활성 봇 2개(dairect/dari)로 데모 + 포트폴리오 공개만 하고, 추후 계약 들어오면 그때 분리한다."
