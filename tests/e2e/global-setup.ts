@@ -25,6 +25,13 @@ const STATE_DIR = join(__dirname, ".state");
 const STATE_FILE = join(STATE_DIR, "main-user.json");
 
 export default async function globalSetup(): Promise<void> {
+  // 외부 의존 prod smoke 같이 main-user / widget 번들이 불필요한 spec 만 실행할 때
+  // 토글로 setup 전체 우회 — globalSetup 실패가 spec 진행 막지 않도록.
+  if (process.env.SKIP_E2E_SETUP === "1") {
+    console.log("[e2e setup] SKIP_E2E_SETUP=1 — 계정/위젯 번들 셋업 건너뜀");
+    return;
+  }
+
   // 과거 teardown 실패로 남은 계정 선제 정리.
   await deleteTestUserByEmail(MAIN_TEST_USER.email);
 

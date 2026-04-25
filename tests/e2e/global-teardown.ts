@@ -17,6 +17,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dirname, ".state", "main-user.json");
 
 export default async function globalTeardown(): Promise<void> {
+  if (process.env.SKIP_E2E_SETUP === "1") {
+    return; // setup 가 우회됐으면 teardown 도 우회
+  }
+
   let uid: string | null = null;
 
   if (existsSync(STATE_FILE)) {

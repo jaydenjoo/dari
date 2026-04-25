@@ -1,0 +1,98 @@
+name: External API Smoke (prod chat)
+
+# 주 1회 prod 외부 의존 smoke 검증 — Anthropic / Gemini / RAG 정상 작동 확인.
+#
+# 목적: 분리 보류 결정의 안전망 (silent failure 조기 감지).
+#   - Gemini text-embedding-004 같은 모델 deprecation
+#   - Anthropic API breaking change
+#   - prod widget-config / chat 라우트 응답 변경
+#   - RAG match_knowledge_chunks RPC 회귀
+#
+# 실행 비용: 주 1회 × 2 봇 호출 = 월 ~8회. Anthropic + Gemini 무료/저비용 tier 안.
+
+on:
+  schedule:
+    # 매주 월요일 00:00 UTC = 09:00 KST.
+    # 한국 시간 월요일 아침 출근 직전 — 알림 받으면 즉시 대응 가능.
+    - cron: "0 0 * * 1"
+  workflow_dispatch: # 수동 실행도 허용
+
+permissions:
+  issues: write # 실패 시 issue 자동 생성
+  contents: read
+
+jobs:
+  prod-chat-smoke:
+    name: prod 데모 봇 chat smoke (dairect + dari)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm playwright install --with-deps chromium
+
+      - name: Run prod chat smoke
+        id: smoke
+        run: pnpm test:prod-smoke
+        env:
+          CI: "true"
+          RUN_PROD_CHAT_SMOKE: "1"
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-smoke-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `🚨 prod chat smoke 실패 (${new Date().toISOString().slice(0,10)})`;
+            const body = [
+              "주간 prod 외부 API smoke 가 실패했습니다.",
+              "",
+              `**실행 로그**: ${runUrl}`,
+              "",
+              "## 우선 의심 항목",
+              "1. Gemini embedding 모델 deprecation (예: 2026-04-25 text-embedding-004 사례)",
+              "2. Anthropic API breaking change",
+              "3. prod 배포 회귀 (chat 라우트 / withAllowedOrigin HOC / RAG)",
+              "4. dairect/dari 봇 config 회귀 (allowedDomains, knowledge)",
+              "",
+              "## 진단 순서",
+              "1. 위 artifact 의 trace + screenshot 확인",
+              "2. Vercel prod logs 확인 (`https://dari-theta.vercel.app` 의 `/api/chat/dairect` 엔드포인트)",
+              "3. SQL 로 prod 봇 config + chunks 카운트 점검",
+              "4. 로컬 `pnpm test:prod-smoke` 재현",
+            ].join("\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["smoke-failure", "prod"],
+            });

@@ -25,23 +25,35 @@ Dari 는 현재 **1인 운영 규모**(Soft Launch Stage 1~4) 이므로 **2환�
 ## 2. 현재 상태 & 이행 로드맵
 
 ```
-[2026-04-21 현재] ── local + preview + prod 3환경 구동 중 (Stage 1 진입 완료)
-                     ├─ Supabase dari-dev 프로젝트 1개 (local + preview 공유)
-                     ├─ Supabase dari-prod 프로젝트 1개 (pxdopzlaffjcxqfrqidq, ap-northeast-2)
+[2026-04-25 현재] ── 데모 모드 (dev/prod 미분리, Jayden 결정 보류)
+                     ├─ Supabase 프로젝트 1개 (dari = pxdopzlaffjcxqfrqidq) — local + Vercel prod 공용
+                     │   ⚠️ .env.local 이 prod 를 직접 참조 (위험 인지 + 보류)
                      ├─ Vercel prod 배포 활성 (dari-theta.vercel.app, ADR-009 γ 호스트)
+                     ├─ 활성 봇 2개: dairect (포트폴리오 데모) + dari (self-reference)
                      ├─ Supabase Authentication URL Configuration 등록 완료 (2026-04-21 Ⅲ)
                      ├─ NEXT_PUBLIC_WIDGET_CDN_URL Vercel Production+Preview 명시 등록 (2026-04-21 Ⅲ)
                      └─ Jayden prod Google OAuth end-to-end 로그인 성공 확인
 
-[Stage 2 진입 시] ── 실사용자 베타 10명 대비
-                     ├─ Sentry production env 이벤트 수집 (이미 작동)
-                     ├─ Vercel Preview DB 격리 검토 (§8)
-                     └─ A-5b Dairect 각 사이트 개발 완료 시 embed + smoke
+[분리 재진행 트리거] ── 아래 중 1개 충족 시 dari-dev 신규 프로젝트 생성 + .env.local 분리
+                     ├─ 외부 사이트 1곳과 정식 embed 계약 체결
+                     ├─ 봇 수 5개 초과
+                     ├─ LLM 페어 프로그래밍 중 prod 데이터 사고 1회 발생 (preventive)
+                     └─ Stage 2 (베타 10명) 진입 직전
+
+[분리 시 작업] ── (재개 시점에 docs/learnings.md 2026-04-25 항목 + 본 §2 참조)
+                     ├─ 새 Free organization 생성 (비용 0)
+                     ├─ dari-dev 프로젝트 생성 (ap-northeast-2, Free Nano)
+                     ├─ pgvector enable + 마이그 0001~0015 apply
+                     ├─ Auth URL Config + Google OAuth client 재사용
+                     ├─ .env.local 의 SUPABASE 3 키 교체 + "dari-dev (NOT prod)" 주석
+                     └─ prod 잔재 정리 (e2e-main@dari.test + rls-test-b@example.com)
 
 [Stage 3~4 이후] ── stg 도입 재평가 조건 충족 시 (§10)
                     → ADR-008 갱신 후 dari-stg 프로젝트 추가
                     → `dairect.kr` 은 별개 프로젝트 (`jaydenjoo/dairect` 리포). Dari 자체는 `dari-theta.vercel.app` 유지
 ```
+
+> **⚠️ 보류 결정 근거 (2026-04-25 Ⅱ)**: 봇 2개 데모 모드 + 1인 운영 + 비계약 단계 → 분리 비용 ($0 + ~1.5h) 대비 위험 노출 시간이 짧음 (계약 진입 시점까지). 단 LLM 페어 프로그래밍 시 prod DB 직접 수정 위험 항상 인지 + 안전 체크리스트 운영. 분리 재개 시 비용 0 (Free org) + 1~1.5시간 복구.
 
 ---
 

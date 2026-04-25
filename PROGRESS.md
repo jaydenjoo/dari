@@ -4,16 +4,114 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 진행 중 (Gemini SDK hot fix 완료, dairect 봇 embed 대기)**. 외부 신호 평가 단계 진입.
-- Epic: **Task A-5b-① dairect 봇 → dairect.kr 공식 embed** (Dari 첫 실사용 사례 1호). Step 1 완료 (브랜드 색상 `#4F46E5` / systemPrompt 원문 / knowledge text 초안 작성). Step 2 진입 직전 **지식 저장 prod 장애 발견** → Gemini embedding 모델 `text-embedding-004` API 지원 종료 (404 Not Found).
-- 상태: **이번 세션(2026-04-25 Ⅰ) Gemini SDK hot fix 완료 + prod 배포 + E2E 핵심 16/16 검증 완료**. dairect.kr 재디자인 발견 (보라 → 앰버 골드 `#FFB800`) → 봇 Config 갱신본 작성. **A-5b-① Step 2 (Jayden prod 실 시도) 대기 중**.
-- 확인: push 후 Vercel 새 빌드 도달 (`x-vercel-id: icn1::d5xfw-1777102580094-...`, last-modified 2026-04-25 07:36:20 UTC). 로컬 dev + Playwright E2E 32 spec 중 핵심 16/16 통과 (text 저장 + 봇 등록 + 편집 + 상세 + smoke). 부수 13건은 fullyParallel workers=5 race + cleanup 누락 (코드 버그 아님).
-- ⚠️ **차단**: Jayden prod 실 시도 결과 대기 — `/bots/dairect/edit` 에서 ① 텍스트 저장 ② URL 추가 둘 다 검증.
-- 🚨 **별도 Task 이월 (중대, 긴급도 상승)**:
-  1. **`.env.local` 이 prod Supabase (`pxdopzlaffjcxqfrqidq`) 를 직접 참조** — dev/prod 분리 부재. 로컬 E2E + `pnpm dev` 가 prod DB 에 실 데이터 쓰는 구조. **Task "dari-dev 프로젝트 별도 생성" 긴급 (현재 위험)**.
-  2. E2E 잔재 계정 `e2e-main@dari.test` 매 globalTeardown 마다 잔재 — Supabase auth.users delete API 가 dependent FK 로 실패. 별도 정리 cron 또는 deleteTestUserByEmail 강화 필요.
-  3. CI 외부 API smoke (주 1회 cron) — Google 모델 deprecation 같은 silent failure 조기 감지.
-  4. Playwright spec serial vs parallel 정합성 — `bots-list` 같은 "빈 상태" 검증 spec 은 `test.describe.serial` 또는 isolated worker 필요.
+- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** ✅ (2026-04-25 Ⅱ). **데모 모드 운영 단계** (활성 봇 2개: `dairect` + `dari` self-reference, 포트폴리오 공개).
+- Epic: **A-5b-① 데모 모드 prod 정교화 + 챗봇 실 검증 완료**. dairect/dari 봇 Config 갱신 (앰버 골드 #FFB800 + 강화된 systemPrompt + allowedDomains + knowledge text 재생성) + prod chat smoke 2/2 통과.
+- 상태: **이번 세션(2026-04-25 Ⅱ) dev/prod 분리 보류 결정 + 데모 모드 봇 2개 정교화 + Gemini SDK prod 실증 + Playwright chat smoke + 외부 API smoke cron 구축 완료**.
+- 확인:
+  - dairect: 7.7s, RAG 인용 ("hidream72@gmail.com" + "이메일" + "포트폴리오") ✅
+  - dari: 12.1s, RAG 인용 ("RAG" + "Anthropic" + "위젯" + "임베드") ✅
+  - widget API 200 응답 (allowedDomains origin 매칭 검증)
+- ⚠️ **차단 해소**: A-5b-① Step 2 prod 실 시도 = 챗봇 smoke 2/2 통과로 직접 해소.
+- 🆕 **데모 공개 가능 상태**:
+  - `https://dari-theta.vercel.app/api/widget-config/dairect` (Origin: dairect.kr) → 200
+  - `https://dari-theta.vercel.app/api/widget-config/dari` (Origin: dari-theta.vercel.app) → 200
+  - chat 라우트도 같은 Origin 으로 호출 시 정상 SSE 스트리밍 응답
+
+### 봇 운영 현황 (prod `dari` 기준, 2026-04-25 세션 Ⅰ 시점)
+
+| Slug             | 상태            | 메모                          |
+| ---------------- | --------------- | ----------------------------- |
+| `dairect`        | ✅ active       | 포트폴리오 데모 (A-5b-① 대상) |
+| `dari`           | ✅ active       | self-reference / 데모         |
+| `interviewgenie` | 🗑️ soft-deleted | Jayden 의도 삭제              |
+| `chatsio`        | 🗑️ soft-deleted | Jayden 의도 삭제              |
+| `findably`       | 🗑️ soft-deleted | Jayden 의도 삭제              |
+
+> Jayden 결정 (2026-04-25 Ⅱ): **2개 봇으로 테스트 + 데모 버전 포트폴리오 공개**. 추후 계약 진입 시 추가 봇 + 분리 작업 재개.
+
+## 🚨 별도 Task 이월 (Jayden 결정 반영)
+
+1. ~~**`.env.local` 이 prod Supabase 직접 참조** — dev/prod 분리 부재~~ → **계약 진입 시 재진행 결정 (보류)**. 사유: 봇 2개 데모 모드 + 1인 운영 + 비계약 단계라 시간/비용 trade-off 로 보류 합리. 단 LLM 페어 프로그래밍 시 prod DB 직접 쓰기 위험 인지 + 안전 체크리스트 운영. 분리 Plan 은 `docs/learnings.md` 2026-04-25 (Ⅱ) 항목에 보존, 재진행 시 활용.
+2. **E2E 잔재 계정 `e2e-main@dari.test`** — 분리 보류로 prod 잔재 그대로 유지. 기능적 영향 없음 (RLS 격리). 분리 시 함께 정리. **`SKIP_E2E_SETUP=1` 토글로 prod-chat-smoke 같은 외부 의존 spec 은 globalSetup 우회 가능** (2026-04-25 Ⅱ 추가).
+3. ~~**CI 외부 API smoke (주 1회 cron)**~~ ✅ **완료 (2026-04-25 Ⅱ)** — `external-api-smoke.yml` 매주 월요일 09:00 KST cron + 실패 시 GitHub Issue 자동 생성. dairect + dari prod chat 호출 + RAG 인용 검증.
+4. **Playwright spec serial vs parallel 정합성** — `bots-list` 빈 상태 spec race. 코드 버그 아님, E2E 의존도 낮은 데모 모드라 후순위.
+5. **분리 재진행 트리거 조건** (계약 진입 시점):
+   - 외부 사이트 1곳과 정식 embed 계약 체결 시
+   - 또는 봇 수 5개 초과 시
+   - 또는 LLM 페어 프로그래밍 중 prod 데이터 사고 1회 발생 시 (preventive trigger)
+   - 또는 Stage 2 (베타 사용자 10명) 진입 직전
+
+## 이번 세션(2026-04-25 Ⅱ) — A-5b-① 데모 모드 정교화 + 챗봇 실 검증 + 분리 보류 결정
+
+Jayden 의 "분리 작업 진행" → 진단 후 "봇 2개 데모 모드 → 분리 보류" 결정 변경 → **A-5b-① 데모 정교화 + 실 챗봇 검증 + 분리 안전망 (CI cron) 구축** 으로 작업 재정의. Auto 모드로 단발 스크립트 작성 + prod 적용 + Playwright spec + GitHub Actions cron 까지 일관 진행.
+
+### 흐름 (~3h)
+
+1. **진단 (Phase A1)**: prod `dari` 봇 현황 SQL 조회
+   - 활성 봇 2개 (dairect + dari) + soft-deleted 3개 = Jayden 의도 일치
+   - dairect 이미 7 chunks (text 1 + url 6 from `https://dairect.kr` 크롤) — **Gemini SDK 마이그 prod 실증 우연 발견** (Step 2 자동 해소)
+   - allowedDomains=[] → widget API 404 (의도된 보안)
+   - primaryColor 기본 파랑 → 앰버 골드 #FFB800 미적용 + systemPrompt 너무 짧음
+
+2. **dev/prod 분리 보류 결정 (Plan 변경)**: 비용 0 + 1.5h 분리 작업 vs 데모 모드 위험 노출 짧음 → 보류 합리. 트리거 4종 (계약 / 봇 5개 초과 / 사고 1회 / Stage 2) 명시.
+
+3. **Phase A2 + A3 통합 — `scripts/seed-demo-bots.ts` 단발 스크립트**:
+   - dairect / dari Config 갱신 (whitelist 외 절대 수정 안 함)
+   - dairectConfigSchema.safeParse 검증 + 실패 시 abort
+   - knowledge text 재생성 (chunkText + Gemini embedBatch + replace_text_knowledge_chunks RPC)
+   - 이중 게이트: `--apply` + `CONFIRM_DEMO=yes`
+   - 결과: dairect 1 chunk (text 473자) + dari 2 chunks (text 849자)
+   - hook 가 prod DB 쓰기 차단 → Jayden 명시 승인 받은 후 적용
+
+4. **Phase A4 — 공개 API 검증**:
+   - `/api/widget-config/dairect` (Origin: https://dairect.kr) → HTTP 200 + `#FFB800` 반영
+   - `/api/widget-config/dari` (Origin: https://dari-theta.vercel.app) → HTTP 200 + 갱신된 welcomeMessage 반영
+   - SQL: dairect text 1 + url 6 = 7 chunks / dari text 2 chunks
+
+5. **Phase A5 — Playwright prod chat smoke (`tests/e2e/prod-chat-smoke.spec.ts`)**:
+   - 새 spec — Playwright `request` fixture 로 prod chat API 직접 호출 (page 미사용)
+   - UIMessageStream 파싱 (`type === "text-delta"` 의 delta 누적)
+   - RAG 인용 검증 (expectedKeywords 중 1개 이상 포함)
+   - SKIP_E2E_SETUP=1 토글 추가 (global-setup/teardown skip — e2e 잔재 계정 충돌 방지)
+   - 결과: 2/2 통과 — dairect 7.7s + dari 12.1s
+
+6. **별도 Playwright config (`playwright.prod-smoke.config.ts`)**:
+   - webServer / globalSetup / globalTeardown 모두 미사용
+   - chromium 단일 project + prod-chat-smoke spec 만
+   - `pnpm test:prod-smoke` alias 추가
+
+7. **Phase B — CI 외부 API smoke cron (`external-api-smoke.yml`)**:
+   - 매주 월요일 00:00 UTC (= 09:00 KST) 자동 + workflow_dispatch
+   - 실패 시 GitHub Issue 자동 생성 (smoke-failure / prod 라벨, 의심 항목 + 진단 순서 본문)
+   - 분리 보류 결정의 안전망 — silent failure 조기 감지
+
+8. **Phase D — mini-task** (`docs/phase-1-release-checklist.md`):
+   - §1 현재 상태 스냅샷 갱신 (마이그 12 → 15 / 봇 5 → 2 / 분리 보류 명시 / 외부 API smoke cron 행 추가)
+   - §4-6 Stage 1 smoke test 항목 체크 (Gemini SDK + RAG + chat smoke 통과 반영)
+   - §4-7 dev/prod 분리 검증 (보류 항목 6개 명시)
+
+### 검증 (누적)
+
+- typecheck 0 / vitest 491 (변경 없음) / build 14 routes 유지
+- Playwright prod chat smoke 2/2 통과 (chromium, dairect 7.7s + dari 12.1s)
+- prod widget-config API 200 응답 (Origin 매칭 검증)
+- prod 봇 chunks: dairect 7 (text 1 + url 6) / dari 2 (text 2)
+- CI cron workflow 작성 (실 cron 첫 실행은 다음 월요일)
+
+### 주요 결정 / 교훈 (learnings.md +1, 직전 항목)
+
+1. **dev/prod 분리 보류 결정 — "1인 + 비계약 + 데모 N개" 단계의 trade-off 판단**:
+   - 위험 = 비용 × 시간. 분리 비용 고정 (0/1.5h), 위험 노출 시간 한정 (계약 진입까지) → 보류 합리.
+   - 보류 ≠ 잊기 — 재개 트리거 조건 4종 명시 (PROGRESS + environments.md + learnings.md).
+   - "계약" = 환경 분리의 자연스러운 트리거. 외부 약속 = 사고 비용 ↑↑ → 분리 필수.
+
+### Backlog (다음 세션 후보)
+
+1. **Sentry Issues smoke** — release-checklist §4-6 마지막 항목 (의도적 에러 1건 → Sentry 수신 → 즉시 삭제)
+2. **CSV export 기능 검증** — Stage 1 smoke 잔여
+3. **dairect.kr 사이트 widget embed 실 적용** (사이트 운영자 = Jayden 본인이 시점 결정)
+4. **Playwright spec parallel race** (bots-list 빈 상태 spec)
+5. **E2E 잔재 계정 정리** — 분리 시 함께 (보류)
 
 ## 완료된 Epic
 

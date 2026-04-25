@@ -9,19 +9,21 @@
 
 ## 1. 현재 상태 스냅샷
 
-| 영역               | 상태                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------- |
-| **Epic 진행**      | Phase 1 완결 + Phase 2 Epic A Task A-1~A-5a 완결 ✅ (2026-04-21 Ⅲ)                                |
-| **테스트 통과**    | vitest **491/491** (Task A-4 스트리밍 전환 후 +23)                                                |
-| **타입/린트/포맷** | typecheck 0 errors / lint 3 baseline warnings / prettier clean                                    |
-| **빌드**           | 14 routes 녹색 (Turbopack + Sentry 10.49 호환, Vercel prod 재배포 확인)                           |
-| **마이그레이션**   | 0001~0012 (12개) — 로컬 `dari-dev` + prod `dari-prod` 둘 다 반영 완료                             |
-| **CI**             | GitHub Actions `verify` + `secret-scan` 2-job — CI 녹색 유지                                      |
-| **호스팅**         | ✅ **Vercel prod 운영 중** — `dari-theta.vercel.app` (ADR-009 γ 경로 기본 호스트)                 |
-| **도메인**         | `dairect.kr` — **별개 프로젝트** (`jaydenjoo/dairect` 리포). Dari 는 `dari-theta.vercel.app` 유지 |
-| **Supabase prod**  | ✅ **`dari-prod` 생성** (pxdopzlaffjcxqfrqidq, ap-northeast-2). 2026-04-21 Ⅲ 에 5개 봇 등록       |
-| **Google OAuth**   | ✅ **prod 실 로그인 성공** — Supabase Authentication URL Configuration 등록 후 (2026-04-21 Ⅲ)     |
-| **Vercel env**     | ✅ `NEXT_PUBLIC_WIDGET_CDN_URL` Production + Preview 명시 등록 (2026-04-21 Ⅲ, ADR-009 §9-1 γ)     |
+| 영역               | 상태                                                                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Epic 진행**      | Phase 1 완결 + Phase 2 Epic A Task A-1~A-5a 완결 + A-5b-① 데모 모드 검증 완결 ✅ (2026-04-25 Ⅱ)                                                                |
+| **테스트 통과**    | vitest **491/491** + Playwright prod chat smoke 2/2 (dairect + dari)                                                                                           |
+| **타입/린트/포맷** | typecheck 0 errors / lint 3 baseline warnings / prettier clean                                                                                                 |
+| **빌드**           | 14 routes 녹색 (Turbopack + Sentry 10.49 호환, Vercel prod 재배포 확인)                                                                                        |
+| **마이그레이션**   | 0001~0015 (15개) — prod `dari` 반영 완료 (`enable_pgvector` 마이그 prod 자동 생성 1건 포함)                                                                    |
+| **CI**             | GitHub Actions `verify` + `secret-scan` + `e2e` + **`external-api-smoke` (주 1회 cron)** — CI 녹색 유지                                                        |
+| **호스팅**         | ✅ **Vercel prod 운영 중** — `dari-theta.vercel.app` (ADR-009 γ 경로 기본 호스트)                                                                              |
+| **도메인**         | `dairect.kr` — **별개 프로젝트** (`jaydenjoo/dairect` 리포). Dari 는 `dari-theta.vercel.app` 유지                                                              |
+| **Supabase prod**  | ✅ **`dari` 운영 중** (pxdopzlaffjcxqfrqidq, ap-northeast-2). 활성 봇 2개 (dairect + dari, 데모 모드)                                                          |
+| **Google OAuth**   | ✅ **prod 실 로그인 성공** — Supabase Authentication URL Configuration 등록 후 (2026-04-21 Ⅲ)                                                                  |
+| **Vercel env**     | ✅ `NEXT_PUBLIC_WIDGET_CDN_URL` Production + Preview 명시 등록 (2026-04-21 Ⅲ, ADR-009 §9-1 γ)                                                                  |
+| **dev/prod 분리**  | ⚠️ **보류 결정 (2026-04-25 Ⅱ)** — 봇 2개 데모 단계라 시간/비용 trade-off. 계약 진입 시 재진행 (트리거 조건 4종은 [environments.md §2](./environments.md) 참조) |
+| **외부 API smoke** | ✅ **주 1회 cron 작동** — `external-api-smoke.yml` (Anthropic + Gemini + RAG silent failure 조기 감지)                                                         |
 
 ---
 
@@ -180,12 +182,27 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 
 ### 4-6. Stage 1 smoke test
 
-- [ ] Jayden 본인 계정으로 Google OAuth 로그인
-- [ ] 봇 1개 생성 (테스트용)
-- [ ] text 지식 저장 → 임베딩 파이프라인 동작
-- [ ] 챗봇에 질문 → RAG 응답 반환
-- [ ] 대화 로그 목록 + CSV export 동작
+- [x] Jayden 본인 계정으로 Google OAuth 로그인 (2026-04-21 Ⅲ)
+- [x] 봇 2개 운영 중 (dairect + dari, 데모 모드 — 2026-04-25 Ⅱ)
+- [x] text 지식 저장 → 임베딩 파이프라인 동작 (Gemini SDK 마이그 + prod 실증 완료)
+- [x] 챗봇에 질문 → RAG 응답 반환 (`pnpm test:prod-smoke` 2/2 통과 — dairect 7s + dari 12s)
+- [ ] 대화 로그 목록 + CSV export 동작 (Stage 1 smoke 잔여)
 - [ ] Sentry Issues 에 의도적 에러 1건 도달 확인 → 검증 후 즉시 삭제
+
+### 4-7. dev/prod 분리 검증 (보류 결정 명시)
+
+> **현 상태**: `.env.local` 이 prod (`pxdopzlaffjcxqfrqidq`) 를 직접 참조 — dev/prod **미분리**.
+>
+> **결정 (2026-04-25 Ⅱ)**: 봇 2개 데모 모드 단계라 분리 보류. 계약 진입 시 재진행 (트리거 4종은 [environments.md §2](./environments.md) 참조).
+>
+> **분리 재진행 시점에 본 §4-7 다시 활성화**.
+
+- [ ] (보류) `dari-dev` Free org + 신규 프로젝트 생성 (비용 0)
+- [ ] (보류) 마이그 0001~0015 + `enable_pgvector` 적용
+- [ ] (보류) Auth URL Configuration + Google Provider 등록 (로컬 4000)
+- [ ] (보류) `.env.local` 의 SUPABASE 3 키 교체 + `# dari-dev (NOT prod)` 주석
+- [ ] (보류) prod 잔재 정리 (e2e-main@dari.test + rls-test-b@example.com)
+- [ ] (보류) 검증: `pnpm dev` + E2E → dari-dev 만 데이터 생성, prod 영향 0
 
 ---
 
