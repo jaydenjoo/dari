@@ -164,7 +164,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] `supabase db push` — 12개 마이그레이션 순차 반영 ⚠️ **되돌리기 어려움**
 - [x] Auth 섹션 → Google Provider 설정 (client id/secret) + redirect URL 등록
 - [ ] Storage 버킷 확인 (0010 마이그레이션의 `knowledge-files` 버킷 생성 여부)
-- [ ] Supabase advisor 실행 → 신규 이슈 0 확인
+- [x] Supabase advisor 실행 → Stage 1 차단 0 확인 (2026-04-27, security 0 + performance INFO 4건 의도적 보존 — 상세 §6)
 
 ### 4-5-1. 🔴 Authentication URL Configuration (교훈 2026-04-21 Ⅲ 반영)
 
@@ -224,7 +224,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] **prod Google OAuth 실 로그인 성공** (교훈 2026-04-21 Ⅲ — Supabase URL Configuration 설정 후 end-to-end 검증)
 - [x] Vercel prod 배포 녹색 + `dari-theta.vercel.app` HTTPS 응답 (dairect.kr 은 별개 프로젝트)
 - [x] `dari-prod` Supabase 12 마이그레이션 반영
-- [ ] Supabase advisor 0 이슈 확인
+- [x] Supabase advisor Stage 1 차단 0 (2026-04-27, security 0 + performance INFO 4건 의도적 보존: `unused_index` ×3 = RAG 데이터 양 적어 sequence scan 정상 / `auth_db_connections_absolute` = 인스턴스 업그레이드 시 재평가)
 - [ ] smoke test 6항목 (§4-6) 전부 통과 — 5/6 통과 (CSV export 잔여)
 - [x] Sentry production environment 이벤트 수집 확인 (2026-04-25 Ⅲ §4-6 마지막 항목 종결)
 - [ ] 환경변수 유출 점검 (`git grep` + Vercel 로그 확인)
@@ -253,3 +253,4 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 
 - **2026-04-20** — 최초 작성 (Task 1-8-e 직후, Epic 1-8 완결 시점)
 - **2026-04-25 Ⅲ** — Task A-5b-③ Sentry Issues smoke 종결. §4-6 마지막 항목 + §6 Go 조건 "Sentry production environment 이벤트 수집 확인" `[x]`. 임시 라우트 `/api/sentry-trigger` (token-gated, 신규 1파일 → 검증 후 삭제 2 커밋 cycle). Vercel function 486ms 내 200 응답 + eventId 발급 + 5d ago 통합 검증 누적 증거로 §4-6 의도 충족.
+- **2026-04-27** — Task B (advisor Stage 1 검증 완료). §4-5 + §6 advisor 항목 `[x]`. security WARN 1건 (`auth_leaked_password_protection`) Dashboard 활성화 ("Prevent use of leaked passwords" toggle ON) → MCP 재호출로 security `lints: []` 확인. performance INFO 4건 (`unused_index` ×3 + `auth_db_connections_absolute`) 모두 의도적 보존 — RAG 데이터 양 적음 (dairect 7 + dari 2 chunks) + Stage 2 진입 시 재평가.
