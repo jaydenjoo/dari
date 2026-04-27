@@ -186,7 +186,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] 봇 2개 운영 중 (dairect + dari, 데모 모드 — 2026-04-25 Ⅱ)
 - [x] text 지식 저장 → 임베딩 파이프라인 동작 (Gemini SDK 마이그 + prod 실증 완료)
 - [x] 챗봇에 질문 → RAG 응답 반환 (`pnpm test:prod-smoke` 2/2 통과 — dairect 7s + dari 12s)
-- [ ] 대화 로그 목록 + CSV export 동작 (Stage 1 smoke 잔여)
+- [x] 대화 로그 목록 + CSV export 동작 (2026-04-27 — Playwright `csv-export-smoke.spec.ts` 3/3 통과 — 자기 봇 export 200 + UUID 위반 404 + 비로그인 401, UTF-8 BOM + 메타 5행 + 헤더 + escape/injection 안전 검증)
 - [x] Sentry Issues 에 의도적 에러 1건 도달 확인 → 검증 후 즉시 삭제 ✅ (2026-04-25 Ⅲ — 임시 라우트 `/api/sentry-trigger` token-gated + curl 200 + eventId 발급 + Vercel function 486ms 내 송신 완료. Sentry 통합 자체는 5d ago `[Sentry Test] 정상 도달` 이슈로 production env 라벨링 검증됨)
 
 ### 4-7. dev/prod 분리 검증 (보류 결정 명시)
@@ -225,7 +225,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] Vercel prod 배포 녹색 + `dari-theta.vercel.app` HTTPS 응답 (dairect.kr 은 별개 프로젝트)
 - [x] `dari-prod` Supabase 12 마이그레이션 반영
 - [x] Supabase advisor Stage 1 차단 0 (2026-04-27, security 0 + performance INFO 4건 의도적 보존: `unused_index` ×3 = RAG 데이터 양 적어 sequence scan 정상 / `auth_db_connections_absolute` = 인스턴스 업그레이드 시 재평가)
-- [ ] smoke test 6항목 (§4-6) 전부 통과 — 5/6 통과 (CSV export 잔여)
+- [x] smoke test 6항목 (§4-6) 전부 통과 — **6/6 종결** (2026-04-27, CSV export Playwright 검증으로 마지막 항목 클로즈)
 - [x] Sentry production environment 이벤트 수집 확인 (2026-04-25 Ⅲ §4-6 마지막 항목 종결)
 - [x] 환경변수 유출 점검 (2026-04-27 — `.env*` gitignore 차단 ✅ / git ls-files `.env` 0 / git log `*.env*` 0 / git grep secret prefix (sk-ant-, AIza, sntrys\_, fc-, eyJ) 0 / **gitleaks 123 commits no leaks** / 코드 dump 패턴 0 (console.log/logger.error 의 env 직접 출력 0 + JSON.stringify(process.env) 0) / Sentry beforeSend + sensitiveFields redaction 인프라 존재 → Vercel runtime 로그 누설 정적 차단)
 
@@ -255,3 +255,4 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - **2026-04-25 Ⅲ** — Task A-5b-③ Sentry Issues smoke 종결. §4-6 마지막 항목 + §6 Go 조건 "Sentry production environment 이벤트 수집 확인" `[x]`. 임시 라우트 `/api/sentry-trigger` (token-gated, 신규 1파일 → 검증 후 삭제 2 커밋 cycle). Vercel function 486ms 내 200 응답 + eventId 발급 + 5d ago 통합 검증 누적 증거로 §4-6 의도 충족.
 - **2026-04-27** — Task B (advisor Stage 1 검증 완료). §4-5 + §6 advisor 항목 `[x]`. security WARN 1건 (`auth_leaked_password_protection`) Dashboard 활성화 ("Prevent use of leaked passwords" toggle ON) → MCP 재호출로 security `lints: []` 확인. performance INFO 4건 (`unused_index` ×3 + `auth_db_connections_absolute`) 모두 의도적 보존 — RAG 데이터 양 적음 (dairect 7 + dari 2 chunks) + Stage 2 진입 시 재평가.
 - **2026-04-27 (Ⅱ)** — Task C (환경변수 유출 점검 완료). §5 `.gitignore` + gitleaks pre-commit 훅 항목 + §6 환경변수 유출 점검 항목 `[x]`. 검증 6단계: (1) `.env*` gitignore 차단 ✅ (2) `git ls-files .env*` 0 (3) `git log -- *.env*` 0 (4) `git grep` secret prefix (sk-ant-/AIza/sntrys\_/fc-/eyJ) 코드 0 (5) **gitleaks 123 commits no leaks** (6) 코드 dump 패턴 0 + Sentry redaction 인프라 (beforeSend + sensitiveFields) 존재 → Vercel runtime 로그 누설 정적 차단.
+- **2026-04-27 (Ⅲ)** — Task A (CSV export 검증 완료). §4-6 smoke **6/6 종결** + §6 smoke test 항목 `[x]`. 신규 Playwright spec `tests/e2e/csv-export-smoke.spec.ts` (3 케이스, 7.1s) — (1) 자기 봇 conversation export 200 + Content-Type/Disposition/Cache-Control + UTF-8 BOM + 메타 5행 + 헤더 + 한글/이모지/쉼표/따옴표/개행 escape + `=SUM` injection → `'=SUM` (2) UUID 형식 위반 → 404 (DB 왕복 전 차단) (3) 비로그인 → 401. `SKIP_E2E_SETUP=1` 토글로 globalSetup 우회 (e2e-main 잔재 계정 활용). `conversations_has_identity` check 위반 1차 발견 → `visitor_id: crypto.randomUUID()` 추가로 해소.
