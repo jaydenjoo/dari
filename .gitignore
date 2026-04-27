@@ -57,3 +57,4 @@ tsconfig.json.backup.*
 /public/widget.js.map
 package-lock.json
 .gstack/
+/delivery/

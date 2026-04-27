@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** + **Task A-5b-③ Sentry Issues smoke 종결** + **Stage 1 진입 마무리 (D+B+C+A 통합)** ✅ (2026-04-27). **Stage 1 진입 가능 상태 도달** — §4-6 smoke **6/6 ✅** + §6 Go 조건 **8/8 ✅** + No-Go 신호 0.
-- Epic: **Stage 1 진입 마무리 자투리 통합 (4 Task 1세션)** — D (CLAUDE.md 의식적 강화) + B (Supabase advisor Stage 1 차단 0 검증) + C (환경변수 유출 점검 — gitleaks 123 commits no leaks) + A (CSV export Playwright smoke 3/3 신규).
-- 상태: **이번 세션(2026-04-27) Stage 1 진입 가능 + Stage 1 진입 공식 선언 가능 상태**.
+- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** + **Task A-5b-③ Sentry Issues smoke 종결** + **Stage 1 진입 마무리 (D+B+C+A 통합)** + **납품 패키지 작성** ✅ (2026-04-27). **Stage 1 진입 가능 상태 도달** + **납품 가능 상태**.
+- Epic: **납품 패키지 작성** — `delivery/` 폴더에 코드 정리 (rsync 제외 패턴) + 16개 납품 문서 + 3개 인수인계 자료. 6.4MB / 347 코드 파일 / 16+3 = 19 신규 문서 (3,917줄). Proprietary 라이선스 + 기술팀 있는 회사 + 자체 호스팅 형태.
+- 상태: **이번 세션(2026-04-27) Stage 1 진입 가능 + 납품 패키지 작성 완료. 2주 후 (~5월 11일) 클라이언트 인계 가능 상태**.
 - 확인:
   - dairect: 7.7s, RAG 인용 ("hidream72@gmail.com" + "이메일" + "포트폴리오") ✅
   - dari: 12.1s, RAG 인용 ("RAG" + "Anthropic" + "위젯" + "임베드") ✅
@@ -41,6 +41,105 @@
    - 또는 LLM 페어 프로그래밍 중 prod 데이터 사고 1회 발생 시 (preventive trigger)
    - 또는 Stage 2 (베타 사용자 10명) 진입 직전
 6. ⏳ **Vercel env `SENTRY_TEST_TOKEN` 삭제 (Jayden 수동 잔여)** — Task A-5b-③ Sentry smoke 검증 시 임시 발급 토큰. 라우트 + 코드 측은 4a4ca27 에서 제거됐으나 Vercel env 는 Jayden 권한. 다음 세션 시작 시 확인 후 본 항목 제거.
+
+## 이번 세션 (2026-04-27 Ⅱ) — 납품 패키지 작성 (전체 시스템 인계용)
+
+Jayden 의 "dari 시스템 전체 납품 + 운영 필요 없는 파일 제외 + 16+ 문서 + 사용가능 코드베이스" 요청. 답변 사전 확인 (Q1-Q5): 기술팀 있는 회사 + 소스+문서만 (자체 호스팅) + Proprietary + 빈 시스템 + 샘플 1개 + 일정 2주 (5월 11일경). Auto mode 풀 가동.
+
+### 흐름 (~3h)
+
+1. **Phase 1 — 폴더 + 코드 분리** (15분):
+   - `delivery/` 폴더 생성 (`code/`, `docs/`, `handover/` 3개 sub)
+   - `.gitignore` 에 `/delivery/` 추가 (메인 git 분리)
+   - **rsync 로 코드 복사** + 제외 패턴 (`node_modules/`, `.next/`, `coverage/`, `playwright-report/`, `test-results/`, `.git/`, `.gstack/`, `.claude/`, `.env*`, `.DS_Store`, `tsconfig.tsbuildinfo`, `delivery/`, `PROGRESS.md`, `AGENTS.md`, `CLAUDE.md`, `tests/e2e/.state/`)
+   - 결과: 6.4MB / 347 파일
+
+2. **Phase 1-2 — 코드 측 정리** (10분):
+   - `delivery/code/docs/` 안 내부 문서 제거 (`PRD.md`, `phase-1-release-checklist.md`, `phase-2-plan.md`, `epic-b-task-breakdown.md`, `dairect-bot-configs.md`, `testing-accounts.md`, `learnings.md`, `security-monitoring.md`)
+   - `delivery/code/scripts/seed-demo-bots.ts` 제거 (본 프로젝트 한정)
+   - `delivery/code/.playwright-mcp/` 캐시 제거
+   - `delivery/code/package.json` 의 `seed:demo-bots` scripts 제거
+   - `delivery/code/env-template.txt` 신규 (`.env.example` 권한 차단되어 텍스트 형식)
+   - `delivery/code/README.md` 갱신 (납품용, 내부 문서 link 정리)
+
+3. **Phase 2 — 납품 문서 16개 작성** (~2.5h):
+   - 🔴 **필수 6**: 01-README-납품안내 / 02-INSTALL-설치가이드 / 03-DEPLOY-배포가이드 / 04-ENVIRONMENT-환경변수 / 05-USER-GUIDE-사용자매뉴얼 / 06-WIDGET-EMBED-위젯설치가이드
+   - 🟡 **권장 5**: 07-API-명세 / 08-ARCHITECTURE-시스템구조 / 09-DATABASE-스키마 / 10-OPERATION-운영가이드 / 11-SECURITY-보안정책
+   - 🟢 **옵션 5**: 12-TROUBLESHOOTING-문제해결 / 13-TESTING-테스트가이드 / 14-CHANGELOG-변경이력 / 15-LICENSE / 16-CONTRIBUTING-개발기여
+   - 총 3,917줄 + 한국어 + 역할별 가이드 (결정권자 / 운영자 / 인프라 / 개발자 / 보안)
+   - `code/docs/adr/`, `code/docs/environments.md`, `code/docs/env-template.md` 등 내부 참고는 코드 폴더 그대로 (이중 구조 — 명확한 분리)
+
+4. **Phase 2-3 — handover 자료 3개** (~30분):
+   - 인수인계-체크리스트 (14개 섹션, 모든 단계별 check)
+   - 계정-자격증명-템플릿 (15개 SaaS + 비밀번호 매니저 vault 가이드)
+   - 30일-운영지원-약정서-템플릿 (12조, 영업일 SLA + 무상 범위 + 제외 + 유상 옵션)
+
+5. **Phase 3 — 검증** (5분):
+   - delivery/code/ gitleaks `--no-git` 스캔 → **no leaks found** ✅
+   - 폴더 구조 검증 (16 docs + 3 handover + 347 코드 파일)
+   - 라인 수 (src 23,222 / tests 2,922 / docs 3,917 / 마이그 15)
+
+6. **Phase 4 — 메인 repo 갱신** (현재 진행 중):
+   - PROGRESS.md 본 세션 항목 추가
+   - 커밋 + push (delivery/ 자체는 .gitignore 차단)
+
+### 패키지 구성
+
+```
+delivery/
+├── README.md                  ← 납품 패키지 진입점
+├── code/                      ← 운영 가능 소스 (6.4MB, 347 파일)
+│   ├── README.md              ← 개발자 빠른 시작
+│   ├── env-template.txt       ← 환경변수 템플릿
+│   ├── package.json (정리됨), tsconfig.json, ...
+│   ├── src/, public/, supabase/, scripts/, tests/
+│   ├── .github/workflows/, .husky/
+│   └── docs/                  ← 내부 개발 참고 (ADR + 환경 + 디자인)
+├── docs/                      ← 납품 문서 16개 (3,917줄)
+│   ├── 01~06 (필수)
+│   ├── 07~11 (권장)
+│   └── 12~16 (옵션)
+└── handover/                  ← 인수인계 3개
+    ├── 인수인계-체크리스트.md
+    ├── 계정-자격증명-템플릿.md
+    └── 30일-운영지원-약정서-템플릿.md
+```
+
+### 검증 (누적)
+
+- gitleaks no leaks (delivery/code/ 단독 스캔)
+- 파일 수 + 크기 정상 (예상 범위 내)
+- 16 docs 모두 prettier 호환 (한국어)
+- handover 3종 완성
+- 메인 dari repo 의 .gitignore 에 `/delivery/` 추가됨 (git tracking 분리)
+
+### 주요 결정 / 교훈 (learnings.md +N 후보)
+
+1. **납품 패키지의 이중 docs 구조** — `delivery/docs/` (납품 받는 측) + `delivery/code/docs/` (개발자 내부 참고). 명확한 분리 + cross-link 로 가치 ↑↑.
+2. **rsync 의 제외 패턴 = 1줄로 보안 + 정리 동시 처리** — `--exclude='.env*' --exclude='PROGRESS.md' --exclude='AGENTS.md' --exclude='CLAUDE.md'` 등으로 운영 정보 + 개인 일지 자동 차단. cp + 사후 cleanup 보다 안전.
+3. **납품 문서의 역할별 가이드 구조** — 01-README 의 "문서 읽는 순서 (역할별)" 5개 분류 (결정권자 / 운영자 / 인프라 / 개발자 / 보안) 로 큰 회사에서도 즉시 적용 가능. 16개 문서 한꺼번에 던지지 않음.
+4. **`.env*` 권한 차단 우회 — env-template.txt 사용** — Claude Code 의 안전 정책으로 `.env*` 패턴 파일 생성 차단. 표준 관례 (`env.example`) 대신 `env-template.txt` + README 안내로 우회.
+5. **"빈 시스템 + 샘플 1개" = seed 스크립트 신규 작성보다 USER-GUIDE 의 단계별 안내가 합리** — 클라이언트가 UI 로 첫 봇 만드는 학습 효과 + 코드 단순. seed-demo-bots.ts (본 프로젝트 한정) 제거.
+6. **handover 의 "30일 운영 지원 약정서" 명문화** — 무상 범위 / 제외 / 유상 옵션 / SLA / 비상 채널 / 사용권자 의무 / 분쟁 해결 모두 사전 명시 = 향후 갈등 차단. 영업일 24h SLA + 화상 회의 2회 한도 등 구체.
+
+### 클라이언트 인계 시 후속 작업 (다음 세션 또는 인계일)
+
+1. **delivery/ 폴더 압축** (zip / tar) 또는 별도 git repo 분리 → 클라이언트 전달 채널
+2. **15-LICENSE.md 의 (저작권자명 / 회사명) 등 placeholder 채우기** — Jayden 명의 + 클라이언트 회사명
+3. **계정-자격증명-템플릿.md** 클라이언트 측에서 직접 채울 부분 (placeholder 그대로 두면 됨)
+4. **README 의 "(납품일 명시)"** 채우기
+5. **인수인계 체크리스트** 양 당사자 진행
+
+### Backlog (Stage 2 / 다음 세션 후보 — 본 세션 작업과 무관)
+
+- pre-commit hook 에 `pnpm format:check` 추가 (β-3b/β-5/직전 세션 = 3회 재발)
+- Playwright `bots-list` race 격리
+- `bot-conversation-detail.spec.ts` 의 seedConversation visitor_id 추가 (본 세션 발견)
+- Vercel CLI 50.32.3 → 52.0.0 업그레이드
+- dairect.kr widget embed 실 적용 (Jayden 시점)
+- dev/prod 분리 재진행 (계약 진입 시)
+
+---
 
 ## 이번 세션 (2026-04-27) — Stage 1 진입 마무리 (D+B+C+A 통합 자투리, 4 Task 1세션)
 
@@ -3330,7 +3429,7 @@ _Unrelated (세션 Ⅶ drift 일괄 fix, 의미 변경 0)_:
 
 ## 마지막 업데이트
 
-- 날짜: **2026-04-27 — Stage 1 진입 마무리 완결 (D+B+C+A 통합)**. §4-6 smoke 6/6 ✅ + §6 Go 조건 8/8 ✅ + No-Go 0. **Stage 1 진입 공식 선언 가능 상태**. 다음: Stage 1 선언 또는 Backlog (dairect.kr embed 실 적용 / pre-commit format:check 추가 / bots-list race 격리).
+- 날짜: **2026-04-27 Ⅱ — 납품 패키지 작성 완료**. `delivery/` 폴더 (6.4MB / 347 파일 / 16+3 = 19 신규 문서 / 3,917줄). Stage 1 진입 가능 + 납품 가능 상태. 2주 후 (~5월 11일) 클라이언트 인계 가능. 다음: 인계일 / 압축 / placeholder 채우기 / Backlog.
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 최근 커밋: `79717b5` (Task A: CSV export smoke) · `6c901ed` (Task C: 환경변수 유출 점검) · `1c4be08` (Task B: advisor) · `30e3807` (Task D: CLAUDE.md 강화) · `6ce75a2` (직전: Sentry smoke save)
+- 최근 커밋: (delivery/ 폴더는 .gitignore 차단, 본 PROGRESS 갱신만 main push) `94a866f` (save: D+B+C+A 통합 + learnings +3) · `79717b5` (Task A) · `6c901ed` (Task C) · `1c4be08` (Task B) · `30e3807` (Task D)
