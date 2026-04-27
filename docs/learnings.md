@@ -2648,3 +2648,77 @@ return result.publicSuffix === baseHost;
 - **`pnpm check` (전체 게이트) 를 매 Task 종료 전 1회 실행** — β-3b 교훈 ("format:check 전체 실행") 이 β-5 세션 Ⅶ 에서 재발 (ADR-010 + ADR README 프리티어 drift). 수동 규칙만으로 부족. `pnpm check` = `typecheck && lint && format:check && test` 단일 명령으로 drift 자동 탐지.
 
 ---
+
+### 2026-04-27 (Ⅰ) MCP 도구 활용으로 외부 SaaS 검증 자동화 — Supabase advisor + execute_sql 패턴 (Task B/A)
+
+**증상**: Stage 1 §6 Go 조건 "Supabase advisor 0 이슈 확인" + CSV export 검증 시점에 "외부 SaaS 데이터 조회" 가 매 검증 단계마다 발생. 직전 Sentry smoke 종결 시 외부 SaaS 인덱싱 디버깅 비용 ↑↑ 경험 (2026-04-25 Ⅲ 교훈) 이후, "외부 SaaS = 자동화 회피" 무의식적 패턴이 굳어져 Jayden 수동 Dashboard 클릭을 디폴트로 가정하게 됨.
+
+**원인**:
+
+1. **MCP 도구의 가용성 + read-only 안전성을 충분히 인지 못함** — Supabase MCP `get_advisors` + `execute_sql` (read-only SELECT) 는 권한 우회 없이 외부 데이터 자동 조회 가능. dari = 🟡 보안 등급 + read-only 자동화는 명시 허용 영역 (글로벌 CLAUDE.md "🟡 부분 보안: 자동화 OK").
+2. **외부 SaaS 디버깅의 마지막 1% 비용** (직전 Sentry 교훈) 트라우마로 "검증" 자체까지 회피. read-only 조회 = 디버깅 영역 ≠ 검증 영역. 분리 인지 부재.
+3. **Deferred MCP 도구의 inertia** — system reminder 에 MCP 서버 목록 + 도구명 매 세션 제공되지만 매 작업 시 적극 매칭 안 됨. ToolSearch 로 schema 로드 한 번 거치는 구조라 "한 번 더 생각" 비용 발생.
+
+**해결 (Task B + A 양방 적용)**:
+
+1. **Task B**: 가드 발동 후 advisor 결과 분석 시 MCP `get_advisors` 재호출 (Jayden 활성화 직후) 로 검증 자동화 (Dashboard 진입 5분 → MCP 호출 30초).
+2. **Task A**: prod conversation 데이터 존재 확인 시 `execute_sql` 1쿼리 실행 (`select b.slug, count(c.id), count(m.id) from bots b left join conversations c on... group by b.slug`). Jayden 수동 페어링 0.
+3. 두 호출 모두 read-only — write (DDL/DML) 은 여전히 Jayden 명시 승인 + 수동.
+
+**규칙** ⭐:
+
+- **🟡 보안 등급에서 외부 SaaS read-only MCP 호출 = 자동화 디폴트** — 매 검증 시점에 (1) 자동화 가능 / (2) 권한 read-only 인지 / (3) 결과 영향이 코드 변경/외부 송신 아닌지 3가지 확인 후 진행. dari 의 Supabase advisor / execute_sql / Sentry 통계 / Vercel 배포 상태 등 모두 영역 내.
+- **MCP 도구 매칭 = 매 Plan 단계의 체크 항목** — Plan 작성 시 "이 검증/조회를 자동화할 MCP 도구 있나?" 1문항 추가. ToolSearch 로 `select:` 또는 keyword 빠르게 확인. Skip 비용 = 0 (없으면 그냥 수동).
+- **자동화 vs 수동 결정 기준**: read-only + 권한 우회 없음 + 결과 후처리가 코드/문서 갱신만 = 자동화. write/송신/돈 영향 = Jayden 명시 승인 + 수동 검증.
+- **외부 SaaS "검증" 과 "디버깅" 분리 인지** — 검증 = "기대 상태 확인" (자동화 가능), 디버깅 = "이상 원인 추적" (외부 시스템 의존도 ↑↑, 누적 증거로 우회 종결 합리). 디버깅 트라우마가 검증 자동화까지 회피하게 만들지 않도록 분리 의식.
+- **MCP 호출 표준 cycle**: ToolSearch 로 schema 로드 → Agent 또는 직접 호출 (subagent 위임 시 결과 verbatim 요청 + 200자 제한) → 결과 파싱 + 후속 작업.
+
+---
+
+### 2026-04-27 (Ⅱ) Playwright e2e seedConversation 시 `conversations_has_identity` check constraint 위반 — reference spec 의 silent broken 가능성
+
+**증상**: Task A CSV export smoke spec 첫 실행 시 `[e2e] conversation insert 실패: new row for relation "conversations" violates check constraint "conversations_has_identity"`. spec 의 seedConversation 헬퍼는 reference spec (`bot-conversation-detail.spec.ts`) 의 동일 헬퍼를 그대로 복제했지만 conversations 테이블의 check constraint (`visitor_id is not null or user_id is not null` — 마이그 0003) 충족 못함. visitor_id, user_id, email 모두 null insert.
+
+**원인**:
+
+1. **`conversations_has_identity` 가 마이그 0003 (Phase 0-B) 부터 존재** 했지만 reference spec 들의 마지막 e2e 실행 시점에 통과했었는지 불확실. PROGRESS 의 직전 교훈 (2026-04-25 "bots-list race") 에서도 e2e 안정성 이슈 명시.
+2. **e2e spec 의 silent broken 가능성** — reference spec 이 dev 환경에서 실행 안 된 사이 마이그/정책 변경으로 깨졌어도 vitest 통과만 검증되면 발견 안 됨. 본 세션 신규 spec 이 같은 패턴 복제했기에 구조적 문제 발견.
+3. **DB 의 비즈니스 의미 검증 부재** — visitor 또는 user 정체성 없는 conversation 은 비즈니스 의미 없음 (anonymous chat 도 visitor_id = cookie UUID). 헬퍼 함수가 그 의미를 강제 안 하고 raw insert 만 함.
+
+**해결**:
+
+1. seedConversation 의 conversations insert 시 `visitor_id: crypto.randomUUID()` 추가 (visitor_id 는 외래키 없는 단순 text 필드라 임의 UUID OK).
+2. 결과: 3/3 통과 (7.1s).
+
+**규칙** ⭐:
+
+- **e2e seedConversation 헬퍼는 visitor_id 자동 채움이 표준** — `visitor_id: crypto.randomUUID()` 또는 `user_id: testUser.id` 중 하나 명시. raw insert 로 헬퍼 작성 시 check constraint 위반 가능.
+- **reference spec 복제 시 마지막 실행 통과 시점 확인** — 본 세션 reference 복제는 silent broken 패턴 그대로 가져온 위험. 복제 직전 reference spec 자체 한 번 실행 (`pnpm test:e2e tests/e2e/<reference>.spec.ts`) 으로 baseline 검증. 시간 비용 30초~1분, 학습 비용 회피.
+- **e2e spec 의 비즈니스 invariant 헬퍼화** — DB 테이블의 check constraint / 비즈니스 룰 (예: "active 봇만 conversation 가능", "visitor OR user 필수") 은 spec 헬퍼 레벨에서 강제. 각 spec 이 raw insert 하면 누락 위험 ↑.
+- **`bot-conversation-detail.spec.ts` + 다른 conversation spec 도 같은 헬퍼 → 별도 검증 Backlog** — 본 세션 발견은 reference spec 도 broken 가능성 시사. 다음 e2e 안정성 Task 에서 함께 검증 + 수정.
+
+---
+
+### 2026-04-27 (Ⅲ) prettier 게이트 3회 재발 (β-3b → β-5 → 본 세션) — 수동 규칙 한계, pre-commit hook 강화 신호
+
+**증상**: 본 세션 Task C 커밋 시도 시 `npx prettier --check docs/phase-1-release-checklist.md` 실패. `--write` 후 재시도로 해결. β-3b 세션 (2026-04-23) 와 β-5 세션 (2026-04-24 Ⅷ) 에서 동일 학습 후 "format:check 매 세션 종료 전 1회" + "`pnpm check` 단일 명령" 규칙을 learnings.md 에 명시했음에도 본 세션에서 또 재발. **누적 3회**.
+
+**원인**:
+
+1. **수동 규칙의 한계** — learnings.md 규칙 명시 + 매 세션 시작 시 로드 + 의식적 적용 시도하지만 실 작업 흐름에서 prettier 실행 잊거나 마지막 커밋 시점에서야 발견.
+2. **`pnpm check` 단일 명령 정의 자체가 미적용** — β-5 권장에도 본 세션은 개별 명령 (`prettier --check`, `tsc --noEmit`, `pnpm test`) 따로 실행. 단일 명령 정의 (package.json scripts) 가 안 돼 있을 가능성.
+3. **3회 재발 = "사람의 의지로 안 풀리는 문제" 신호** — Compound Engineering 의 "프로세스 강화" 임계 도달. 자동화 강제 없이 재발 보장.
+
+**해결 (즉시 + 영구)**:
+
+1. **즉시 (본 세션 cleanup)**: prettier `--write` 적용 + `--check` 통과.
+2. **영구 (별도 Task 우선순위 ↑↑)**: pre-commit hook 에 `pnpm format:check` 추가. `.husky/pre-commit` 1줄 추가. 인프라 차원 강제 = 의지력 의존 0.
+
+**규칙** ⭐:
+
+- **"learnings.md 에 규칙을 3회 적었는데 또 재발 = 인프라 강제 시기"** — Compound Engineering 의 명시적 임계점. 수동 규칙 = 1회 학습 / 자동화 강제 = 영구 해소. 비용 5분 (hook 1줄) << 재발 비용 (매 커밋 1~2분 + 인지 부하 누적).
+- **단일 게이트 명령 (`pnpm check`) 정의 + pre-commit hook 두 단계 강제** — `package.json` scripts 에 `"check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"` 단일 명령 + `.husky/pre-commit` 에 `pnpm format:check` (test 제외 — 시간 ↑) 추가. CI 와 로컬 둘 다 강제.
+- **재발 횟수 카운트 = 자동화 우선순위 메트릭** — learnings.md "N회 재발" 명시 → 3+ 도달 시 즉시 인프라 강화 Task. 본 항목 = 다음 세션 1순위 Backlog.
+- **β-3b/β-5/본 세션 = 모두 ADR/learnings/release-checklist docs 파일에서 발생** — 코드 파일은 PostToolUse hook 으로 자동 prettier 적용되지만 docs 는 hook 범위 밖일 가능성. Hook 설정 확인 + 확장 필요.
+
+---

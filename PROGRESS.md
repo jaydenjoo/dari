@@ -4,9 +4,9 @@
 
 ## 현재 위치
 
-- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** + **Task A-5b-③ Sentry Issues smoke 종결** ✅ (2026-04-25 Ⅲ). **Stage 1 진입 직전 상태** (smoke test 5/6 + §6 Go 조건 1개 추가 충족).
-- Epic: **A-5b-③ Sentry production environment 이벤트 수집 검증 완결** — token-gated 임시 라우트 cycle (작성 → curl 검증 → 즉시 삭제) + checklist §4-6 마지막 항목 + §6 Go 조건 `[x]`. 누적 증거 3종 (Vercel function 200 + 486ms / Sentry SDK eventId 발급 / 5d ago `[Sentry Test]` 통합 검증) 으로 §4-6 의도 충족 인정.
-- 상태: **이번 세션(2026-04-25 Ⅲ) Sentry smoke 종결 + 외부 SaaS 검증 패턴 표준화 6 규칙 학습 + Stage 1 smoke 5/6 통과**.
+- Phase: **2 Epic B + 백로그 β-1~β-5 완결** + **Task A-5b-① 데모 모드 검증 완결** + **Task A-5b-③ Sentry Issues smoke 종결** + **Stage 1 진입 마무리 (D+B+C+A 통합)** ✅ (2026-04-27). **Stage 1 진입 가능 상태 도달** — §4-6 smoke **6/6 ✅** + §6 Go 조건 **8/8 ✅** + No-Go 신호 0.
+- Epic: **Stage 1 진입 마무리 자투리 통합 (4 Task 1세션)** — D (CLAUDE.md 의식적 강화) + B (Supabase advisor Stage 1 차단 0 검증) + C (환경변수 유출 점검 — gitleaks 123 commits no leaks) + A (CSV export Playwright smoke 3/3 신규).
+- 상태: **이번 세션(2026-04-27) Stage 1 진입 가능 + Stage 1 진입 공식 선언 가능 상태**.
 - 확인:
   - dairect: 7.7s, RAG 인용 ("hidream72@gmail.com" + "이메일" + "포트폴리오") ✅
   - dari: 12.1s, RAG 인용 ("RAG" + "Anthropic" + "위젯" + "임베드") ✅
@@ -41,6 +41,108 @@
    - 또는 LLM 페어 프로그래밍 중 prod 데이터 사고 1회 발생 시 (preventive trigger)
    - 또는 Stage 2 (베타 사용자 10명) 진입 직전
 6. ⏳ **Vercel env `SENTRY_TEST_TOKEN` 삭제 (Jayden 수동 잔여)** — Task A-5b-③ Sentry smoke 검증 시 임시 발급 토큰. 라우트 + 코드 측은 4a4ca27 에서 제거됐으나 Vercel env 는 Jayden 권한. 다음 세션 시작 시 확인 후 본 항목 제거.
+
+## 이번 세션 (2026-04-27) — Stage 1 진입 마무리 (D+B+C+A 통합 자투리, 4 Task 1세션)
+
+세션 시작 시 PROGRESS + learnings 로드 후 Stage 1 §4-6 smoke 5/6 + §6 Go 조건 5/9 = "Stage 1 진입 직전" 상태 확인. Backlog 1~4 + CLAUDE.md 미커밋 처리 = 자투리 4 Task 통합 진행 (D+B+C+A 순서, 페어링 의존도 고려).
+
+### 흐름 (~60-75분, 4 Task)
+
+#### Task D — CLAUDE.md 미커밋 처리 (5분, `30e3807`)
+
+- 미커밋 25줄 (AI 응답 검증 규칙) = 글로벌 `~/.claude/CLAUDE.md` 와 거의 동일.
+- 경로 비교: A (강화 명시 커밋) vs B (revert) vs C (차별 강화) → **A 권장 + 채택**: 글로벌은 Jayden 로컬에만 적용 + 다른 LLM/협업자 진입 시 프로젝트 CLAUDE.md 가 단독 안전망 + dari = 🟡 보안 등급에 부합.
+- prettier `--write` 1회 + 커밋. clean tree 확보.
+
+#### Task B — Supabase advisor Stage 1 검증 (15분, `1c4be08`)
+
+- Supabase MCP `get_advisors` (security + performance 병렬) 호출.
+- **결과**: security 1 WARN (`auth_leaked_password_protection`) + performance 4 INFO (`unused_index` ×3 + `auth_db_connections_absolute`).
+- 가드 발동 (1+ 이슈) → Plan 재제시: A (WARN 해소 + INFO 4 의도적 보존 + §6 표현 정밀화) vs B (drop 마이그) vs C (전부 잔존) vs D (`[ ]` 유지).
+- **A 채택**: leaked password 활성화 = Dashboard 1클릭/0비용/Stage 2 필수 + INFO 4건 = RAG 데이터 양 적어 sequence scan 정상 (`idx_knowledge_chunks_embedding` 절대 drop 금지).
+- Jayden Dashboard 활성화 → MCP 재호출 → security `lints: []` 확인.
+- release-checklist §4-5 + §6 + §8 갱신 → 커밋.
+
+#### Task C — 환경변수 유출 점검 (15분, `6c901ed`)
+
+- 6단계 검증 (병렬 + 정적):
+  1. `.gitignore` `.env*` 차단 ✅
+  2. `git ls-files .env*` 0
+  3. `git log -- *.env*` 0
+  4. `git grep` secret prefix (sk-ant-/AIza/sntrys\_/fc-/eyJ) 코드 0
+  5. **`gitleaks detect --log-opts="--all"` 123 commits no leaks** ✅
+  6. 코드 dump 패턴 (console.log/logger.error/JSON.stringify(env)) 0 + Sentry redaction 인프라 (beforeSend + sensitiveFields + redactDeep) 존재 → Vercel runtime 로그 누설 정적 차단.
+- Vercel 로그 수동 검증 → 정적 검증으로 충분 인정 (코드 dump 경로 0 = 로그 누설 가능성 0).
+- release-checklist §5 + §6 + §8 갱신 → 커밋.
+
+#### Task A — CSV export Playwright smoke (~25분, `79717b5`)
+
+- 코드 정적 검증: route.ts (UUID + auth + RLS 2-hop + rate limit + CSV injection 방어 + 5000 행 DoS 가드 + UTF-8 BOM + ASCII 파일명 + Cache-Control + soft delete race + 감사 로그) 모두 통과.
+- buildConversationCsv unit test 13 케이스 (csv.test.ts) 이미 통과 — 보안 + UTF-8 + truncation + injection 모두 검증 완료.
+- prod 데이터 SQL 확인 (Supabase MCP `execute_sql`): dairect 7 conv / 20 msg + dari 4 conv / 8 msg = 충분.
+- Jayden 명시 요청 ("Playwright 로 검증") → 신규 spec `tests/e2e/csv-export-smoke.spec.ts` 작성:
+  - reference 패턴 (`bot-conversation-detail.spec.ts`) 복제 — admin 클라이언트 + seedConversation + createOwnBot
+  - 3 케이스: 자기 봇 export 200 + UUID 위반 404 + 비로그인 401
+  - body 검증: UTF-8 BOM + 메타 5행 ("봇 이름"/"대화 ID"/"방문자"/"상태"/"시작 시각") + 헤더 (`role,content,tokens_used,created_at`) + 한글/이모지/쉼표/따옴표/개행 escape + `=SUM` injection → `'=SUM`
+- 1차 실패: globalSetup `createTestUser` 가 e2e-main 잔재 충돌 → `SKIP_E2E_SETUP=1` 토글로 해결.
+- 2차 실패: `conversations_has_identity` check constraint 위반 (visitor_id OR user_id 필수) → `visitor_id: crypto.randomUUID()` 추가로 해결.
+- **3/3 통과 (7.1s)**.
+- release-checklist §4-6 smoke 6/6 + §6 + §8 갱신 → 커밋.
+
+### Stage 1 진입 상태 (release-checklist 갱신 결과)
+
+| §4-6 smoke 항목            | 상태         |
+| -------------------------- | ------------ |
+| Google OAuth               | ✅           |
+| 봇 운영                    | ✅           |
+| text 지식 + 임베딩         | ✅           |
+| RAG 응답                   | ✅           |
+| 대화 로그 + CSV export     | ✅ (본 세션) |
+| Sentry production env 수집 | ✅           |
+
+| §6 Go/No-Go                        | 상태              |
+| ---------------------------------- | ----------------- |
+| Vercel prod 빌드 녹색              | ✅                |
+| prod Google OAuth 실 로그인        | ✅                |
+| Vercel prod 배포 + HTTPS           | ✅                |
+| `dari-prod` 마이그 반영            | ✅                |
+| Supabase advisor Stage 1 차단 0    | ✅ (본 세션)      |
+| smoke 6항목                        | ✅ (본 세션, 6/6) |
+| Sentry production environment 수집 | ✅                |
+| 환경변수 유출 점검                 | ✅ (본 세션)      |
+| **Go 조건 8/8**                    | ✅                |
+| **No-Go 신호**                     | 0                 |
+
+### 검증 (누적)
+
+- typecheck 0 / lint 3 baseline (신규 0) / prettier clean / build 14 routes
+- Playwright csv-export-smoke 3/3 (chromium, 7.1s)
+- gitleaks 123 commits no leaks
+- Supabase advisor security `lints: []` (재호출 후)
+
+### 주요 결정 / 교훈 (learnings.md +3 본 세션)
+
+1. **MCP 도구 적극 활용** — Supabase `get_advisors` + `execute_sql` 로 Jayden 수동 시간 절감 (Dashboard 클릭 → MCP read-only 자동). dari = 🟡 보안 등급에서 read-only MCP 호출은 자동화 영역.
+2. **`conversations_has_identity` check constraint** — visitor_id OR user_id 필수 (마이그 0003). seedConversation 헬퍼는 `visitor_id: crypto.randomUUID()` 표준 적용 권장. reference spec (`bot-conversation-detail.spec.ts`) 도 같은 패턴 사용 → 마이그 추가 시 같이 broken 가능 (별도 검증 필요).
+3. **prettier 게이트 3회 재발** (β-3b → β-5 → 본 세션) → 운영 규칙 강화 신호. pre-commit hook 에 `pnpm format:check` 추가 = 다음 우선 처리 후보.
+4. **Stage 1 진입 마무리 = 자투리 통합 작업 패턴** — 4 Task 1세션 (D + B + C + A) 처리 시 페어링 의존도 순으로 배치 (D=independent → B/C=Jayden 수동 동시 → A=가장 길고 단독). Plan→Approve→Build 사이클 엄격 준수 + Auto mode 협력.
+
+### Backlog (Stage 1 이후 / Phase 2 후보)
+
+1. **Vercel CLI 50.32.3 → 52.0.0 업그레이드** — 본 세션 system reminder 발견. 별도 시점 (5분).
+2. **Stage 1 진입 공식 선언** — Jayden 결정 (release-checklist §6 8/8 충족 + No-Go 0).
+3. **dairect.kr 사이트 widget embed 실 적용** (Jayden 시점 결정).
+4. **Playwright `bots-list` race 격리** (직전 교훈 항목, 45-60분).
+5. **pre-commit hook 에 `pnpm format:check` 추가** (β-3b/β-5/본 세션 = 3회 재발 → 우선순위 ↑↑).
+6. **`bot-conversation-detail.spec.ts` 의 seedConversation 도 visitor_id 추가** (본 세션 발견 → reference spec 도 broken 가능성 검증).
+7. **CSV export spec 을 external-api-smoke cron 통합** 검토 (외부 API 비의존이라 무료 가능).
+8. **dev/prod 분리 재진행** (계약 진입 시 또는 트리거 4종 발동 시 — environments.md §2 참조).
+
+### Jayden 수동 후처리
+
+- ⏳ **Vercel env `SENTRY_TEST_TOKEN` 삭제** — 직전 세션 별도 Task 이월 6번. 본 세션 미확인. 다음 세션 시작 시 다시 확인.
+
+---
 
 ## 이번 세션(2026-04-25 Ⅲ) — Task A-5b-③ Sentry Issues smoke 종결 (Stage 1 §4-6 마지막)
 
@@ -99,25 +201,25 @@ Jayden 의 "a" 선택 (Backlog 1번, Sentry Issues smoke) 으로 세션 시작. 
 
 ### Stage 1 진입 상태 (release-checklist 갱신 결과)
 
-| §4-6 smoke 항목 | 상태 |
-| -------- | ---- |
-| Google OAuth | ✅ |
-| 봇 운영 | ✅ |
-| text 지식 + 임베딩 | ✅ |
-| RAG 응답 | ✅ |
-| 대화 로그 + CSV export | ⏳ (Stage 1 smoke 잔여 1건) |
-| Sentry production env 수집 | ✅ (본 세션) |
+| §4-6 smoke 항목            | 상태                        |
+| -------------------------- | --------------------------- |
+| Google OAuth               | ✅                          |
+| 봇 운영                    | ✅                          |
+| text 지식 + 임베딩         | ✅                          |
+| RAG 응답                   | ✅                          |
+| 대화 로그 + CSV export     | ⏳ (Stage 1 smoke 잔여 1건) |
+| Sentry production env 수집 | ✅ (본 세션)                |
 
-| §6 Go/No-Go | 상태 |
-| -------- | ---- |
-| Vercel prod 빌드 녹색 | ✅ |
-| prod Google OAuth 실 로그인 | ✅ |
-| Vercel prod 배포 + HTTPS | ✅ |
-| `dari-prod` 마이그 반영 | ✅ |
-| Supabase advisor 0 이슈 | ⏳ |
-| smoke 6항목 | ⏳ (5/6) |
+| §6 Go/No-Go                        | 상태         |
+| ---------------------------------- | ------------ |
+| Vercel prod 빌드 녹색              | ✅           |
+| prod Google OAuth 실 로그인        | ✅           |
+| Vercel prod 배포 + HTTPS           | ✅           |
+| `dari-prod` 마이그 반영            | ✅           |
+| Supabase advisor 0 이슈            | ⏳           |
+| smoke 6항목                        | ⏳ (5/6)     |
 | Sentry production environment 수집 | ✅ (본 세션) |
-| 환경변수 유출 점검 | ⏳ |
+| 환경변수 유출 점검                 | ⏳           |
 
 ### Backlog (다음 세션 후보)
 
@@ -3228,7 +3330,7 @@ _Unrelated (세션 Ⅶ drift 일괄 fix, 의미 변경 0)_:
 
 ## 마지막 업데이트
 
-- 날짜: 2026-04-24 Ⅷ (Task **β-5 완결** = β-4 이월 cleanup 3건 클로즈. `computeRetryAfterSeconds` 공용화 (`shared/time/retry-after`) + NaN/Infinity 가드 + 24h 상한 + L-1 상호 배타 근거 주석. 리뷰 Fix 4건. 다음: 외부 신호 평가 또는 sec L-2 별도 설계)
+- 날짜: **2026-04-27 — Stage 1 진입 마무리 완결 (D+B+C+A 통합)**. §4-6 smoke 6/6 ✅ + §6 Go 조건 8/8 ✅ + No-Go 0. **Stage 1 진입 공식 선언 가능 상태**. 다음: Stage 1 선언 또는 Backlog (dairect.kr embed 실 적용 / pre-commit format:check 추가 / bots-list race 격리).
 - 작성자: Jayden + Claude (Opus 4.7 1M, effort=max)
 - 브랜치: `main`
-- 최근 커밋: `d0f02b3` (β-4 잔여 ② ADR-010) · `440cacd` (β-4 잔여 ① PSL tldts) · `2291bec` (β-4 잔여 ① docs) · `1ff2dfb` (β-4) · `6205e3f` (β-3b)
+- 최근 커밋: `79717b5` (Task A: CSV export smoke) · `6c901ed` (Task C: 환경변수 유출 점검) · `1c4be08` (Task B: advisor) · `30e3807` (Task D: CLAUDE.md 강화) · `6ce75a2` (직전: Sentry smoke save)
