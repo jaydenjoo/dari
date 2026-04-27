@@ -2722,3 +2722,91 @@ return result.publicSuffix === baseHost;
 - **β-3b/β-5/본 세션 = 모두 ADR/learnings/release-checklist docs 파일에서 발생** — 코드 파일은 PostToolUse hook 으로 자동 prettier 적용되지만 docs 는 hook 범위 밖일 가능성. Hook 설정 확인 + 확장 필요.
 
 ---
+
+### 2026-04-27 (Ⅳ) 납품 패키지 작성 표준 절차 — rsync 제외 패턴 + 이중 docs 구조 + 사전 5개 질문
+
+**증상**: Jayden 의 "dari 시스템 전체 납품 + 운영 필요 없는 파일 제외 + 16+ 문서 + 사용가능 코드베이스" 요청. 납품 형태 / 받는 측 / 라이선스 / 봇 데이터 / 일정의 5가지 핵심 변수가 결정 안 된 상태에서 시작 시 만들고 폐기 반복 위험.
+
+**원인 (납품 작업의 변수와 trade-off)**:
+
+1. **납품 형태 미결정 시 폴더 구조 결정 불가** — (a) 소스+문서만 / (b) 운영 시스템 인계 / (c) 턴키 — 각각 폴더 구조 + 문서 종류 + 인수인계 자료가 다름. 추측 시 만들고 다시 만들 위험.
+2. **받는 측 기술 수준 미결정 시 문서 깊이 불일치** — 비개발자 운영팀 vs 기술팀 있는 회사 = 문서 작성 톤 / 깊이 / 분량이 2-3배 차이. 잘못 잡으면 처음부터 재작성.
+3. **라이선스 미결정 시 LICENSE 작성 불가** — Proprietary / 영구 사용권 / MIT 등 오픈 = 권리 범위 + 분쟁 해결 + 책임 한계 모두 다름.
+4. **본 프로젝트 한정 정보 (slug / 도메인 / 본 세션 작업 일지) 가 코드/문서에 박힘** — `seed-demo-bots.ts` (dairect/dari 하드코딩) / `PROGRESS.md` (Jayden 작업 일지 298KB) / `learnings.md` (분리 보류 결정 / e2e 잔재 등 내부 정보). 단순 cp 시 모두 노출.
+5. **`.env*` 권한 차단** — Claude Code 의 안전 정책으로 `.env.example` 직접 생성 차단. 표준 관례 (`env.example`) 시도 시 막힘.
+
+**해결 (재사용 가능한 표준 절차)**:
+
+#### Phase 0 — 사전 5개 질문 (필수)
+
+Jayden 답변 받기 전 작업 시작 금지:
+
+1. **납품 받는 측** — 기술팀 유무 + 회사/개인
+2. **납품 형태** — 소스+문서 / 운영 시스템 인계 / 턴키
+3. **라이선스** — Proprietary / 영구 사용권 / MIT 등
+4. **데이터 포함** — 빈 시스템 + 샘플 / 운영 데이터 포함 / 클라이언트 자체
+5. **일정** — 마감일
+
+#### Phase 1 — 폴더 + 코드 분리 (rsync 제외 패턴 표준)
+
+```bash
+rsync -a \
+  --exclude='node_modules/' --exclude='.next/' --exclude='coverage/' \
+  --exclude='playwright-report/' --exclude='test-results/' \
+  --exclude='.git/' --exclude='.gstack/' --exclude='.claude/' \
+  --exclude='.env.local' --exclude='.env.production' --exclude='.env.test' \
+  --exclude='.DS_Store' --exclude='tsconfig.tsbuildinfo' \
+  --exclude='delivery/' \
+  --exclude='PROGRESS.md' --exclude='AGENTS.md' --exclude='CLAUDE.md' \
+  --exclude='tests/e2e/.state/' \
+  ./ delivery/code/
+```
+
+- `.gitignore` 에 `/delivery/` 추가 (메인 git 분리).
+
+#### Phase 1-2 — 코드 측 정리
+
+- **본 프로젝트 한정 docs 제거**: `PRD.md`, `phase-*.md`, `epic-*.md`, `<bot-name>-bot-configs.md`, `testing-accounts.md`, `learnings.md`, `security-monitoring.md`
+- **본 프로젝트 한정 scripts 제거**: `seed-<project>-bots.ts`
+- **package.json 의 scripts 정리**: 본 프로젝트 한정 scripts 제거
+- **README.md 갱신**: 납품용 (내부 link 정리 + 라이선스 명시 + ../docs/ 참조)
+- **`.env.example` 권한 차단 우회**: `env-template.txt` + README 안내 ("이 파일을 .env.local 로 복사")
+
+#### Phase 2 — 이중 docs 구조
+
+- **`delivery/docs/`** = 납품 받는 측이 읽는 16개 (필수 6 + 권장 5 + 옵션 5)
+  - 01-README, 02-INSTALL, 03-DEPLOY, 04-ENVIRONMENT, 05-USER-GUIDE, 06-WIDGET-EMBED
+  - 07-API, 08-ARCHITECTURE, 09-DATABASE, 10-OPERATION, 11-SECURITY
+  - 12-TROUBLESHOOTING, 13-TESTING, 14-CHANGELOG, 15-LICENSE, 16-CONTRIBUTING
+- **`delivery/code/docs/`** = 개발자 내부 참고 (ADR / environments / config-examples / design-references / scripts)
+- 두 docs 사이 cross-link 로 정보 분리 + 중복 제거
+
+#### Phase 2-3 — handover 자료 3종
+
+- **인수인계-체크리스트** (14개 섹션)
+- **계정-자격증명-템플릿** (15+ SaaS + 비밀번호 매니저 가이드, 실 값은 vault 보관)
+- **30일-운영지원-약정서-템플릿** (12조, 영업일 SLA + 무상 범위 + 제외 + 유상 옵션 + 분쟁 해결)
+
+#### Phase 3 — 검증
+
+- `gitleaks detect --source delivery/code --no-git --no-banner` → no leaks
+- 폴더 구조 + 라인 수 정합성
+- `delivery/code/` 단독 `pnpm install` 시도 (선택, 시간 ↑)
+
+#### Phase 4 — 메인 repo 갱신
+
+- PROGRESS.md 본 세션 항목
+- 커밋 + push (delivery/ 자체는 .gitignore 차단)
+- placeholder 채우기 (라이선스 / 약정서 / README 의 (저작권자명) 등) 는 인계일 임박 시 별도
+
+**규칙** ⭐:
+
+- **납품 작업 = 사전 5개 질문 → Phase 1~4 표준 절차** — Plan 우선. 답변 없이 시작 시 만들고 폐기 반복.
+- **rsync 제외 패턴 = 보안 + 정리 1줄 처리** — `cp -r` + 사후 cleanup 보다 안전. `.env*` / 작업 일지 / AI 도구 설정 / 캐시 / 임시 파일 모두 차단.
+- **이중 docs 구조 = 납품 받는 측 + 개발자 분리** — 16개 납품 docs (역할별 가이드 5종) + code/docs/ (ADR + 내부 참고). cross-link 로 명확한 분리.
+- **`.env*` 권한 차단 우회 = `env-template.txt` + README 안내** — 표준 관례 (`.env.example`) 안 되는 경우 텍스트 형식으로 우회.
+- **handover 의 30일 운영 지원 약정서 = 양 당사자 갈등 사전 차단** — 무상 범위 / 제외 / 유상 옵션 / SLA / 비상 채널 / 사용권자 의무 / 분쟁 해결 모두 명문화. 영업일 24h SLA + 화상 회의 한도 등 구체.
+- **본 프로젝트 한정 정보의 silent 노출 위험** — `seed-<project>-bots.ts`, `PROGRESS.md`, `learnings.md`, `<project>-configs.md` 등은 단순 cp 시 모두 따라옴. rsync 제외 + 사후 검증 (gitleaks + git grep) 필수.
+- **placeholder 우선 작성 → 인계일 채우기 분리** — `(저작권자명)`, `(클라이언트사명)`, `(납품일)`, `(연락처)` 등은 인계일 임박 시 일괄 채우기. 사전에 채우면 정보 불일치 위험.
+
+---
