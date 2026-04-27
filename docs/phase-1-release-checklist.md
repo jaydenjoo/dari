@@ -208,8 +208,8 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 
 ## 5. 보안 최종 점검
 
-- [ ] `.env.local` 이 `.gitignore` 에 의해 차단되는지 확인 (`git check-ignore .env.local`)
-- [ ] gitleaks pre-commit 훅 동작 확인 (`.husky/pre-commit` 존재)
+- [x] `.env.local` 이 `.gitignore` 에 의해 차단되는지 확인 (`git check-ignore .env.local`) — 2026-04-27 검증 (`.env*` 패턴 line 37)
+- [x] gitleaks pre-commit 훅 동작 확인 (`.husky/pre-commit` 존재) — 2026-04-27 전체 history 스캔 123 commits no leaks
 - [ ] RLS 정책 전수 적용 확인 — `SELECT * FROM pg_policies WHERE schemaname = 'public';` 로 4 테이블 14 정책
 - [ ] Sentry 경로에서 민감 필드 redact 검증 (로그인 세션 + PII 가 Sentry 이벤트에 누출되지 않음)
 - [ ] CSP 헤더 설정 고려 (Phase 2 위젯 embed 시 필수)
@@ -227,7 +227,7 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - [x] Supabase advisor Stage 1 차단 0 (2026-04-27, security 0 + performance INFO 4건 의도적 보존: `unused_index` ×3 = RAG 데이터 양 적어 sequence scan 정상 / `auth_db_connections_absolute` = 인스턴스 업그레이드 시 재평가)
 - [ ] smoke test 6항목 (§4-6) 전부 통과 — 5/6 통과 (CSV export 잔여)
 - [x] Sentry production environment 이벤트 수집 확인 (2026-04-25 Ⅲ §4-6 마지막 항목 종결)
-- [ ] 환경변수 유출 점검 (`git grep` + Vercel 로그 확인)
+- [x] 환경변수 유출 점검 (2026-04-27 — `.env*` gitignore 차단 ✅ / git ls-files `.env` 0 / git log `*.env*` 0 / git grep secret prefix (sk-ant-, AIza, sntrys\_, fc-, eyJ) 0 / **gitleaks 123 commits no leaks** / 코드 dump 패턴 0 (console.log/logger.error 의 env 직접 출력 0 + JSON.stringify(process.env) 0) / Sentry beforeSend + sensitiveFields redaction 인프라 존재 → Vercel runtime 로그 누설 정적 차단)
 
 ### 🛑 No-Go 신호
 
@@ -254,3 +254,4 @@ Vercel → Project → Settings → Environment Variables → 각 변수마다 *
 - **2026-04-20** — 최초 작성 (Task 1-8-e 직후, Epic 1-8 완결 시점)
 - **2026-04-25 Ⅲ** — Task A-5b-③ Sentry Issues smoke 종결. §4-6 마지막 항목 + §6 Go 조건 "Sentry production environment 이벤트 수집 확인" `[x]`. 임시 라우트 `/api/sentry-trigger` (token-gated, 신규 1파일 → 검증 후 삭제 2 커밋 cycle). Vercel function 486ms 내 200 응답 + eventId 발급 + 5d ago 통합 검증 누적 증거로 §4-6 의도 충족.
 - **2026-04-27** — Task B (advisor Stage 1 검증 완료). §4-5 + §6 advisor 항목 `[x]`. security WARN 1건 (`auth_leaked_password_protection`) Dashboard 활성화 ("Prevent use of leaked passwords" toggle ON) → MCP 재호출로 security `lints: []` 확인. performance INFO 4건 (`unused_index` ×3 + `auth_db_connections_absolute`) 모두 의도적 보존 — RAG 데이터 양 적음 (dairect 7 + dari 2 chunks) + Stage 2 진입 시 재평가.
+- **2026-04-27 (Ⅱ)** — Task C (환경변수 유출 점검 완료). §5 `.gitignore` + gitleaks pre-commit 훅 항목 + §6 환경변수 유출 점검 항목 `[x]`. 검증 6단계: (1) `.env*` gitignore 차단 ✅ (2) `git ls-files .env*` 0 (3) `git log -- *.env*` 0 (4) `git grep` secret prefix (sk-ant-/AIza/sntrys\_/fc-/eyJ) 코드 0 (5) **gitleaks 123 commits no leaks** (6) 코드 dump 패턴 0 + Sentry redaction 인프라 (beforeSend + sensitiveFields) 존재 → Vercel runtime 로그 누설 정적 차단.
